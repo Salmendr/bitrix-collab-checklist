@@ -1,10 +1,43 @@
-from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi import FastAPI, Request, UploadFile, File, Form
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 import requests
 import json
 import html
+import sqlite3
+from io import BytesIO
+from datetime import datetime
+import openpyxl
 
 app = FastAPI()
+
+DB_PATH = "app.db"
+
+
+def get_conn():
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def init_db():
+    conn = get_conn()
+    cur = conn.cursor()
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS checklists (
+            dialog_id TEXT PRIMARY KEY,
+            title TEXT,
+            data_json TEXT
+        )
+    """)
+
+    conn.commit()
+    conn.close()
+
+
+@app.on_event("startup")
+def startup_event():
+    init_db()
 
 
 def normalize_domain(value: str) -> str:
@@ -46,6 +79,84 @@ def install_finish_block():
     """
 
 
+def format_cell(value):
+    if value is None:
+        return ""
+    if isinstance(value, datetime):
+        return value.strftime("%d.%m.%Y")
+    return str(value).strip()
+
+
+def parse_xlsx_to_checklist(file_bytes: bytes):
+    wb = openpyxl.load_workbook(BytesIO(file_bytes), data_only=True)
+    ws = wb[wb.sheetnames[0]]
+
+    title = format_cell(ws["C5"].value) or "Чек-лист ИД"
+    contract_deadline = format_cell(ws["I11"].value)
+    start_date = format_cell(ws["I12"].value)
+
+    items = []
+    for row in range(12, 200):
+        name = format_cell(ws[f"B{row}"].value)
+        status = format_cell(ws[f"C{row}"].value)
+        plan = format_cell(ws[f"D{row}"].value)
+        fact = format_cell(ws[f"E{row}"].value)
+
+        if not name:
+            continue
+
+        items.append({
+            "name": name,
+            "status": status or "—",
+            "plan": plan or "—",
+            "fact": fact or "—",
+        })
+
+    return {
+        "title": title,
+        "contractDeadline": contract_deadline or "—",
+        "startDate": start_date or "—",
+        "items": items
+    }
+
+
+def save_checklist(dialog_id: str, data: dict):
+    conn = get_conn()
+    conn.execute("""
+        INSERT INTO checklists(dialog_id, title, data_json)
+        VALUES (?, ?, ?)
+        ON CONFLICT(dialog_id) DO UPDATE SET
+            title=excluded.title,
+            data_json=excluded.data_json
+    """, (dialog_id, data.get("title", "Чек-лист"), json.dumps(data, ensure_ascii=False)))
+    conn.commit()
+    conn.close()
+
+
+def get_checklist(dialog_id: str):
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT data_json FROM checklists WHERE dialog_id = ?",
+        (dialog_id,)
+    ).fetchone()
+    conn.close()
+
+    if row:
+        return json.loads(row["data_json"])
+
+    return {
+        "title": "Демо-чек-лист",
+        "contractDeadline": "—",
+        "startDate": "—",
+        "items": [
+            {"name": "ППТ", "status": "Есть", "plan": "—", "fact": "—"},
+            {"name": "ГПЗУ", "status": "Нет", "plan": "апрель", "fact": "—"},
+            {"name": "ТУ Свет", "status": "В работе", "plan": "27.03.2026", "fact": "—"},
+        ],
+        "notice": "Для этого dialogId пока не загружен реальный Excel, поэтому показывается демо."
+    }
+
+
 def app_home_html():
     return """
     <html>
@@ -55,9 +166,9 @@ def app_home_html():
     </head>
     <body style="font-family:Arial,sans-serif;padding:40px">
         <h1>Приложение работает</h1>
-        <p>Это главная страница приложения.</p>
         <p><a href="/sidebar" target="_blank">Открыть /sidebar</a></p>
         <p><a href="/install" target="_blank">Открыть /install</a></p>
+        <p><a href="/admin" target="_blank">Открыть /admin</a></p>
     </body>
     </html>
     """
@@ -107,10 +218,33 @@ def sidebar_html():
                 color: #666;
                 margin-top: 10px;
             }
+            .item {
+                border-top: 1px solid #f0f0f0;
+                padding: 10px 0;
+            }
+            .item:first-child {
+                border-top: none;
+            }
+            .item-name {
+                font-weight: 700;
+                margin-bottom: 4px;
+            }
+            .muted {
+                color: #666;
+                font-size: 12px;
+                margin-bottom: 2px;
+            }
+            .badge {
+                display: inline-block;
+                border-radius: 999px;
+                padding: 4px 8px;
+                font-size: 12px;
+                background: #eef2ff;
+            }
         </style>
     </head>
     <body>
-        <div id="app"></div>
+        <div id="app">Загрузка...</div>
 
         <script>
             function esc(v) {
@@ -122,10 +256,35 @@ def sidebar_html():
                     .replace(/"/g, '&quot;');
             }
 
-            function render(mode, dialogId, message) {
-                var html =
+            function renderChecklist(dialogId, data, mode) {
+                var itemsHtml = '';
+
+                if (data.items && data.items.length) {
+                    for (var i = 0; i < data.items.length; i++) {
+                        var item = data.items[i];
+                        itemsHtml +=
+                            '<div class="item">' +
+                                '<div class="item-name">' + esc(item.name) + '</div>' +
+                                '<div class="muted"><span class="badge">' + esc(item.status || '—') + '</span></div>' +
+                                '<div class="muted">План: ' + esc(item.plan || '—') + '</div>' +
+                                '<div class="muted">Факт: ' + esc(item.fact || '—') + '</div>' +
+                            '</div>';
+                    }
+                } else {
+                    itemsHtml = '<div class="muted">Нет пунктов чек-листа</div>';
+                }
+
+                var noticeHtml = '';
+                if (data.notice) {
+                    noticeHtml =
+                        '<div class="card">' +
+                            '<div class="note">' + esc(data.notice) + '</div>' +
+                        '</div>';
+                }
+
+                document.getElementById('app').innerHTML =
                     '<div class="card">' +
-                        '<div class="title">Тестовый чек-лист</div>' +
+                        '<div class="title">' + esc(data.title || 'Чек-лист') + '</div>' +
 
                         '<div class="row">' +
                             '<div class="label">Режим</div>' +
@@ -138,53 +297,55 @@ def sidebar_html():
                         '</div>' +
 
                         '<div class="row">' +
-                            '<div class="label">Сообщение</div>' +
-                            '<div class="value">' + esc(message) + '</div>' +
+                            '<div class="label">Срок по договору</div>' +
+                            '<div class="value">' + esc(data.contractDeadline || '—') + '</div>' +
                         '</div>' +
 
-                        '<div class="note">' +
-                            'Позже здесь будет ваш чек-лист по текущей коллабе.' +
+                        '<div class="row">' +
+                            '<div class="label">Начало работ</div>' +
+                            '<div class="value">' + esc(data.startDate || '—') + '</div>' +
                         '</div>' +
-                    '</div>';
-
-                document.getElementById('app').innerHTML = html;
+                    '</div>' +
+                    noticeHtml +
+                    '<div class="card">' + itemsHtml + '</div>';
             }
 
-            render(
-                'Локальный браузер',
-                '',
-                'Страница открыта вне Bitrix24, поэтому dialogId пока недоступен'
-            );
-
-            try {
-                if (typeof BX24 !== 'undefined') {
-                    BX24.init(function () {
-                        var dialogId = '';
-
+            function loadChecklist(dialogId, mode) {
+                fetch('/api/checklist?dialogId=' + encodeURIComponent(dialogId || ''))
+                    .then(function(response) { return response.json(); })
+                    .then(function(data) {
+                        renderChecklist(dialogId, data, mode);
                         try {
-                            var info = BX24.placement.info();
-                            if (info && info.options && info.options.dialogId) {
-                                dialogId = info.options.dialogId;
+                            if (typeof BX24 !== 'undefined') {
+                                BX24.fitWindow();
                             }
                         } catch (e) {
                             console.log(e);
                         }
-
-                        render(
-                            'Bitrix24',
-                            dialogId,
-                            'Страница открыта внутри Bitrix24'
-                        );
-
-                        try {
-                            BX24.fitWindow();
-                        } catch (e) {
-                            console.log(e);
-                        }
+                    })
+                    .catch(function(error) {
+                        console.log(error);
+                        document.getElementById('app').innerHTML = 'Ошибка загрузки чек-листа';
                     });
-                }
-            } catch (e) {
-                console.log(e);
+            }
+
+            if (typeof BX24 !== 'undefined') {
+                BX24.init(function () {
+                    var dialogId = '';
+
+                    try {
+                        var info = BX24.placement.info();
+                        if (info && info.options && info.options.dialogId) {
+                            dialogId = info.options.dialogId;
+                        }
+                    } catch (e) {
+                        console.log(e);
+                    }
+
+                    loadChecklist(dialogId, 'Bitrix24');
+                });
+            } else {
+                loadChecklist('', 'Локальный браузер');
             }
         </script>
     </body>
@@ -276,6 +437,77 @@ def sidebar_get():
 @app.post("/sidebar", response_class=HTMLResponse)
 async def sidebar_post(request: Request):
     return sidebar_html()
+
+
+@app.get("/api/checklist")
+def api_checklist(dialogId: str = ""):
+    return JSONResponse(get_checklist(dialogId))
+
+
+@app.get("/admin", response_class=HTMLResponse)
+def admin():
+    conn = get_conn()
+    rows = conn.execute("SELECT dialog_id, title FROM checklists ORDER BY dialog_id").fetchall()
+    conn.close()
+
+    items = "".join(
+        f"<li><b>{html.escape(row['dialog_id'])}</b> — {html.escape(row['title'])}</li>"
+        for row in rows
+    ) or "<li>Пока ничего не загружено</li>"
+
+    return f"""
+    <html>
+    <head>
+        <meta charset="utf-8">
+        <title>Загрузка чек-листа</title>
+    </head>
+    <body style="font-family:Arial,sans-serif;padding:40px;max-width:900px">
+        <h1>Загрузка Excel для коллабы</h1>
+        <p>Шаг 1: откройте коллабу и посмотрите значение <b>dialogId</b> в sidebar.</p>
+        <p>Шаг 2: вставьте этот dialogId сюда и загрузите .xlsx файл.</p>
+
+        <form action="/admin/upload" method="post" enctype="multipart/form-data" style="margin:30px 0">
+            <div style="margin-bottom:16px">
+                <label>dialogId</label><br>
+                <input type="text" name="dialog_id" required style="width:100%;padding:10px">
+            </div>
+
+            <div style="margin-bottom:16px">
+                <label>XLSX файл</label><br>
+                <input type="file" name="file" accept=".xlsx" required>
+            </div>
+
+            <button type="submit" style="padding:10px 16px">Загрузить чек-лист</button>
+        </form>
+
+        <h2>Уже загруженные чек-листы</h2>
+        <ul>{items}</ul>
+    </body>
+    </html>
+    """
+
+
+@app.post("/admin/upload", response_class=HTMLResponse)
+async def admin_upload(dialog_id: str = Form(...), file: UploadFile = File(...)):
+    file_bytes = await file.read()
+    data = parse_xlsx_to_checklist(file_bytes)
+    save_checklist(dialog_id, data)
+
+    return f"""
+    <html>
+    <head>
+        <meta charset="utf-8">
+        <title>Готово</title>
+    </head>
+    <body style="font-family:Arial,sans-serif;padding:40px">
+        <h1>Чек-лист сохранён</h1>
+        <p><b>dialogId:</b> {html.escape(dialog_id)}</p>
+        <p><b>Файл:</b> {html.escape(file.filename or '')}</p>
+        <p>Теперь вернитесь в коллабу и обновите sidebar.</p>
+        <p><a href="/admin">Назад в /admin</a></p>
+    </body>
+    </html>
+    """
 
 
 @app.get("/api/test")
