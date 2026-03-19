@@ -1,9 +1,49 @@
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse
+import requests
 import json
 import html
 
 app = FastAPI()
+
+
+def normalize_domain(value: str) -> str:
+    value = (value or "").strip()
+    value = value.replace("https://", "").replace("http://", "").strip("/")
+    return value
+
+
+def bitrix_rest_call(domain: str, method: str, access_token: str, payload: dict):
+    url = f"https://{domain}/rest/{method}.json"
+    response = requests.post(
+        url,
+        data={**payload, "auth": access_token},
+        timeout=30
+    )
+    try:
+        return response.json()
+    except Exception:
+        return {
+            "http_status": response.status_code,
+            "text": response.text
+        }
+
+
+def install_finish_block():
+    return """
+    <script src="https://api.bitrix24.com/api/v1/"></script>
+    <script>
+        if (typeof BX24 !== 'undefined') {
+            BX24.init(function () {
+                try {
+                    BX24.installFinish();
+                } catch (e) {
+                    console.log(e);
+                }
+            });
+        }
+    </script>
+    """
 
 
 @app.get("/health")
@@ -20,10 +60,71 @@ def home():
         <title>Bitrix Checklist MVP</title>
     </head>
     <body style="font-family:Arial,sans-serif;padding:40px">
-        <h1>Проект работает</h1>
-        <p>Это локальный тест FastAPI.</p>
-        <p>Следующий шаг — открыть страницу sidebar.</p>
+        <h1>Приложение работает</h1>
+        <p>Это главная страница приложения.</p>
         <p><a href="/sidebar" target="_blank">Открыть /sidebar</a></p>
+        <p><a href="/install" target="_blank">Открыть /install</a></p>
+    </body>
+    </html>
+    """
+
+
+@app.get("/install", response_class=HTMLResponse)
+def install_get():
+    return f"""
+    <html>
+    <head>
+        <meta charset="utf-8">
+        <title>Bitrix24 Install</title>
+    </head>
+    <body style="font-family:Arial,sans-serif;padding:40px">
+        <h1>Установка приложения</h1>
+        <p>Если эта страница открыта внутри Bitrix24, она завершит установку приложения.</p>
+        {install_finish_block()}
+    </body>
+    </html>
+    """
+
+
+@app.post("/install", response_class=HTMLResponse)
+async def install_post(request: Request):
+    form = dict(await request.form())
+
+    access_token = form.get("AUTH_ID") or form.get("access_token") or ""
+    domain = normalize_domain(form.get("DOMAIN") or form.get("domain") or "")
+    base_url = str(request.base_url).rstrip("/")
+
+    bind_result = {"skipped": True}
+
+    if domain and access_token:
+        bind_result = bitrix_rest_call(
+            domain,
+            "placement.bind",
+            access_token,
+            {
+                "PLACEMENT": "IM_SIDEBAR",
+                "HANDLER": f"{base_url}/sidebar",
+                "TITLE": "Чек-лист ИД"
+            }
+        )
+
+    return f"""
+    <html>
+    <head>
+        <meta charset="utf-8">
+        <title>Bitrix24 Install Callback</title>
+    </head>
+    <body style="font-family:Arial,sans-serif;padding:40px">
+        <h1>Install callback получен</h1>
+        <p>Если bind прошёл успешно, виджет будет зарегистрирован в IM_SIDEBAR.</p>
+
+        <h2>Что прислал Bitrix24</h2>
+        <pre>{html.escape(json.dumps(form, ensure_ascii=False, indent=2))}</pre>
+
+        <h2>Ответ placement.bind</h2>
+        <pre>{html.escape(json.dumps(bind_result, ensure_ascii=False, indent=2))}</pre>
+
+        {install_finish_block()}
     </body>
     </html>
     """
@@ -110,7 +211,7 @@ def sidebar():
                         '</div>' +
 
                         '<div class="note">' +
-                            'Сейчас это тестовая страница. Позже здесь будет чек-лист по текущей коллабе.' +
+                            'Позже здесь будет ваш чек-лист по текущей коллабе.' +
                         '</div>' +
                     '</div>';
 
@@ -154,22 +255,6 @@ def sidebar():
                 console.log(e);
             }
         </script>
-    </body>
-    </html>
-    """
-
-
-@app.post("/install", response_class=HTMLResponse)
-async def install(request: Request):
-    form = dict(await request.form())
-
-    return f"""
-    <html>
-    <head><meta charset="utf-8"></head>
-    <body style="font-family:Arial,sans-serif;padding:40px">
-        <h1>Install callback получен</h1>
-        <p>Это тестовая страница установки приложения из Bitrix24.</p>
-        <pre>{html.escape(json.dumps(form, ensure_ascii=False, indent=2))}</pre>
     </body>
     </html>
     """
