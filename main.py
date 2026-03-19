@@ -157,6 +157,45 @@ def save_checklist(dialog_id: str, data: dict):
     conn.commit()
     conn.close()
 
+def extract_dialog_id_from_form(form: dict) -> str:
+    direct_candidates = [
+        form.get("dialogId"),
+        form.get("DIALOG_ID"),
+        form.get("DIALOGID"),
+        form.get("dialog_id"),
+    ]
+
+    for value in direct_candidates:
+        value = normalize_dialog_id(value)
+        if value:
+            return value
+
+    json_candidates = [
+        form.get("PLACEMENT_OPTIONS"),
+        form.get("placementOptions"),
+        form.get("options"),
+    ]
+
+    for raw in json_candidates:
+        if not raw:
+            continue
+        try:
+            data = json.loads(raw) if isinstance(raw, str) else raw
+            for key in ["dialogId", "DIALOG_ID", "dialog_id"]:
+                value = normalize_dialog_id(data.get(key))
+                if value:
+                    return value
+        except Exception:
+            pass
+
+    # На случай неожиданных имен полей
+    for key, value in form.items():
+        if "dialog" in str(key).lower():
+            value = normalize_dialog_id(value)
+            if value:
+                return value
+
+    return ""
 
 def get_checklist(dialog_id: str):
     raw_id = str(dialog_id or "").strip()
@@ -223,8 +262,11 @@ def app_home_html():
     """
 
 
-def sidebar_html():
-    return """
+def sidebar_html(initial_dialog_id: str = "", initial_context_text: str = ""):
+    initial_dialog_id_json = json.dumps(initial_dialog_id or "", ensure_ascii=False)
+    initial_context_text_json = json.dumps(initial_context_text or "", ensure_ascii=False)
+
+    return f"""
     <!doctype html>
     <html lang="ru">
     <head>
@@ -232,74 +274,74 @@ def sidebar_html():
         <title>Bitrix24 Sidebar Test</title>
         <script src="https://api.bitrix24.com/api/v1/"></script>
         <style>
-            body {
+            body {{
                 font-family: Arial, sans-serif;
                 margin: 0;
                 padding: 16px;
                 background: #f7f9fc;
-            }
-            .card {
+            }}
+            .card {{
                 background: #ffffff;
                 border: 1px solid #e5e7eb;
                 border-radius: 12px;
                 padding: 16px;
                 margin-bottom: 12px;
-            }
-            .title {
+            }}
+            .title {{
                 font-size: 20px;
                 font-weight: 700;
                 margin-bottom: 10px;
-            }
-            .row {
+            }}
+            .row {{
                 margin-bottom: 10px;
-            }
-            .label {
+            }}
+            .label {{
                 color: #666;
                 font-size: 13px;
                 margin-bottom: 3px;
-            }
-            .value {
+            }}
+            .value {{
                 font-weight: 600;
                 color: #222;
                 word-break: break-word;
-            }
-            .note {
+            }}
+            .note {{
                 font-size: 13px;
                 color: #666;
                 margin-top: 10px;
-            }
-            .item {
+            }}
+            .item {{
                 border-top: 1px solid #f0f0f0;
                 padding: 10px 0;
-            }
-            .item:first-child {
+            }}
+            .item:first-child {{
                 border-top: none;
-            }
-            .item-name {
+            }}
+            .item-name {{
                 font-weight: 700;
                 margin-bottom: 4px;
-            }
-            .muted {
+            }}
+            .muted {{
                 color: #666;
                 font-size: 12px;
                 margin-bottom: 2px;
-            }
-            .badge {
+            }}
+            .badge {{
                 display: inline-block;
                 border-radius: 999px;
                 padding: 4px 8px;
                 font-size: 12px;
                 background: #eef2ff;
-            }
-            .error {
+            }}
+            .error {{
                 background: #fff1f1;
                 border: 1px solid #f3b3b3;
-            }
-            pre {
+            }}
+            pre {{
                 white-space: pre-wrap;
                 word-break: break-word;
                 font-size: 12px;
-            }
+            }}
         </style>
     </head>
     <body>
@@ -312,33 +354,35 @@ def sidebar_html():
 
         <script>
             var started = false;
+            var initialDialogId = {initial_dialog_id_json};
+            var initialContextText = {initial_context_text_json};
 
-            function esc(v) {
+            function esc(v) {{
                 if (v === null || v === undefined) return '';
                 return String(v)
                     .replace(/&/g, '&amp;')
                     .replace(/</g, '&lt;')
                     .replace(/>/g, '&gt;')
                     .replace(/"/g, '&quot;');
-            }
+            }}
 
-            function showError(title, text) {
+            function showError(title, text) {{
                 document.getElementById('app').innerHTML =
                     '<div class="card error">' +
                         '<div class="title">' + esc(title) + '</div>' +
                         '<div class="note">' + esc(text) + '</div>' +
                     '</div>';
-            }
+            }}
 
-            window.onerror = function(message, source, lineno, colno) {
+            window.onerror = function(message, source, lineno, colno) {{
                 showError('JavaScript error', message + ' | line: ' + lineno + ', col: ' + colno);
-            };
+            }};
 
-            function renderChecklist(dialogId, data, mode, debugInfo) {
+            function renderChecklist(dialogId, data, mode, debugInfo) {{
                 var itemsHtml = '';
 
-                if (data.items && data.items.length) {
-                    for (var i = 0; i < data.items.length; i++) {
+                if (data.items && data.items.length) {{
+                    for (var i = 0; i < data.items.length; i++) {{
                         var item = data.items[i];
                         itemsHtml +=
                             '<div class="item">' +
@@ -347,18 +391,18 @@ def sidebar_html():
                                 '<div class="muted">План: ' + esc(item.plan || '—') + '</div>' +
                                 '<div class="muted">Факт: ' + esc(item.fact || '—') + '</div>' +
                             '</div>';
-                    }
-                } else {
+                    }}
+                }} else {{
                     itemsHtml = '<div class="muted">Нет пунктов чек-листа</div>';
-                }
+                }}
 
                 var noticeHtml = '';
-                if (data.notice) {
+                if (data.notice) {{
                     noticeHtml =
                         '<div class="card">' +
                             '<div class="note">' + esc(data.notice) + '</div>' +
                         '</div>';
-                }
+                }}
 
                 var debugHtml =
                     '<div class="card">' +
@@ -379,61 +423,67 @@ def sidebar_html():
                     noticeHtml +
                     '<div class="card">' + itemsHtml + '</div>' +
                     debugHtml;
-            }
+            }}
 
-            function loadChecklist(dialogId, mode, placementInfoText) {
+            function loadChecklist(dialogId, mode, placementInfoText) {{
                 started = true;
 
                 fetch('/api/checklist?dialogId=' + encodeURIComponent(dialogId || ''))
-                    .then(function(response) {
+                    .then(function(response) {{
                         return response.json();
-                    })
-                    .then(function(data) {
+                    }})
+                    .then(function(data) {{
                         renderChecklist(dialogId, data, mode, placementInfoText);
-                        try {
-                            if (typeof BX24 !== 'undefined') {
+                        try {{
+                            if (typeof BX24 !== 'undefined') {{
                                 BX24.fitWindow();
-                            }
-                        } catch (e) {
+                            }}
+                        }} catch (e) {{
                             console.log(e);
-                        }
-                    })
-                    .catch(function(error) {
+                        }}
+                    }})
+                    .catch(function(error) {{
                         showError('Ошибка загрузки чек-листа', String(error));
-                    });
-            }
+                    }});
+            }}
 
-            setTimeout(function() {
-                if (!started) {
-                    loadChecklist('', 'fallback', 'BX24.init не сработал за 2 секунды');
-                }
-            }, 2000);
-
-            if (typeof BX24 !== 'undefined') {
-                try {
-                    BX24.init(function () {
+            // 1. Если Bitrix уже передал dialogId сервером — используем его сразу
+            if (initialDialogId) {{
+                loadChecklist(initialDialogId, 'server-post', initialContextText);
+            }} else if (typeof BX24 !== 'undefined') {{
+                // 2. Иначе пробуем получить через BX24 JS SDK
+                try {{
+                    BX24.init(function () {{
                         var dialogId = '';
                         var rawInfo = '';
 
-                        try {
+                        try {{
                             var info = BX24.placement.info();
-                            rawInfo = JSON.stringify(info || {}, null, 2);
+                            rawInfo = JSON.stringify(info || {{}}, null, 2);
 
-                            if (info && info.options && info.options.dialogId) {
+                            if (info && info.options && info.options.dialogId) {{
                                 dialogId = info.options.dialogId;
-                            }
-                        } catch (e) {
+                            }}
+                        }} catch (e) {{
                             rawInfo = 'placement.info error: ' + String(e);
-                        }
+                        }}
 
-                        loadChecklist(dialogId, 'Bitrix24', rawInfo);
-                    });
-                } catch (e) {
+                        loadChecklist(dialogId, 'Bitrix24-js', rawInfo);
+                    }});
+                }} catch (e) {{
                     showError('BX24.init error', String(e));
-                }
-            } else {
+                }}
+            }} else {{
+                // 3. Обычное открытие страницы вне Bitrix
                 loadChecklist('', 'local', 'BX24 не найден');
-            }
+            }}
+
+            // 4. Аварийный fallback
+            setTimeout(function() {{
+                if (!started) {{
+                    loadChecklist('', 'fallback', 'Ни server-post, ни BX24.init не сработали за 5 секунд');
+                }}
+            }}, 5000);
         </script>
     </body>
     </html>
@@ -518,12 +568,19 @@ async def install_post(request: Request):
 
 @app.get("/sidebar", response_class=HTMLResponse)
 def sidebar_get():
-    return sidebar_html()
+    return sidebar_html("", "GET /sidebar without Bitrix POST context")
 
 
 @app.post("/sidebar", response_class=HTMLResponse)
 async def sidebar_post(request: Request):
-    return sidebar_html()
+    form = dict(await request.form())
+    dialog_id = extract_dialog_id_from_form(form)
+    raw_context = json.dumps(form, ensure_ascii=False, indent=2)
+
+    print("SIDEBAR POST FORM:", raw_context)
+    print("SIDEBAR EXTRACTED DIALOG ID:", dialog_id)
+
+    return sidebar_html(dialog_id, raw_context)
 
 
 @app.get("/api/checklist")
