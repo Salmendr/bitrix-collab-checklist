@@ -46,13 +46,7 @@ def install_finish_block():
     """
 
 
-@app.get("/health")
-def health():
-    return {"ok": True}
-
-
-@app.get("/", response_class=HTMLResponse)
-def home():
+def app_home_html():
     return """
     <html>
     <head>
@@ -69,69 +63,7 @@ def home():
     """
 
 
-@app.get("/install", response_class=HTMLResponse)
-def install_get():
-    return f"""
-    <html>
-    <head>
-        <meta charset="utf-8">
-        <title>Bitrix24 Install</title>
-    </head>
-    <body style="font-family:Arial,sans-serif;padding:40px">
-        <h1>Установка приложения</h1>
-        <p>Если эта страница открыта внутри Bitrix24, она завершит установку приложения.</p>
-        {install_finish_block()}
-    </body>
-    </html>
-    """
-
-
-@app.post("/install", response_class=HTMLResponse)
-async def install_post(request: Request):
-    form = dict(await request.form())
-
-    access_token = form.get("AUTH_ID") or form.get("access_token") or ""
-    domain = normalize_domain(form.get("DOMAIN") or form.get("domain") or "")
-    base_url = str(request.base_url).rstrip("/")
-
-    bind_result = {"skipped": True}
-
-    if domain and access_token:
-        bind_result = bitrix_rest_call(
-            domain,
-            "placement.bind",
-            access_token,
-            {
-                "PLACEMENT": "IM_SIDEBAR",
-                "HANDLER": f"{base_url}/sidebar",
-                "TITLE": "Чек-лист ИД"
-            }
-        )
-
-    return f"""
-    <html>
-    <head>
-        <meta charset="utf-8">
-        <title>Bitrix24 Install Callback</title>
-    </head>
-    <body style="font-family:Arial,sans-serif;padding:40px">
-        <h1>Install callback получен</h1>
-        <p>Если bind прошёл успешно, виджет будет зарегистрирован в IM_SIDEBAR.</p>
-
-        <h2>Что прислал Bitrix24</h2>
-        <pre>{html.escape(json.dumps(form, ensure_ascii=False, indent=2))}</pre>
-
-        <h2>Ответ placement.bind</h2>
-        <pre>{html.escape(json.dumps(bind_result, ensure_ascii=False, indent=2))}</pre>
-
-        {install_finish_block()}
-    </body>
-    </html>
-    """
-
-
-@app.get("/sidebar", response_class=HTMLResponse)
-def sidebar():
+def sidebar_html():
     return """
     <!doctype html>
     <html lang="ru">
@@ -258,6 +190,92 @@ def sidebar():
     </body>
     </html>
     """
+
+
+@app.get("/health")
+def health():
+    return {"ok": True}
+
+
+@app.get("/", response_class=HTMLResponse)
+def home_get():
+    return app_home_html()
+
+
+@app.post("/", response_class=HTMLResponse)
+async def home_post(request: Request):
+    return app_home_html()
+
+
+@app.get("/install", response_class=HTMLResponse)
+def install_get():
+    return f"""
+    <html>
+    <head>
+        <meta charset="utf-8">
+        <title>Bitrix24 Install</title>
+    </head>
+    <body style="font-family:Arial,sans-serif;padding:40px">
+        <h1>Установка приложения</h1>
+        <p>Если эта страница открыта внутри Bitrix24, она завершит установку приложения.</p>
+        {install_finish_block()}
+    </body>
+    </html>
+    """
+
+
+@app.post("/install", response_class=HTMLResponse)
+async def install_post(request: Request):
+    form = dict(await request.form())
+
+    access_token = form.get("AUTH_ID") or form.get("access_token") or ""
+    domain = normalize_domain(form.get("DOMAIN") or form.get("domain") or "")
+    base_url = str(request.base_url).rstrip("/")
+
+    bind_result = {"skipped": True}
+
+    if domain and access_token:
+        bind_result = bitrix_rest_call(
+            domain,
+            "placement.bind",
+            access_token,
+            {
+                "PLACEMENT": "IM_SIDEBAR",
+                "HANDLER": f"{base_url}/sidebar",
+                "TITLE": "Чек-лист ИД"
+            }
+        )
+
+    return f"""
+    <html>
+    <head>
+        <meta charset="utf-8">
+        <title>Bitrix24 Install Callback</title>
+    </head>
+    <body style="font-family:Arial,sans-serif;padding:40px">
+        <h1>Install callback получен</h1>
+        <p>Если bind прошёл успешно, виджет будет зарегистрирован в IM_SIDEBAR.</p>
+
+        <h2>Что прислал Bitrix24</h2>
+        <pre>{html.escape(json.dumps(form, ensure_ascii=False, indent=2))}</pre>
+
+        <h2>Ответ placement.bind</h2>
+        <pre>{html.escape(json.dumps(bind_result, ensure_ascii=False, indent=2))}</pre>
+
+        {install_finish_block()}
+    </body>
+    </html>
+    """
+
+
+@app.get("/sidebar", response_class=HTMLResponse)
+def sidebar_get():
+    return sidebar_html()
+
+
+@app.post("/sidebar", response_class=HTMLResponse)
+async def sidebar_post(request: Request):
+    return sidebar_html()
 
 
 @app.get("/api/test")
