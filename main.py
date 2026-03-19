@@ -119,8 +119,24 @@ def parse_xlsx_to_checklist(file_bytes: bytes):
         "items": items
     }
 
+def normalize_dialog_id(value: str) -> str:
+    s = str(value or "").strip()
+    s = s.strip('"').strip("'")
+
+    if not s:
+        return ""
+
+    if s.startswith("chat") and s[4:].isdigit():
+        return s
+
+    if s.isdigit():
+        return f"chat{s}"
+
+    return s
 
 def save_checklist(dialog_id: str, data: dict):
+    dialog_id = normalize_dialog_id(dialog_id)
+
     conn = get_conn()
     conn.execute("""
         INSERT INTO checklists(dialog_id, title, data_json)
@@ -134,15 +150,37 @@ def save_checklist(dialog_id: str, data: dict):
 
 
 def get_checklist(dialog_id: str):
+    raw_id = str(dialog_id or "").strip()
+    normalized_id = normalize_dialog_id(raw_id)
+
+    aliases = []
+    for candidate in [raw_id, normalized_id]:
+        if candidate and candidate not in aliases:
+            aliases.append(candidate)
+
+    if normalized_id.startswith("chat") and normalized_id[4:].isdigit():
+        numeric_id = normalized_id[4:]
+        if numeric_id not in aliases:
+            aliases.append(numeric_id)
+
     conn = get_conn()
-    row = conn.execute(
-        "SELECT data_json FROM checklists WHERE dialog_id = ?",
-        (dialog_id,)
-    ).fetchone()
+
+    row = None
+    for candidate in aliases:
+        row = conn.execute(
+            "SELECT data_json FROM checklists WHERE dialog_id = ?",
+            (candidate,)
+        ).fetchone()
+        if row:
+            break
+
     conn.close()
 
     if row:
-        return json.loads(row["data_json"])
+        data = json.loads(row["data_json"])
+        data["resolvedDialogId"] = normalized_id
+        data["lookupAliases"] = aliases
+        return data
 
     return {
         "title": "Демо-чек-лист",
@@ -153,7 +191,9 @@ def get_checklist(dialog_id: str):
             {"name": "ГПЗУ", "status": "Нет", "plan": "апрель", "fact": "—"},
             {"name": "ТУ Свет", "status": "В работе", "plan": "27.03.2026", "fact": "—"},
         ],
-        "notice": "Для этого dialogId пока не загружен реальный Excel, поэтому показывается демо."
+        "notice": "Для этого dialogId пока не найден реальный Excel.",
+        "resolvedDialogId": normalized_id,
+        "lookupAliases": aliases
     }
 
 
@@ -212,6 +252,7 @@ def sidebar_html():
             .value {
                 font-weight: 600;
                 color: #222;
+                word-break: break-word;
             }
             .note {
                 font-size: 13px;
@@ -241,12 +282,28 @@ def sidebar_html():
                 font-size: 12px;
                 background: #eef2ff;
             }
+            .error {
+                background: #fff1f1;
+                border: 1px solid #f3b3b3;
+            }
+            pre {
+                white-space: pre-wrap;
+                word-break: break-word;
+                font-size: 12px;
+            }
         </style>
     </head>
     <body>
-        <div id="app">Загрузка...</div>
+        <div id="app">
+            <div class="card">
+                <div class="title">Инициализация...</div>
+                <div class="note">Ждём загрузку Bitrix24 SDK и данных чек-листа.</div>
+            </div>
+        </div>
 
         <script>
+            var started = false;
+
             function esc(v) {
                 if (v === null || v === undefined) return '';
                 return String(v)
@@ -256,7 +313,19 @@ def sidebar_html():
                     .replace(/"/g, '&quot;');
             }
 
-            function renderChecklist(dialogId, data, mode) {
+            function showError(title, text) {
+                document.getElementById('app').innerHTML =
+                    '<div class="card error">' +
+                        '<div class="title">' + esc(title) + '</div>' +
+                        '<div class="note">' + esc(text) + '</div>' +
+                    '</div>';
+            }
+
+            window.onerror = function(message, source, lineno, colno) {
+                showError('JavaScript error', message + ' | line: ' + lineno + ', col: ' + colno);
+            };
+
+            function renderChecklist(dialogId, data, mode, debugInfo) {
                 var itemsHtml = '';
 
                 if (data.items && data.items.length) {
@@ -282,39 +351,36 @@ def sidebar_html():
                         '</div>';
                 }
 
+                var debugHtml =
+                    '<div class="card">' +
+                        '<div class="title">Диагностика</div>' +
+                        '<div class="row"><div class="label">mode</div><div class="value">' + esc(mode) + '</div></div>' +
+                        '<div class="row"><div class="label">dialogId из Bitrix</div><div class="value">' + esc(dialogId || 'не передан') + '</div></div>' +
+                        '<div class="row"><div class="label">resolvedDialogId</div><div class="value">' + esc(data.resolvedDialogId || '') + '</div></div>' +
+                        '<div class="row"><div class="label">lookupAliases</div><div class="value">' + esc((data.lookupAliases || []).join(', ')) + '</div></div>' +
+                        '<div class="row"><div class="label">raw placement info</div><pre>' + esc(debugInfo || '') + '</pre></div>' +
+                    '</div>';
+
                 document.getElementById('app').innerHTML =
                     '<div class="card">' +
                         '<div class="title">' + esc(data.title || 'Чек-лист') + '</div>' +
-
-                        '<div class="row">' +
-                            '<div class="label">Режим</div>' +
-                            '<div class="value">' + esc(mode) + '</div>' +
-                        '</div>' +
-
-                        '<div class="row">' +
-                            '<div class="label">dialogId</div>' +
-                            '<div class="value">' + esc(dialogId || 'не передан') + '</div>' +
-                        '</div>' +
-
-                        '<div class="row">' +
-                            '<div class="label">Срок по договору</div>' +
-                            '<div class="value">' + esc(data.contractDeadline || '—') + '</div>' +
-                        '</div>' +
-
-                        '<div class="row">' +
-                            '<div class="label">Начало работ</div>' +
-                            '<div class="value">' + esc(data.startDate || '—') + '</div>' +
-                        '</div>' +
+                        '<div class="row"><div class="label">Срок по договору</div><div class="value">' + esc(data.contractDeadline || '—') + '</div></div>' +
+                        '<div class="row"><div class="label">Начало работ</div><div class="value">' + esc(data.startDate || '—') + '</div></div>' +
                     '</div>' +
                     noticeHtml +
-                    '<div class="card">' + itemsHtml + '</div>';
+                    '<div class="card">' + itemsHtml + '</div>' +
+                    debugHtml;
             }
 
-            function loadChecklist(dialogId, mode) {
+            function loadChecklist(dialogId, mode, placementInfoText) {
+                started = true;
+
                 fetch('/api/checklist?dialogId=' + encodeURIComponent(dialogId || ''))
-                    .then(function(response) { return response.json(); })
+                    .then(function(response) {
+                        return response.json();
+                    })
                     .then(function(data) {
-                        renderChecklist(dialogId, data, mode);
+                        renderChecklist(dialogId, data, mode, placementInfoText);
                         try {
                             if (typeof BX24 !== 'undefined') {
                                 BX24.fitWindow();
@@ -324,28 +390,40 @@ def sidebar_html():
                         }
                     })
                     .catch(function(error) {
-                        console.log(error);
-                        document.getElementById('app').innerHTML = 'Ошибка загрузки чек-листа';
+                        showError('Ошибка загрузки чек-листа', String(error));
                     });
             }
 
+            setTimeout(function() {
+                if (!started) {
+                    loadChecklist('', 'fallback', 'BX24.init не сработал за 2 секунды');
+                }
+            }, 2000);
+
             if (typeof BX24 !== 'undefined') {
-                BX24.init(function () {
-                    var dialogId = '';
+                try {
+                    BX24.init(function () {
+                        var dialogId = '';
+                        var rawInfo = '';
 
-                    try {
-                        var info = BX24.placement.info();
-                        if (info && info.options && info.options.dialogId) {
-                            dialogId = info.options.dialogId;
+                        try {
+                            var info = BX24.placement.info();
+                            rawInfo = JSON.stringify(info || {}, null, 2);
+
+                            if (info && info.options && info.options.dialogId) {
+                                dialogId = info.options.dialogId;
+                            }
+                        } catch (e) {
+                            rawInfo = 'placement.info error: ' + String(e);
                         }
-                    } catch (e) {
-                        console.log(e);
-                    }
 
-                    loadChecklist(dialogId, 'Bitrix24');
-                });
+                        loadChecklist(dialogId, 'Bitrix24', rawInfo);
+                    });
+                } catch (e) {
+                    showError('BX24.init error', String(e));
+                }
             } else {
-                loadChecklist('', 'Локальный браузер');
+                loadChecklist('', 'local', 'BX24 не найден');
             }
         </script>
     </body>
@@ -441,6 +519,7 @@ async def sidebar_post(request: Request):
 
 @app.get("/api/checklist")
 def api_checklist(dialogId: str = ""):
+    dialogId = normalize_dialog_id(dialogId)
     return JSONResponse(get_checklist(dialogId))
 
 
@@ -489,6 +568,7 @@ def admin():
 
 @app.post("/admin/upload", response_class=HTMLResponse)
 async def admin_upload(dialog_id: str = Form(...), file: UploadFile = File(...)):
+    dialog_id = normalize_dialog_id(dialog_id)
     file_bytes = await file.read()
     data = parse_xlsx_to_checklist(file_bytes)
     save_checklist(dialog_id, data)
