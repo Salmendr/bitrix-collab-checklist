@@ -588,6 +588,49 @@ def api_checklist(dialogId: str = ""):
     dialogId = normalize_dialog_id(dialogId)
     return JSONResponse(get_checklist(dialogId))
 
+@app.get("/", response_class=HTMLResponse)
+def home_get():
+    return """
+    <html>
+    <head>
+        <meta charset="utf-8">
+        <title>Чек-лист ИД</title>
+        <script src="https://api.bitrix24.com/api/v1/"></script>
+    </head>
+    <body style="font-family:Arial,sans-serif;padding:40px">
+        <h1>Чек-лист ИД</h1>
+
+        <button id="bindBtn" style="padding:10px 16px;font-size:16px;">
+            Привязать виджет к коллабам
+        </button>
+
+        <pre id="log" style="margin-top:20px;white-space:pre-wrap;"></pre>
+
+        <script>
+            function log(text) {
+                document.getElementById('log').textContent = text;
+            }
+
+            document.getElementById('bindBtn').addEventListener('click', function () {
+                BX24.init(function () {
+                    BX24.callMethod('placement.bind', {
+                        PLACEMENT: 'IM_SIDEBAR',
+                        HANDLER: window.location.origin + '/sidebar',
+                        TITLE: 'Чек-лист ИД'
+                    }, function(result) {
+                        if (result.error()) {
+                            log('Ошибка: ' + result.error());
+                        } else {
+                            log('Готово. placement.bind выполнен:\\n' + JSON.stringify(result.data(), null, 2));
+                        }
+                    });
+                });
+            });
+        </script>
+    </body>
+    </html>
+    """
+
 
 @app.get("/admin", response_class=HTMLResponse)
 def admin():
