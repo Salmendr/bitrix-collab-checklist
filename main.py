@@ -91,17 +91,26 @@ def parse_xlsx_to_checklist(file_bytes: bytes):
     wb = openpyxl.load_workbook(BytesIO(file_bytes), data_only=True)
     ws = wb[wb.sheetnames[0]]
 
-    title = format_cell(ws["C5"].value) or "Чек-лист ИД"
-    contract_deadline = format_cell(ws["I11"].value)
-    start_date = format_cell(ws["I12"].value)
+    def format_local(value):
+        if value is None:
+            return ""
+        if isinstance(value, datetime):
+            return value.strftime("%d.%m.%Y")
+        return str(value).strip()
 
     items = []
-    for row in range(12, 200):
-        name = format_cell(ws[f"B{row}"].value)
-        status = format_cell(ws[f"C{row}"].value)
-        plan = format_cell(ws[f"D{row}"].value)
-        fact = format_cell(ws[f"E{row}"].value)
 
+    # В файле:
+    # строка 1 = заголовки "ИД / Статус / Дата получения"
+    # строка 2 = подписи "План / Факт"
+    # данные начинаются со строки 3
+    for row in range(3, ws.max_row + 1):
+        name = format_local(ws[f"A{row}"].value)
+        status = format_local(ws[f"B{row}"].value)
+        plan = format_local(ws[f"C{row}"].value)
+        fact = format_local(ws[f"D{row}"].value)
+
+        # пропускаем полностью пустые строки
         if not name:
             continue
 
@@ -113,9 +122,9 @@ def parse_xlsx_to_checklist(file_bytes: bytes):
         })
 
     return {
-        "title": title,
-        "contractDeadline": contract_deadline or "—",
-        "startDate": start_date or "—",
+        "title": f"Чек-лист ИД — {ws.title}",
+        "contractDeadline": "—",
+        "startDate": "—",
         "items": items
     }
 
