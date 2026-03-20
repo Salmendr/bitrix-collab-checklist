@@ -250,13 +250,55 @@ def app_home_html():
     <html>
     <head>
         <meta charset="utf-8">
-        <title>Bitrix Checklist MVP</title>
+        <title>Чек-лист ИД</title>
+        <script src="https://api.bitrix24.com/api/v1/"></script>
     </head>
     <body style="font-family:Arial,sans-serif;padding:40px">
-        <h1>Приложение работает</h1>
-        <p><a href="/sidebar" target="_blank">Открыть /sidebar</a></p>
-        <p><a href="/install" target="_blank">Открыть /install</a></p>
+        <h1>Чек-лист ИД</h1>
+
+        <button id="bindBtn" style="padding:10px 16px;font-size:16px;">
+            Зарегистрировать виджет в IM_SIDEBAR
+        </button>
+
+        <p style="margin-top:20px;"><a href="/sidebar" target="_blank">Открыть /sidebar</a></p>
         <p><a href="/admin" target="_blank">Открыть /admin</a></p>
+
+        <pre id="log" style="margin-top:20px;white-space:pre-wrap;"></pre>
+
+        <script>
+            function log(text) {
+                document.getElementById('log').textContent = text;
+            }
+
+            if (typeof BX24 === 'undefined') {
+                log('BX24 SDK не найден. Эту страницу нужно открывать из Bitrix24 как приложение.');
+            } else {
+                BX24.init(function () {
+                    BX24.callMethod('app.info', {}, function(infoResult) {
+                        if (infoResult.error()) {
+                            log('app.info error: ' + infoResult.error());
+                            return;
+                        }
+
+                        log('app.info ok:\\n' + JSON.stringify(infoResult.data(), null, 2));
+
+                        document.getElementById('bindBtn').addEventListener('click', function () {
+                            BX24.callMethod('placement.bind', {
+                                PLACEMENT: 'IM_SIDEBAR',
+                                HANDLER: window.location.origin + '/sidebar',
+                                TITLE: 'Чек-лист ИД'
+                            }, function(result) {
+                                if (result.error()) {
+                                    log('placement.bind error: ' + result.error());
+                                } else {
+                                    log('placement.bind ok:\\n' + JSON.stringify(result.data(), null, 2));
+                                }
+                            });
+                        });
+                    });
+                });
+            }
+        </script>
     </body>
     </html>
     """
