@@ -569,7 +569,6 @@ def sidebar_html(initial_dialog_id: str = "", initial_context_text: str = ""):
 def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
     initial_dialog_id_json = json.dumps(initial_dialog_id or "", ensure_ascii=False)
     initial_context_text_json = json.dumps(initial_context_text or "", ensure_ascii=False)
-    app_portal_path_json = json.dumps(APP_PORTAL_PATH, ensure_ascii=False)
 
     return f"""
     <!doctype html>
@@ -651,7 +650,6 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
         <script>
             var initialDialogId = {initial_dialog_id_json};
             var initialContextText = {initial_context_text_json};
-            var appPortalPath = {app_portal_path_json};
             var autoOpened = false;
 
             function setMeta(text) {{
@@ -662,30 +660,27 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
                 document.getElementById('error').textContent = text || '';
             }}
 
-            function buildSliderPath(dialogId) {{
-                return appPortalPath + '?openChecklist=1&dialogId=' + encodeURIComponent(dialogId);
-            }}
-
             function openChecklist(dialogId) {{
                 if (!dialogId) {{
                     setError('dialogId не найден');
                     return;
                 }}
 
-                var sliderPath = buildSliderPath(dialogId);
-
                 try {{
                     if (typeof BX24 !== 'undefined') {{
-                        BX24.openPath(sliderPath);
+                        BX24.openApplication({{
+                            dialogId: dialogId,
+                            mode: 'popup'
+                        }});
                         autoOpened = true;
-                        setMeta('Открываем чек-лист для ' + dialogId);
+                        setMeta('Открываем popup для ' + dialogId);
                         return;
                     }}
                 }} catch (e) {{
-                    setError('BX24.openPath error: ' + String(e));
+                    setError('BX24.openApplication error: ' + String(e));
                 }}
 
-                window.open(sliderPath, '_blank');
+                window.open('/popup?dialogId=' + encodeURIComponent(dialogId), '_blank');
             }}
 
             document.getElementById('openBtn').addEventListener('click', function () {{
@@ -753,9 +748,9 @@ def health():
 
 
 @app.get("/", response_class=HTMLResponse)
-def home_get(request: Request, dialogId: str = "", openChecklist: str = ""):
-    if openChecklist == "1":
-        return view_get(dialogId)
+def home_get(request: Request, dialogId: str = "", mode: str = ""):
+    if mode == "popup":
+        return popup_get(dialogId)
     return app_home_html()
 
 
@@ -881,6 +876,134 @@ async def textarea_post(request: Request):
     print("TEXTAREA EXTRACTED DIALOG ID:", dialog_id)
 
     return textarea_html(dialog_id, raw_context)
+
+
+@app.get("/popup", response_class=HTMLResponse)
+def popup_get(dialogId: str = ""):
+    dialog_id = normalize_dialog_id(dialogId)
+    data = get_checklist(dialog_id)
+
+    items_html = ""
+    for item in data.get("items", []):
+        status = html.escape(item.get("status", "—"))
+        plan = html.escape(item.get("plan", "—"))
+        fact = html.escape(item.get("fact", "—"))
+        name = html.escape(item.get("name", "—"))
+
+        items_html += f"""
+        <div class="item">
+            <div class="item-name">{name}</div>
+            <div class="item-meta"><b>Статус:</b> {status}</div>
+            <div class="item-meta"><b>План:</b> {plan}</div>
+            <div class="item-meta"><b>Факт:</b> {fact}</div>
+        </div>
+        """
+
+    if not items_html:
+        items_html = '<div class="empty">Нет пунктов чек-листа</div>'
+
+    title = html.escape(data.get("title", "Чек-лист ИД"))
+    contract_deadline = html.escape(data.get("contractDeadline", "—"))
+    start_date = html.escape(data.get("startDate", "—"))
+
+    return f"""
+    <html>
+    <head>
+        <meta charset="utf-8">
+        <title>{title}</title>
+        <script src="https://api.bitrix24.com/api/v1/"></script>
+        <style>
+            * {{ box-sizing: border-box; }}
+            body {{
+                margin: 0;
+                font-family: Arial, sans-serif;
+                background: #f5f7fb;
+            }}
+            .shell {{
+                padding: 18px;
+            }}
+            .modal {{
+                background: #fff;
+                border-radius: 16px;
+                border: 1px solid #e5e7eb;
+                overflow: hidden;
+                box-shadow: 0 16px 40px rgba(0,0,0,0.12);
+            }}
+            .header {{
+                padding: 20px 24px;
+                border-bottom: 1px solid #edf0f2;
+            }}
+            .title {{
+                font-size: 28px;
+                font-weight: 700;
+                margin-bottom: 8px;
+            }}
+            .meta {{
+                color: #667085;
+                font-size: 14px;
+                display: flex;
+                gap: 18px;
+                flex-wrap: wrap;
+            }}
+            .content {{
+                max-height: 560px;
+                overflow: auto;
+                padding: 12px 24px 24px;
+            }}
+            .item {{
+                border-top: 1px solid #edf0f2;
+                padding: 14px 0;
+            }}
+            .item:first-child {{
+                border-top: none;
+            }}
+            .item-name {{
+                font-size: 18px;
+                font-weight: 700;
+                margin-bottom: 6px;
+            }}
+            .item-meta {{
+                color: #444;
+                font-size: 14px;
+                margin-bottom: 3px;
+            }}
+            .empty {{
+                padding: 24px 0;
+                color: #667085;
+            }}
+        </style>
+    </head>
+    <body>
+        <div class="shell">
+            <div class="modal">
+                <div class="header">
+                    <div class="title">{title}</div>
+                    <div class="meta">
+                        <div><b>dialogId:</b> {html.escape(dialog_id or "не передан")}</div>
+                        <div><b>Срок по договору:</b> {contract_deadline}</div>
+                        <div><b>Начало работ:</b> {start_date}</div>
+                    </div>
+                </div>
+                <div class="content">
+                    {items_html}
+                </div>
+            </div>
+        </div>
+
+        <script>
+            if (typeof BX24 !== 'undefined') {{
+                BX24.init(function () {{
+                    try {{
+                        BX24.resizeWindow(1100, 720);
+                    }} catch (e) {{
+                        console.log(e);
+                    }}
+                }});
+            }}
+        </script>
+    </body>
+    </html>
+    """
 
 
 @app.get("/view", response_class=HTMLResponse)
