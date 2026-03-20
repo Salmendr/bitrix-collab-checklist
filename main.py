@@ -307,20 +307,25 @@ def app_home_html():
                         });
 
                         document.getElementById('bindTextareaBtn').addEventListener('click', function () {
-                            BX24.callMethod('placement.bind', {
+                            BX24.callMethod('placement.unbind', {
+                                PLACEMENT: 'IM_TEXTAREA',
+                                HANDLER: window.location.origin + '/textarea'
+                            }, function(unbindResult) {
+                                BX24.callMethod('placement.bind', {
                                 PLACEMENT: 'IM_TEXTAREA',
                                 HANDLER: window.location.origin + '/textarea',
                                 TITLE: 'Чек-лист ИД',
                                 OPTIONS: {
                                     iconName: 'fa-bars',
-                                    context: 'USER'
+                                    context: 'CHAT'
                                 }
-                            }, function(result) {
-                                if (result.error()) {
-                                    log('placement.bind textarea error: ' + result.error());
+                            }, function(bindResult) {
+                                if (bindResult.error()) {
+                                    log('placement.bind textarea error: ' + bindResult.error());
                                 } else {
-                                    log('placement.bind textarea ok:\\n' + JSON.stringify(result.data(), null, 2));
+                                    log('placement.bind textarea ok:\\n' + JSON.stringify(bindResult.data(), null, 2));
                                 }
+                            });
                             });
                         });
                     });
@@ -788,7 +793,7 @@ async def install_post(request: Request):
                 "TITLE": "Чек-лист ИД",
                 "OPTIONS": {
                     "iconName": "fa-bars",
-                    "context": "USER"
+                    "context": "CHAT"
                 }
             }
         )
