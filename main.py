@@ -259,8 +259,12 @@ def app_home_html():
         <button id="bindBtn" style="padding:10px 16px;font-size:16px;">
             Зарегистрировать виджет в IM_SIDEBAR
         </button>
+        <button id="bindTextareaBtn" style="padding:10px 16px;font-size:16px;margin-left:8px;">
+            Зарегистрировать виджет в IM_TEXTAREA
+        </button>
 
         <p style="margin-top:20px;"><a href="/sidebar" target="_blank">Открыть /sidebar</a></p>
+        <p><a href="/textarea" target="_blank">Открыть /textarea</a></p>
         <p><a href="/admin" target="_blank">Открыть /admin</a></p>
 
         <pre id="log" style="margin-top:20px;white-space:pre-wrap;"></pre>
@@ -298,6 +302,24 @@ def app_home_html():
                                     log('placement.bind error: ' + result.error());
                                 } else {
                                     log('placement.bind ok:\\n' + JSON.stringify(result.data(), null, 2));
+                                }
+                            });
+                        });
+
+                        document.getElementById('bindTextareaBtn').addEventListener('click', function () {
+                            BX24.callMethod('placement.bind', {
+                                PLACEMENT: 'IM_TEXTAREA',
+                                HANDLER: window.location.origin + '/textarea',
+                                TITLE: 'Чек-лист ИД',
+                                OPTIONS: {
+                                    iconName: 'fa-bars',
+                                    context: 'USER'
+                                }
+                            }, function(result) {
+                                if (result.error()) {
+                                    log('placement.bind textarea error: ' + result.error());
+                                } else {
+                                    log('placement.bind textarea ok:\\n' + JSON.stringify(result.data(), null, 2));
                                 }
                             });
                         });
@@ -538,6 +560,132 @@ def sidebar_html(initial_dialog_id: str = "", initial_context_text: str = ""):
     """
 
 
+def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
+    initial_dialog_id_json = json.dumps(initial_dialog_id or "", ensure_ascii=False)
+    initial_context_text_json = json.dumps(initial_context_text or "", ensure_ascii=False)
+
+    return f"""
+    <!doctype html>
+    <html lang="ru">
+    <head>
+        <meta charset="utf-8">
+        <title>Bitrix24 Textarea Test</title>
+        <script src="https://api.bitrix24.com/api/v1/"></script>
+        <style>
+            body {{
+                font-family: Arial, sans-serif;
+                margin: 0;
+                padding: 16px;
+                background: #f7f9fc;
+            }}
+            .card {{
+                background: #ffffff;
+                border: 1px solid #e5e7eb;
+                border-radius: 12px;
+                padding: 16px;
+                margin-bottom: 12px;
+            }}
+            .title {{
+                font-size: 20px;
+                font-weight: 700;
+                margin-bottom: 10px;
+            }}
+            .label {{
+                color: #666;
+                font-size: 13px;
+                margin-bottom: 4px;
+            }}
+            .value {{
+                font-weight: 600;
+                color: #222;
+                margin-bottom: 10px;
+                word-break: break-word;
+            }}
+            .note {{
+                font-size: 13px;
+                color: #666;
+            }}
+            pre {{
+                white-space: pre-wrap;
+                word-break: break-word;
+                font-size: 12px;
+            }}
+        </style>
+    </head>
+    <body>
+        <div id="app">
+            <div class="card">
+                <div class="title">Инициализация...</div>
+                <div class="note">Ждем загрузку Bitrix24 SDK и данных IM_TEXTAREA.</div>
+            </div>
+        </div>
+
+        <script>
+            var initialDialogId = {initial_dialog_id_json};
+            var initialContextText = {initial_context_text_json};
+
+            function esc(v) {{
+                if (v === null || v === undefined) return '';
+                return String(v)
+                    .replace(/&/g, '&amp;')
+                    .replace(/</g, '&lt;')
+                    .replace(/>/g, '&gt;')
+                    .replace(/"/g, '&quot;');
+            }}
+
+            function render(mode, dialogId, rawInfo) {{
+                document.getElementById('app').innerHTML =
+                    '<div class="card">' +
+                        '<div class="title">IM_TEXTAREA debug</div>' +
+                        '<div class="label">mode</div>' +
+                        '<div class="value">' + esc(mode) + '</div>' +
+                        '<div class="label">dialogId</div>' +
+                        '<div class="value">' + esc(dialogId || 'не передан') + '</div>' +
+                        '<div class="note">Тестовый обработчик /textarea для проверки контекста чата.</div>' +
+                    '</div>' +
+                    '<div class="card">' +
+                        '<div class="title">raw context</div>' +
+                        '<pre>' + esc(rawInfo || '') + '</pre>' +
+                    '</div>';
+            }}
+
+            if (initialDialogId) {{
+                render('server-post', initialDialogId, initialContextText);
+            }} else if (typeof BX24 !== 'undefined') {{
+                BX24.init(function () {{
+                    var dialogId = '';
+                    var rawInfo = '';
+
+                    try {{
+                        var info = BX24.placement.info() || {{}};
+                        rawInfo = JSON.stringify(info, null, 2);
+
+                        if (info.options && info.options.dialogId) {{
+                            dialogId = info.options.dialogId;
+                        }} else if (info.options && info.options.DIALOG_ID) {{
+                            dialogId = info.options.DIALOG_ID;
+                        }}
+                    }} catch (e) {{
+                        rawInfo = 'placement.info error: ' + String(e);
+                    }}
+
+                    render('Bitrix24-js', dialogId, rawInfo);
+
+                    try {{
+                        BX24.fitWindow();
+                    }} catch (e) {{
+                        console.log(e);
+                    }}
+                }});
+            }} else {{
+                render('local', '', 'BX24 не найден');
+            }}
+        </script>
+    </body>
+    </html>
+    """
+
+
 @app.get("/health")
 def health():
     return {"ok": True}
@@ -578,10 +726,13 @@ async def install_post(request: Request):
     domain = normalize_domain(form.get("DOMAIN") or form.get("domain") or "")
     base_url = str(request.base_url).rstrip("/")
 
-    bind_result = {"skipped": True}
+    bind_result = {
+        "im_sidebar": {"skipped": True},
+        "im_textarea": {"skipped": True}
+    }
 
     if domain and access_token:
-        bind_result = bitrix_rest_call(
+        bind_result["im_sidebar"] = bitrix_rest_call(
             domain,
             "placement.bind",
             access_token,
@@ -597,6 +748,20 @@ async def install_post(request: Request):
                 "TITLE": "Чек-лист ИД"
             }
         )
+        bind_result["im_textarea"] = bitrix_rest_call(
+            domain,
+            "placement.bind",
+            access_token,
+            {
+                "PLACEMENT": "IM_TEXTAREA",
+                "HANDLER": f"{base_url}/textarea",
+                "TITLE": "Чек-лист ИД",
+                "OPTIONS": {
+                    "iconName": "fa-bars",
+                    "context": "USER"
+                }
+            }
+        )
 
     return f"""
     <html>
@@ -606,7 +771,7 @@ async def install_post(request: Request):
     </head>
     <body style="font-family:Arial,sans-serif;padding:40px">
         <h1>Install callback получен</h1>
-        <p>Если bind прошёл успешно, виджет будет зарегистрирован в IM_SIDEBAR.</p>
+        <p>Если bind прошёл успешно, виджеты будут зарегистрированы в IM_SIDEBAR и IM_TEXTAREA.</p>
 
         <h2>Что прислал Bitrix24</h2>
         <pre>{html.escape(json.dumps(form, ensure_ascii=False, indent=2))}</pre>
@@ -635,6 +800,23 @@ async def sidebar_post(request: Request):
     print("SIDEBAR EXTRACTED DIALOG ID:", dialog_id)
 
     return sidebar_html(dialog_id, raw_context)
+
+
+@app.get("/textarea", response_class=HTMLResponse)
+def textarea_get():
+    return textarea_html("", "GET /textarea without Bitrix POST context")
+
+
+@app.post("/textarea", response_class=HTMLResponse)
+async def textarea_post(request: Request):
+    form = dict(await request.form())
+    dialog_id = extract_dialog_id_from_form(form)
+    raw_context = json.dumps(form, ensure_ascii=False, indent=2)
+
+    print("TEXTAREA POST FORM:", raw_context)
+    print("TEXTAREA EXTRACTED DIALOG ID:", dialog_id)
+
+    return textarea_html(dialog_id, raw_context)
 
 
 @app.get("/api/checklist")
