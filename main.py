@@ -292,7 +292,7 @@ def app_home_html():
                                 if (result.error()) {
                                     log('placement.bind error: ' + result.error());
                                 } else {
-                                    log('placement.bind ok:\n' + JSON.stringify(result.data(), null, 2));
+                                    log('placement.bind ok:\\n' + JSON.stringify(result.data(), null, 2));
                                 }
                             });
                         });
@@ -583,6 +583,7 @@ async def install_post(request: Request):
             {
                 "PLACEMENT": "IM_SIDEBAR",
                 "HANDLER": f"{base_url}/sidebar",
+                "iconName": "fa-cloud",
                 "TITLE": "Чек-лист ИД"
             }
         )
@@ -631,8 +632,7 @@ def api_checklist(dialogId: str = ""):
     dialogId = normalize_dialog_id(dialogId)
     return JSONResponse(get_checklist(dialogId))
 
-@app.get("/", response_class=HTMLResponse)
-def home_get():
+def home_get_legacy_disabled():
     return """
     <html>
     <head>
