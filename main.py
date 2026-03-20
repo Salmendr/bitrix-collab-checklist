@@ -287,7 +287,12 @@ def app_home_html():
                                 PLACEMENT: 'IM_SIDEBAR',
                                 HANDLER: window.location.origin + '/sidebar',
                                 TITLE: 'Чек-лист ИД',
-                                iconName: 'fa-cloud'
+                                OPTIONS: {
+                                    iconName: 'fa-cloud',
+                                    context: 'CHAT',
+                                    role: 'USER',
+                                    color: 'GREEN'
+                                }
                             }, function(result) {
                                 if (result.error()) {
                                     log('placement.bind error: ' + result.error());
@@ -583,7 +588,12 @@ async def install_post(request: Request):
             {
                 "PLACEMENT": "IM_SIDEBAR",
                 "HANDLER": f"{base_url}/sidebar",
-                "iconName": "fa-cloud",
+                "OPTIONS": {
+                    "iconName": "fa-cloud",
+                    "context": "CHAT",
+                    "role": "USER",
+                    "color": "GREEN"
+                },
                 "TITLE": "Чек-лист ИД"
             }
         )
