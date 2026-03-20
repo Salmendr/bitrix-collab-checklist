@@ -569,54 +569,75 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
     <html lang="ru">
     <head>
         <meta charset="utf-8">
-        <title>Bitrix24 Textarea Test</title>
+        <title>Чек-лист ИД — textarea</title>
         <script src="https://api.bitrix24.com/api/v1/"></script>
         <style>
             body {{
                 font-family: Arial, sans-serif;
                 margin: 0;
-                padding: 16px;
-                background: #f7f9fc;
+                padding: 10px 12px;
+                background: #fff;
             }}
-            .card {{
-                background: #ffffff;
-                border: 1px solid #e5e7eb;
-                border-radius: 12px;
-                padding: 16px;
-                margin-bottom: 12px;
+            .wrap {{
+                display: flex;
+                align-items: center;
+                gap: 10px;
+            }}
+            .dot {{
+                width: 28px;
+                height: 28px;
+                border-radius: 999px;
+                background: #7b61ff;
+                color: #fff;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-weight: 700;
+                flex: 0 0 28px;
+            }}
+            .main {{
+                min-width: 0;
+                flex: 1;
             }}
             .title {{
-                font-size: 20px;
+                font-size: 13px;
                 font-weight: 700;
-                margin-bottom: 10px;
+                margin-bottom: 3px;
             }}
-            .label {{
+            .meta {{
+                font-size: 11px;
                 color: #666;
-                font-size: 13px;
-                margin-bottom: 4px;
-            }}
-            .value {{
-                font-weight: 600;
-                color: #222;
-                margin-bottom: 10px;
+                margin-bottom: 6px;
                 word-break: break-word;
             }}
-            .note {{
-                font-size: 13px;
-                color: #666;
-            }}
-            pre {{
-                white-space: pre-wrap;
-                word-break: break-word;
+            .btn {{
+                display: inline-block;
+                padding: 6px 10px;
+                border: 1px solid #d0d7de;
+                border-radius: 8px;
+                background: #f6f8fa;
+                cursor: pointer;
                 font-size: 12px;
+            }}
+            .btn:hover {{
+                background: #eef2f7;
+            }}
+            .error {{
+                color: #b42318;
+                font-size: 11px;
+                margin-top: 6px;
+                word-break: break-word;
             }}
         </style>
     </head>
     <body>
-        <div id="app">
-            <div class="card">
-                <div class="title">Инициализация...</div>
-                <div class="note">Ждем загрузку Bitrix24 SDK и данных IM_TEXTAREA.</div>
+        <div class="wrap">
+            <div class="dot">≡</div>
+            <div class="main">
+                <div class="title">Чек-лист ИД</div>
+                <div class="meta" id="meta">Инициализация...</div>
+                <button class="btn" id="openBtn" type="button">Открыть чек-лист</button>
+                <div class="error" id="error"></div>
             </div>
         </div>
 
@@ -624,61 +645,70 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
             var initialDialogId = {initial_dialog_id_json};
             var initialContextText = {initial_context_text_json};
 
-            function esc(v) {{
-                if (v === null || v === undefined) return '';
-                return String(v)
-                    .replace(/&/g, '&amp;')
-                    .replace(/</g, '&lt;')
-                    .replace(/>/g, '&gt;')
-                    .replace(/"/g, '&quot;');
+            function setMeta(text) {{
+                document.getElementById('meta').textContent = text;
             }}
 
-            function render(mode, dialogId, rawInfo) {{
-                document.getElementById('app').innerHTML =
-                    '<div class="card">' +
-                        '<div class="title">IM_TEXTAREA debug</div>' +
-                        '<div class="label">mode</div>' +
-                        '<div class="value">' + esc(mode) + '</div>' +
-                        '<div class="label">dialogId</div>' +
-                        '<div class="value">' + esc(dialogId || 'не передан') + '</div>' +
-                        '<div class="note">Тестовый обработчик /textarea для проверки контекста чата.</div>' +
-                    '</div>' +
-                    '<div class="card">' +
-                        '<div class="title">raw context</div>' +
-                        '<pre>' + esc(rawInfo || '') + '</pre>' +
-                    '</div>';
+            function setError(text) {{
+                document.getElementById('error').textContent = text || '';
+            }}
+
+            function openChecklist(dialogId) {{
+                if (!dialogId) {{
+                    setError('dialogId не найден');
+                    return;
+                }}
+
+                var url = '/view?dialogId=' + encodeURIComponent(dialogId);
+                window.open(url, '_blank');
+            }}
+
+            document.getElementById('openBtn').addEventListener('click', function () {{
+                try {{
+                    if (window.__dialogId) {{
+                        openChecklist(window.__dialogId);
+                    }} else {{
+                        setError('dialogId ещё не определён');
+                    }}
+                }} catch (e) {{
+                    setError(String(e));
+                }}
+            }});
+
+            function finish(dialogId, sourceText) {{
+                window.__dialogId = dialogId || '';
+                setMeta('dialogId: ' + (window.__dialogId || 'не передан') + ' | source: ' + sourceText);
+
+                try {{
+                    if (typeof BX24 !== 'undefined') {{
+                        BX24.fitWindow();
+                    }}
+                }} catch (e) {{}}
             }}
 
             if (initialDialogId) {{
-                render('server-post', initialDialogId, initialContextText);
+                finish(initialDialogId, 'server-post');
             }} else if (typeof BX24 !== 'undefined') {{
-                BX24.init(function () {{
-                    var dialogId = '';
-                    var rawInfo = '';
-
-                    try {{
-                        var info = BX24.placement.info() || {{}};
-                        rawInfo = JSON.stringify(info, null, 2);
-
-                        if (info.options && info.options.dialogId) {{
-                            dialogId = info.options.dialogId;
-                        }} else if (info.options && info.options.DIALOG_ID) {{
-                            dialogId = info.options.DIALOG_ID;
+                try {{
+                    BX24.init(function () {{
+                        var dialogId = '';
+                        try {{
+                            var info = BX24.placement.info();
+                            if (info && info.options && info.options.dialogId) {{
+                                dialogId = info.options.dialogId;
+                            }}
+                        }} catch (e) {{
+                            setError('placement.info error: ' + String(e));
                         }}
-                    }} catch (e) {{
-                        rawInfo = 'placement.info error: ' + String(e);
-                    }}
-
-                    render('Bitrix24-js', dialogId, rawInfo);
-
-                    try {{
-                        BX24.fitWindow();
-                    }} catch (e) {{
-                        console.log(e);
-                    }}
-                }});
+                        finish(dialogId, 'BX24-js');
+                    }});
+                }} catch (e) {{
+                    setError('BX24.init error: ' + String(e));
+                    finish('', 'BX24-init-failed');
+                }}
             }} else {{
-                render('local', '', 'BX24 не найден');
+                setError(initialContextText || 'BX24 не найден');
+                finish('', 'local');
             }}
         </script>
     </body>
@@ -803,8 +833,9 @@ async def sidebar_post(request: Request):
 
 
 @app.get("/textarea", response_class=HTMLResponse)
-def textarea_get():
-    return textarea_html("", "GET /textarea without Bitrix POST context")
+def textarea_get(dialogId: str = ""):
+    dialog_id = normalize_dialog_id(dialogId)
+    return textarea_html(dialog_id, "GET /textarea")
 
 
 @app.post("/textarea", response_class=HTMLResponse)
@@ -817,6 +848,55 @@ async def textarea_post(request: Request):
     print("TEXTAREA EXTRACTED DIALOG ID:", dialog_id)
 
     return textarea_html(dialog_id, raw_context)
+
+
+@app.get("/view", response_class=HTMLResponse)
+def view_get(dialogId: str = ""):
+    dialog_id = normalize_dialog_id(dialogId)
+    data = get_checklist(dialog_id)
+
+    items_html = ""
+    for item in data.get("items", []):
+        items_html += f"""
+        <div style="border-top:1px solid #eee;padding:12px 0;">
+            <div style="font-weight:700;margin-bottom:4px;">{html.escape(item.get('name', ''))}</div>
+            <div style="font-size:13px;color:#444;">Статус: {html.escape(item.get('status', '—'))}</div>
+            <div style="font-size:13px;color:#666;">План: {html.escape(item.get('plan', '—'))}</div>
+            <div style="font-size:13px;color:#666;">Факт: {html.escape(item.get('fact', '—'))}</div>
+        </div>
+        """
+
+    if not items_html:
+        items_html = '<div style="color:#666;">Нет пунктов чек-листа</div>'
+
+    notice_html = ""
+    if data.get("notice"):
+        notice_html = f"""
+        <div style="background:#fff8e1;border:1px solid #f3d37a;border-radius:10px;padding:12px;margin-bottom:16px;">
+            {html.escape(data.get("notice", ""))}
+        </div>
+        """
+
+    return f"""
+    <html>
+    <head>
+        <meta charset="utf-8">
+        <title>{html.escape(data.get("title", "Чек-лист ИД"))}</title>
+    </head>
+    <body style="font-family:Arial,sans-serif;padding:24px;max-width:900px;margin:0 auto;">
+        <h1 style="margin-bottom:8px;">{html.escape(data.get("title", "Чек-лист ИД"))}</h1>
+        <div style="color:#666;margin-bottom:6px;">dialogId: {html.escape(dialog_id or 'не передан')}</div>
+        <div style="color:#666;margin-bottom:6px;">Срок по договору: {html.escape(data.get("contractDeadline", "—"))}</div>
+        <div style="color:#666;margin-bottom:20px;">Начало работ: {html.escape(data.get("startDate", "—"))}</div>
+
+        {notice_html}
+
+        <div style="border:1px solid #e5e7eb;border-radius:12px;padding:16px;">
+            {items_html}
+        </div>
+    </body>
+    </html>
+    """
 
 
 @app.get("/api/checklist")
