@@ -994,7 +994,7 @@ def popup_get(dialogId: str = ""):
             if (typeof BX24 !== 'undefined') {{
                 BX24.init(function () {{
                     try {{
-                        BX24.resizeWindow(1100, 720);
+                        BX24.resizeWindow(760, 460);
                     }} catch (e) {{
                         console.log(e);
                     }}
