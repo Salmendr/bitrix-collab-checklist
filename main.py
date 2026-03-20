@@ -286,12 +286,13 @@ def app_home_html():
                             BX24.callMethod('placement.bind', {
                                 PLACEMENT: 'IM_SIDEBAR',
                                 HANDLER: window.location.origin + '/sidebar',
-                                TITLE: 'Чек-лист ИД'
+                                TITLE: 'Чек-лист ИД',
+                                iconName: 'fa-cloud'
                             }, function(result) {
                                 if (result.error()) {
                                     log('placement.bind error: ' + result.error());
                                 } else {
-                                    log('placement.bind ok:\\n' + JSON.stringify(result.data(), null, 2));
+                                    log('placement.bind ok:\n' + JSON.stringify(result.data(), null, 2));
                                 }
                             });
                         });
