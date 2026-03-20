@@ -11,6 +11,7 @@ import openpyxl
 app = FastAPI()
 
 DB_PATH = "app.db"
+APP_PORTAL_PATH = "/marketplace/app/84/"
 
 
 def get_conn():
@@ -568,6 +569,7 @@ def sidebar_html(initial_dialog_id: str = "", initial_context_text: str = ""):
 def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
     initial_dialog_id_json = json.dumps(initial_dialog_id or "", ensure_ascii=False)
     initial_context_text_json = json.dumps(initial_context_text or "", ensure_ascii=False)
+    app_portal_path_json = json.dumps(APP_PORTAL_PATH, ensure_ascii=False)
 
     return f"""
     <!doctype html>
@@ -592,7 +594,7 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
                 width: 28px;
                 height: 28px;
                 border-radius: 999px;
-                background: #7b61ff;
+                background: #ef5b8d;
                 color: #fff;
                 display: flex;
                 align-items: center;
@@ -649,6 +651,8 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
         <script>
             var initialDialogId = {initial_dialog_id_json};
             var initialContextText = {initial_context_text_json};
+            var appPortalPath = {app_portal_path_json};
+            var autoOpened = false;
 
             function setMeta(text) {{
                 document.getElementById('meta').textContent = text;
@@ -658,14 +662,30 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
                 document.getElementById('error').textContent = text || '';
             }}
 
+            function buildSliderPath(dialogId) {{
+                return appPortalPath + '?openChecklist=1&dialogId=' + encodeURIComponent(dialogId);
+            }}
+
             function openChecklist(dialogId) {{
                 if (!dialogId) {{
                     setError('dialogId не найден');
                     return;
                 }}
 
-                var url = '/view?dialogId=' + encodeURIComponent(dialogId);
-                window.open(url, '_blank');
+                var sliderPath = buildSliderPath(dialogId);
+
+                try {{
+                    if (typeof BX24 !== 'undefined') {{
+                        BX24.openPath(sliderPath);
+                        autoOpened = true;
+                        setMeta('Открываем чек-лист для ' + dialogId);
+                        return;
+                    }}
+                }} catch (e) {{
+                    setError('BX24.openPath error: ' + String(e));
+                }}
+
+                window.open(sliderPath, '_blank');
             }}
 
             document.getElementById('openBtn').addEventListener('click', function () {{
@@ -689,6 +709,12 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
                         BX24.fitWindow();
                     }}
                 }} catch (e) {{}}
+
+                if (window.__dialogId && !autoOpened) {{
+                    setTimeout(function() {{
+                        openChecklist(window.__dialogId);
+                    }}, 250);
+                }}
             }}
 
             if (initialDialogId) {{
@@ -727,7 +753,9 @@ def health():
 
 
 @app.get("/", response_class=HTMLResponse)
-def home_get():
+def home_get(request: Request, dialogId: str = "", openChecklist: str = ""):
+    if openChecklist == "1":
+        return view_get(dialogId)
     return app_home_html()
 
 
