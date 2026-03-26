@@ -1139,8 +1139,7 @@ async def textarea_post(request: Request):
     return textarea_html(dialog_id, raw_context)
 
 
-@app.get("/popup", response_class=HTMLResponse)
-def popup_get(dialogId: str = ""):
+def popup_get_legacy(dialogId: str = ""):
     dialog_id = normalize_dialog_id(dialogId)
     data = get_checklist(dialog_id)
 
@@ -1261,6 +1260,578 @@ def popup_get(dialogId: str = ""):
                     }}
                 }});
             }}
+        </script>
+    </body>
+    </html>
+    """
+
+
+@app.get("/popup", response_class=HTMLResponse)
+def popup_get(dialogId: str = ""):
+    dialog_id = normalize_dialog_id(dialogId)
+    data = get_checklist(dialog_id)
+
+    title = html.escape(data.get("title", "Чек-лист ИД"))
+    contract_deadline = html.escape(data.get("contractDeadline", "—") or "—")
+    start_date = html.escape(data.get("startDate", "—") or "—")
+
+    items_json = json.dumps(data.get("items", []), ensure_ascii=False)
+    groups_json = json.dumps(data.get("groups", []), ensure_ascii=False)
+    dialog_id_json = json.dumps(dialog_id, ensure_ascii=False)
+
+    return f"""
+    <html>
+    <head>
+        <meta charset="utf-8">
+        <title>{title}</title>
+        <script src="https://api.bitrix24.com/api/v1/"></script>
+        <style>
+            * {{
+                box-sizing: border-box;
+            }}
+
+            body {{
+                margin: 0;
+                font-family: Arial, sans-serif;
+                background: #f3f6fb;
+                color: #1f2328;
+            }}
+
+            .shell {{
+                padding: 18px;
+            }}
+
+            .modal {{
+                background: #fff;
+                border-radius: 16px;
+                border: 1px solid #e5e7eb;
+                overflow: hidden;
+                box-shadow: 0 16px 40px rgba(0,0,0,0.12);
+            }}
+
+            .header {{
+                padding: 20px 24px 16px;
+                border-bottom: 1px solid #edf0f2;
+                display: flex;
+                justify-content: space-between;
+                align-items: flex-start;
+                gap: 20px;
+            }}
+
+            .title {{
+                font-size: 28px;
+                font-weight: 700;
+                margin-bottom: 8px;
+            }}
+
+            .meta {{
+                color: #667085;
+                font-size: 14px;
+                display: flex;
+                gap: 18px;
+                flex-wrap: wrap;
+            }}
+
+            .save-state {{
+                font-size: 13px;
+                font-weight: 700;
+                padding: 8px 12px;
+                border-radius: 999px;
+                background: #eef2ff;
+                color: #3730a3;
+                white-space: nowrap;
+            }}
+
+            .save-state.saving {{
+                background: #fff4e5;
+                color: #b26a00;
+            }}
+
+            .save-state.error {{
+                background: #fdecec;
+                color: #b42318;
+            }}
+
+            .content {{
+                padding: 18px 24px 24px;
+                max-height: 75vh;
+                overflow: auto;
+            }}
+
+            .table {{
+                width: 100%;
+                border: 1px solid #e5e7eb;
+                border-radius: 14px;
+                overflow: hidden;
+            }}
+
+            .thead {{
+                background: #f8fafc;
+                border-bottom: 1px solid #e5e7eb;
+            }}
+
+            .thead-top,
+            .thead-bottom,
+            .row {{
+                display: grid;
+                grid-template-columns: 1.8fr 1fr 150px 150px;
+                gap: 0;
+                align-items: stretch;
+            }}
+
+            .th,
+            .td {{
+                padding: 12px 14px;
+                border-right: 1px solid #edf0f2;
+            }}
+
+            .th:last-child,
+            .td:last-child {{
+                border-right: none;
+            }}
+
+            .th {{
+                font-size: 13px;
+                font-weight: 700;
+                color: #475467;
+            }}
+
+            .th.center {{
+                text-align: center;
+            }}
+
+            .group-block {{
+                border-top: 10px solid #f8fafc;
+            }}
+
+            .group-title {{
+                padding: 14px 16px;
+                background: #fafbfc;
+                border-top: 1px solid #e5e7eb;
+                border-bottom: 1px solid #e5e7eb;
+                font-size: 14px;
+                font-weight: 700;
+                color: #344054;
+            }}
+
+            .row {{
+                border-top: 1px solid #edf0f2;
+                background: #fff;
+            }}
+
+            .cell-name {{
+                display: flex;
+                align-items: center;
+                gap: 10px;
+                min-width: 0;
+            }}
+
+            .drag {{
+                color: #98a2b3;
+                font-size: 18px;
+                line-height: 1;
+                cursor: default;
+                flex: 0 0 auto;
+            }}
+
+            .priority {{
+                width: 18px;
+                height: 34px;
+                border-radius: 6px;
+                cursor: pointer;
+                flex: 0 0 18px;
+                border: 1px solid rgba(0,0,0,0.06);
+            }}
+
+            .priority.red {{
+                background: #e74c3c;
+            }}
+
+            .priority.orange {{
+                background: #f39c12;
+            }}
+
+            .priority.yellow {{
+                background: #f1c40f;
+            }}
+
+            .item-name {{
+                font-size: 14px;
+                font-weight: 700;
+                color: #1f2328;
+                line-height: 1.35;
+                min-width: 0;
+            }}
+
+            .status-select,
+            .date-input {{
+                width: 100%;
+                border: 1px solid #d0d7de;
+                border-radius: 8px;
+                padding: 8px 10px;
+                font-size: 14px;
+                background: #fff;
+            }}
+
+            .date-display {{
+                font-size: 12px;
+                color: #667085;
+                margin-top: 6px;
+                min-height: 16px;
+            }}
+
+            .toolbar {{
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                gap: 12px;
+                margin-bottom: 14px;
+            }}
+
+            .legend {{
+                display: flex;
+                gap: 10px;
+                flex-wrap: wrap;
+                font-size: 12px;
+                color: #667085;
+            }}
+
+            .legend-item {{
+                display: flex;
+                align-items: center;
+                gap: 6px;
+            }}
+
+            .legend-color {{
+                width: 12px;
+                height: 12px;
+                border-radius: 4px;
+            }}
+
+            .legend-color.red {{
+                background: #e74c3c;
+            }}
+
+            .legend-color.orange {{
+                background: #f39c12;
+            }}
+
+            .legend-color.yellow {{
+                background: #f1c40f;
+            }}
+
+            .helper {{
+                font-size: 12px;
+                color: #667085;
+            }}
+
+            @media (max-width: 980px) {{
+                .thead-top,
+                .thead-bottom,
+                .row {{
+                    grid-template-columns: 1fr;
+                }}
+
+                .th,
+                .td {{
+                    border-right: none;
+                    border-bottom: 1px solid #edf0f2;
+                }}
+
+                .th:last-child,
+                .td:last-child {{
+                    border-bottom: none;
+                }}
+            }}
+        </style>
+    </head>
+    <body>
+        <div class="shell">
+            <div class="modal">
+                <div class="header">
+                    <div>
+                        <div class="title">{title}</div>
+                        <div class="meta">
+                            <div><b>dialogId:</b> {html.escape(dialog_id or "не передан")}</div>
+                            <div><b>Срок по договору:</b> {contract_deadline}</div>
+                            <div><b>Начало работ:</b> {start_date}</div>
+                        </div>
+                    </div>
+
+                    <div id="saveState" class="save-state">Сохранено</div>
+                </div>
+
+                <div class="content">
+                    <div class="toolbar">
+                        <div class="legend">
+                            <div class="legend-item"><span class="legend-color red"></span> Высокий</div>
+                            <div class="legend-item"><span class="legend-color orange"></span> Средний</div>
+                            <div class="legend-item"><span class="legend-color yellow"></span> Базовый</div>
+                        </div>
+
+                        <div class="helper">
+                            Изменения сохраняются автоматически
+                        </div>
+                    </div>
+
+                    <div class="table">
+                        <div class="thead">
+                            <div class="thead-top">
+                                <div class="th">ИД</div>
+                                <div class="th">Статус</div>
+                                <div class="th center" style="grid-column: 3 / span 2;">Дата получения</div>
+                            </div>
+                            <div class="thead-bottom">
+                                <div class="th"></div>
+                                <div class="th"></div>
+                                <div class="th">План</div>
+                                <div class="th">Факт</div>
+                            </div>
+                        </div>
+
+                        <div id="tableBody"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <script>
+            const dialogId = {dialog_id_json};
+            const groups = {groups_json};
+            let items = {items_json};
+
+            const saveStateEl = document.getElementById('saveState');
+            const tableBodyEl = document.getElementById('tableBody');
+
+            function setSaveState(mode, text) {{
+                saveStateEl.classList.remove('saving', 'error');
+
+                if (mode === 'saving') {{
+                    saveStateEl.classList.add('saving');
+                }}
+                if (mode === 'error') {{
+                    saveStateEl.classList.add('error');
+                }}
+
+                saveStateEl.textContent = text;
+            }}
+
+            function esc(v) {{
+                if (v === null || v === undefined) return '';
+                return String(v)
+                    .replaceAll('&', '&amp;')
+                    .replaceAll('<', '&lt;')
+                    .replaceAll('>', '&gt;')
+                    .replaceAll('"', '&quot;');
+            }}
+
+            function toInputDate(value) {{
+                if (!value) return '';
+                const parts = value.split('.');
+                if (parts.length !== 3) return '';
+                return `${{parts[2]}}-${{parts[1]}}-${{parts[0]}}`;
+            }}
+
+            function fromInputDate(value) {{
+                if (!value) return '';
+                const parts = value.split('-');
+                if (parts.length !== 3) return '';
+                return `${{parts[2]}}.${{parts[1]}}.${{parts[0]}}`;
+            }}
+
+            function nextPriority(current) {{
+                if (current === 'red') return 'orange';
+                if (current === 'orange') return 'yellow';
+                return 'red';
+            }}
+
+            async function updateItem(itemId, field, value) {{
+                setSaveState('saving', 'Сохраняем...');
+
+                const response = await fetch('/api/checklist/update-item', {{
+                    method: 'POST',
+                    headers: {{
+                        'Content-Type': 'application/json'
+                    }},
+                    body: JSON.stringify({{
+                        dialogId,
+                        itemId,
+                        field,
+                        value
+                    }})
+                }});
+
+                const result = await response.json();
+
+                if (!response.ok || !result.ok) {{
+                    throw new Error(result.error || 'save failed');
+                }}
+
+                setSaveState('', 'Сохранено');
+                return result;
+            }}
+
+            function getItemsByGroup(groupId) {{
+                return items
+                    .filter(item => item.group === groupId)
+                    .sort((a, b) => a.order - b.order);
+            }}
+
+            function renderGroup(group) {{
+                const groupItems = getItemsByGroup(group.id);
+
+                if (!groupItems.length) {{
+                    return '';
+                }}
+
+                const rows = groupItems.map(item => {{
+                    return `
+                        <div class="row" data-item-id="${{esc(item.id)}}">
+                            <div class="td">
+                                <div class="cell-name">
+                                    <div class="drag">⋮⋮</div>
+                                    <div class="priority ${{esc(item.priority)}}" data-role="priority" data-item-id="${{esc(item.id)}}"></div>
+                                    <div class="item-name">${{esc(item.name)}}</div>
+                                </div>
+                            </div>
+
+                            <div class="td">
+                                <select class="status-select" data-role="status" data-item-id="${{esc(item.id)}}">
+                                    <option value="" ${{item.status === '' ? 'selected' : ''}}></option>
+                                    <option value="Есть" ${{item.status === 'Есть' ? 'selected' : ''}}>Есть</option>
+                                    <option value="Нет" ${{item.status === 'Нет' ? 'selected' : ''}}>Нет</option>
+                                    <option value="Подписан" ${{item.status === 'Подписан' ? 'selected' : ''}}>Подписан</option>
+                                    <option value="Не требуется" ${{item.status === 'Не требуется' ? 'selected' : ''}}>Не требуется</option>
+                                    <option value="Запрос опросного листа" ${{item.status === 'Запрос опросного листа' ? 'selected' : ''}}>Запрос опросного листа</option>
+                                </select>
+                            </div>
+
+                            <div class="td">
+                                <input class="date-input" type="date" data-role="plan" data-item-id="${{esc(item.id)}}" value="${{esc(toInputDate(item.plan))}}">
+                                <div class="date-display">${{esc(item.plan || '')}}</div>
+                            </div>
+
+                            <div class="td">
+                                <input class="date-input" type="date" data-role="fact" data-item-id="${{esc(item.id)}}" value="${{esc(toInputDate(item.fact))}}">
+                                <div class="date-display">${{esc(item.fact || '')}}</div>
+                            </div>
+                        </div>
+                    `;
+                }}).join('');
+
+                return `
+                    <div class="group-block">
+                        <div class="group-title">${{esc(group.title)}}</div>
+                        ${{rows}}
+                    </div>
+                `;
+            }}
+
+            function renderTable() {{
+                tableBodyEl.innerHTML = groups.map(renderGroup).join('');
+                bindEvents();
+            }}
+
+            function bindEvents() {{
+                document.querySelectorAll('[data-role="priority"]').forEach(el => {{
+                    el.addEventListener('click', async function() {{
+                        const itemId = this.dataset.itemId;
+                        const item = items.find(x => x.id === itemId);
+                        if (!item) return;
+
+                        const newPriority = nextPriority(item.priority);
+                        const oldPriority = item.priority;
+
+                        item.priority = newPriority;
+                        renderTable();
+
+                        try {{
+                            await updateItem(itemId, 'priority', newPriority);
+                        }} catch (e) {{
+                            item.priority = oldPriority;
+                            renderTable();
+                            setSaveState('error', 'Ошибка сохранения');
+                        }}
+                    }});
+                }});
+
+                document.querySelectorAll('[data-role="status"]').forEach(el => {{
+                    el.addEventListener('change', async function() {{
+                        const itemId = this.dataset.itemId;
+                        const item = items.find(x => x.id === itemId);
+                        if (!item) return;
+
+                        const oldValue = item.status;
+                        const newValue = this.value;
+
+                        item.status = newValue;
+
+                        try {{
+                            await updateItem(itemId, 'status', newValue);
+                        }} catch (e) {{
+                            item.status = oldValue;
+                            renderTable();
+                            setSaveState('error', 'Ошибка сохранения');
+                        }}
+                    }});
+                }});
+
+                document.querySelectorAll('[data-role="plan"]').forEach(el => {{
+                    el.addEventListener('change', async function() {{
+                        const itemId = this.dataset.itemId;
+                        const item = items.find(x => x.id === itemId);
+                        if (!item) return;
+
+                        const oldValue = item.plan;
+                        const newValue = fromInputDate(this.value);
+
+                        item.plan = newValue;
+                        renderTable();
+
+                        try {{
+                            await updateItem(itemId, 'plan', newValue);
+                        }} catch (e) {{
+                            item.plan = oldValue;
+                            renderTable();
+                            setSaveState('error', 'Ошибка сохранения');
+                        }}
+                    }});
+                }});
+
+                document.querySelectorAll('[data-role="fact"]').forEach(el => {{
+                    el.addEventListener('change', async function() {{
+                        const itemId = this.dataset.itemId;
+                        const item = items.find(x => x.id === itemId);
+                        if (!item) return;
+
+                        const oldValue = item.fact;
+                        const newValue = fromInputDate(this.value);
+
+                        item.fact = newValue;
+                        renderTable();
+
+                        try {{
+                            await updateItem(itemId, 'fact', newValue);
+                        }} catch (e) {{
+                            item.fact = oldValue;
+                            renderTable();
+                            setSaveState('error', 'Ошибка сохранения');
+                        }}
+                    }});
+                }});
+            }}
+
+            if (typeof BX24 !== 'undefined') {{
+                BX24.init(function () {{
+                    try {{
+                        BX24.resizeWindow(1100, 720);
+                    }} catch (e) {{
+                        console.log(e);
+                    }}
+                }});
+            }}
+
+            renderTable();
         </script>
     </body>
     </html>
