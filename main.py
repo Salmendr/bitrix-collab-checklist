@@ -13,6 +13,180 @@ app = FastAPI()
 DB_PATH = "app.db"
 APP_PORTAL_PATH = "/marketplace/app/84/"
 
+CHECKLIST_GROUPS = {
+    1: {
+        "title": "ИД",
+        "items": [
+            "ППТ",
+            "Сокращение ОКН",
+            "Выписка ЕГРН",
+            "ГПЗУ",
+            "ИГДИ",
+            "ИГИ",
+            "ИЭИ",
+            "ИГМИ",
+            "ИГИ СМР",
+        ],
+    },
+    2: {
+        "title": "ТУ",
+        "items": [
+            "ТУ Свет",
+            "ТУ Водоснабжение",
+            "ТУ Бытовая канализация",
+            "Расположение пож гидрантов",
+            "ТУ СС",
+            "ТУ ТС",
+            "ТУ Газ",
+            "ТУ Ливневка",
+            "ТУ выносы",
+            "СТУ",
+        ],
+    },
+    3: {
+        "title": "Прочее",
+        "items": [
+            "Задание на лифты",
+            "Аэропорт",
+            "Примыкание ОДД",
+            "Порубочный лист",
+            "Справка вывоза мусора",
+        ],
+    },
+}
+
+STATUS_OPTIONS = [
+    "",
+    "Есть",
+    "Нет",
+    "Подписан",
+    "Не требуется",
+    "Запрос опросного листа",
+]
+
+PRIORITY_OPTIONS = ["red", "orange", "yellow"]
+
+
+def build_default_groups():
+    return [
+        {"id": group_id, "title": group_data["title"]}
+        for group_id, group_data in CHECKLIST_GROUPS.items()
+    ]
+
+
+def resolve_group_id(name: str) -> int:
+    name = str(name or "").strip()
+
+    for group_id, group_data in CHECKLIST_GROUPS.items():
+        if name in group_data["items"]:
+            return group_id
+
+    return 3
+
+
+def clean_cell_value(value):
+    value = str(value or "").strip()
+    if value == "—":
+        return ""
+    return value
+
+
+def normalize_priority(value: str) -> str:
+    value = str(value or "").strip().lower()
+    if value in PRIORITY_OPTIONS:
+        return value
+    return "yellow"
+
+
+def normalize_status(value: str) -> str:
+    value = clean_cell_value(value)
+    if value in STATUS_OPTIONS:
+        return value
+    return value
+
+
+def normalize_date_string(value: str) -> str:
+    value = clean_cell_value(value)
+    if not value:
+        return ""
+
+    # Оставляем как есть, если это уже формат ДД.ММ.ГГГГ
+    parts = value.split(".")
+    if len(parts) == 3 and len(parts[0]) == 2 and len(parts[1]) == 2 and len(parts[2]) == 4:
+        return value
+
+    return value
+
+
+def build_item_id(group_id: int, order: int) -> str:
+    return f"item_g{group_id}_{order}"
+
+
+def normalize_checklist_data(data: dict) -> dict:
+    data = dict(data or {})
+
+    raw_items = data.get("items", []) or []
+    normalized_items = []
+
+    group_order_counters = {1: 0, 2: 0, 3: 0}
+
+    for index, item in enumerate(raw_items, start=1):
+        item = dict(item or {})
+
+        name = clean_cell_value(item.get("name"))
+        if not name:
+            continue
+
+        group_id = item.get("group")
+        if not isinstance(group_id, int) or group_id not in CHECKLIST_GROUPS:
+            group_id = resolve_group_id(name)
+
+        group_order_counters[group_id] += 1
+        default_order = group_order_counters[group_id]
+
+        normalized_items.append({
+            "id": str(item.get("id") or build_item_id(group_id, default_order)),
+            "group": group_id,
+            "order": int(item.get("order") or default_order),
+            "name": name,
+            "priority": normalize_priority(item.get("priority")),
+            "status": normalize_status(item.get("status")),
+            "plan": normalize_date_string(item.get("plan")),
+            "fact": normalize_date_string(item.get("fact")),
+        })
+
+    normalized_items.sort(key=lambda x: (x["group"], x["order"], x["name"]))
+
+    for group_id in [1, 2, 3]:
+        group_items = [x for x in normalized_items if x["group"] == group_id]
+        for order, item in enumerate(group_items, start=1):
+            item["order"] = order
+            if not item.get("id"):
+                item["id"] = build_item_id(group_id, order)
+
+    return {
+        "title": data.get("title") or "Чек-лист ИД",
+        "contractDeadline": clean_cell_value(data.get("contractDeadline")),
+        "startDate": clean_cell_value(data.get("startDate")),
+        "groups": build_default_groups(),
+        "items": normalized_items,
+        "notice": data.get("notice", ""),
+    }
+
+
+def build_demo_checklist():
+    return normalize_checklist_data({
+        "title": "Демо-чек-лист",
+        "contractDeadline": "",
+        "startDate": "",
+        "notice": "Для этого dialogId пока не найден реальный Excel.",
+        "items": [
+            {"name": "ППТ", "status": "Есть", "plan": "", "fact": "", "priority": "red"},
+            {"name": "ГПЗУ", "status": "Нет", "plan": "апрель", "fact": "", "priority": "orange"},
+            {"name": "ТУ Свет", "status": "", "plan": "27.03.2026", "fact": "", "priority": "yellow"},
+        ],
+    })
+
 
 def get_conn():
     conn = sqlite3.connect(DB_PATH)
@@ -88,7 +262,7 @@ def format_cell(value):
     return str(value).strip()
 
 
-def parse_xlsx_to_checklist(file_bytes: bytes):
+def parse_xlsx_to_checklist_legacy(file_bytes: bytes):
     wb = openpyxl.load_workbook(BytesIO(file_bytes), data_only=True)
     ws = wb[wb.sheetnames[0]]
 
@@ -128,6 +302,48 @@ def parse_xlsx_to_checklist(file_bytes: bytes):
         "startDate": "—",
         "items": items
     }
+
+def parse_xlsx_to_checklist(file_bytes: bytes):
+    wb = openpyxl.load_workbook(BytesIO(file_bytes), data_only=True)
+    ws = wb[wb.sheetnames[0]]
+
+    items = []
+
+    # строка 1 = ИД / Статус / Дата получения
+    # строка 2 = План / Факт
+    # данные начинаются со строки 3
+    for row in range(3, ws.max_row + 1):
+        name = clean_cell_value(ws[f"A{row}"].value)
+        status = normalize_status(ws[f"B{row}"].value)
+        plan = normalize_date_string(format_cell(ws[f"C{row}"].value))
+        fact = normalize_date_string(format_cell(ws[f"D{row}"].value))
+
+        if not name:
+            continue
+
+        group_id = resolve_group_id(name)
+
+        items.append({
+            "id": build_item_id(group_id, len([x for x in items if x["group"] == group_id]) + 1),
+            "group": group_id,
+            "order": len([x for x in items if x["group"] == group_id]) + 1,
+            "name": name,
+            "priority": "yellow",
+            "status": status,
+            "plan": plan,
+            "fact": fact,
+        })
+
+    data = {
+        "title": f"Чек-лист ИД — {ws.title}",
+        "contractDeadline": "",
+        "startDate": "",
+        "groups": build_default_groups(),
+        "items": items,
+    }
+
+    return normalize_checklist_data(data)
+
 
 def normalize_dialog_id(value: str) -> str:
     s = str(value or "").strip()
@@ -198,7 +414,7 @@ def extract_dialog_id_from_form(form: dict) -> str:
 
     return ""
 
-def get_checklist(dialog_id: str):
+def get_checklist_legacy(dialog_id: str):
     raw_id = str(dialog_id or "").strip()
     normalized_id = normalize_dialog_id(raw_id)
 
@@ -244,6 +460,51 @@ def get_checklist(dialog_id: str):
         "resolvedDialogId": normalized_id,
         "lookupAliases": aliases
     }
+
+
+def get_checklist(dialog_id: str):
+    raw_id = str(dialog_id or "").strip()
+    normalized_id = normalize_dialog_id(raw_id)
+
+    aliases = []
+    for candidate in [raw_id, normalized_id]:
+        if candidate and candidate not in aliases:
+            aliases.append(candidate)
+
+    if normalized_id.startswith("chat") and normalized_id[4:].isdigit():
+        numeric_id = normalized_id[4:]
+        if numeric_id not in aliases:
+            aliases.append(numeric_id)
+
+    conn = get_conn()
+
+    row = None
+    found_alias = None
+
+    for candidate in aliases:
+        row = conn.execute(
+            "SELECT data_json FROM checklists WHERE dialog_id = ?",
+            (candidate,)
+        ).fetchone()
+        if row:
+            found_alias = candidate
+            break
+
+    conn.close()
+
+    if row:
+        data = json.loads(row["data_json"])
+        data = normalize_checklist_data(data)
+        data["resolvedDialogId"] = normalized_id
+        data["lookupAliases"] = aliases
+        data["foundAlias"] = found_alias
+        return data
+
+    data = build_demo_checklist()
+    data["resolvedDialogId"] = normalized_id
+    data["lookupAliases"] = aliases
+    data["foundAlias"] = None
+    return data
 
 
 def app_home_html():
@@ -1059,6 +1320,56 @@ def view_get(dialogId: str = ""):
 def api_checklist(dialogId: str = ""):
     dialogId = normalize_dialog_id(dialogId)
     return JSONResponse(get_checklist(dialogId))
+
+
+@app.post("/api/checklist/update-item")
+async def api_checklist_update_item(request: Request):
+    payload = await request.json()
+
+    dialog_id = normalize_dialog_id(payload.get("dialogId"))
+    item_id = str(payload.get("itemId") or "").strip()
+    field = str(payload.get("field") or "").strip()
+    value = payload.get("value")
+
+    if not dialog_id:
+        return JSONResponse({"ok": False, "error": "dialogId is required"}, status_code=400)
+
+    if not item_id:
+        return JSONResponse({"ok": False, "error": "itemId is required"}, status_code=400)
+
+    allowed_fields = {"priority", "status", "plan", "fact"}
+    if field not in allowed_fields:
+        return JSONResponse({"ok": False, "error": "invalid field"}, status_code=400)
+
+    data = get_checklist(dialog_id)
+    items = data.get("items", [])
+
+    target_item = None
+    for item in items:
+        if str(item.get("id")) == item_id:
+            target_item = item
+            break
+
+    if not target_item:
+        return JSONResponse({"ok": False, "error": "item not found"}, status_code=404)
+
+    if field == "priority":
+        target_item["priority"] = normalize_priority(value)
+    elif field == "status":
+        target_item["status"] = normalize_status(value)
+    elif field == "plan":
+        target_item["plan"] = normalize_date_string(value)
+    elif field == "fact":
+        target_item["fact"] = normalize_date_string(value)
+
+    data = normalize_checklist_data(data)
+    save_checklist(dialog_id, data)
+
+    return JSONResponse({
+        "ok": True,
+        "item": target_item,
+        "dialogId": dialog_id
+    })
 
 def home_get_legacy_disabled():
     return """
