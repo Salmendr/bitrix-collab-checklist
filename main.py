@@ -2418,7 +2418,8 @@ def popup_get_compact_legacy(dialogId: str = ""):
             let startDate = {start_date_json};
 
             const saveStateEl = document.getElementById('saveState');
-            const tableBodyEl = document.getElementById('tableBody');
+            const leftTableBodyEl = document.getElementById('leftTableBody');
+            const rightTableBodyEl = document.getElementById('rightTableBody');
             const progressValueEl = document.getElementById('progressValue');
             const progressBarEl = document.getElementById('progressBar');
             const contractDeadlineInput = document.getElementById('contractDeadlineInput');
@@ -2656,14 +2657,14 @@ def popup_get_compact_legacy(dialogId: str = ""):
                         const newValue = this.value;
 
                         item.status = newValue;
-                        renderTable();
+                        renderAll();
 
                         try {{
                             await updateItem(itemId, 'status', newValue);
-                            renderTable();
+                            renderAll();
                         }} catch (e) {{
                             replaceItemInState(oldItem);
-                            renderTable();
+                            renderAll();
                             setSaveState('error', 'Ошибка сохранения');
                         }}
                     }});
@@ -2679,14 +2680,14 @@ def popup_get_compact_legacy(dialogId: str = ""):
                         const newValue = fromInputDate(this.value);
 
                         item.plan = newValue;
-                        renderTable();
+                        renderAll();
 
                         try {{
                             await updateItem(itemId, 'plan', newValue);
-                            renderTable();
+                            renderAll();
                         }} catch (e) {{
                             replaceItemInState(oldItem);
-                            renderTable();
+                            renderAll();
                             setSaveState('error', 'Ошибка сохранения');
                         }}
                     }});
@@ -2702,14 +2703,14 @@ def popup_get_compact_legacy(dialogId: str = ""):
                         const newValue = fromInputDate(this.value);
 
                         item.fact = newValue;
-                        renderTable();
+                        renderAll();
 
                         try {{
                             await updateItem(itemId, 'fact', newValue);
-                            renderTable();
+                            renderAll();
                         }} catch (e) {{
                             replaceItemInState(oldItem);
-                            renderTable();
+                            renderAll();
                             setSaveState('error', 'Ошибка сохранения');
                         }}
                     }});
@@ -2730,7 +2731,7 @@ def popup_get_compact_legacy(dialogId: str = ""):
                                 items.push(result.item);
                             }}
                             input.value = '';
-                            renderTable();
+                            renderAll();
                         }} catch (e) {{
                             setSaveState('error', 'Ошибка добавления пункта');
                         }}
@@ -2787,7 +2788,7 @@ def popup_get_compact_legacy(dialogId: str = ""):
                 }}
             }}
 
-            renderTable();
+            renderAll();
             safeInitBx24ForPopup();
         </script>
     </body>
@@ -2837,21 +2838,26 @@ def popup_get(dialogId: str = ""):
             .save-state.saving {{ background:#fff4e5; color:#b26a00; }}
             .save-state.error {{ background:#fdecec; color:#b42318; }}
             .content {{ padding:14px 16px 16px; max-height:78vh; overflow:auto; }}
-            .layout {{ display:grid; grid-template-columns:minmax(0,1fr) 250px; gap:14px; align-items:start; }}
+            .layout {{ display:grid; grid-template-columns:minmax(0,1fr) 240px; gap:14px; align-items:start; }}
+            .tables-grid {{ display:grid; grid-template-columns:1fr 1fr; gap:14px; align-items:start; }}
+            .table-panel {{ min-width:0; display:flex; }}
+            .table-panel .table {{ flex:1 1 auto; }}
             .side-panel {{ border:1px solid #e5e7eb; border-radius:12px; background:#fff; overflow:hidden; position:sticky; top:0; }}
             .side-panel-title {{ padding:12px 14px; background:#fafbfc; border-bottom:1px solid #e5e7eb; font-size:13px; font-weight:700; color:#344054; }}
             .side-panel-list {{ padding:10px; display:flex; flex-direction:column; gap:8px; }}
             .side-link {{ display:block; width:100%; text-align:left; border:1px solid #d0d7de; border-radius:8px; background:#fff; padding:9px 10px; font-size:13px; cursor:pointer; }}
             .side-link.active {{ background:#eef2ff; border-color:#c7d2fe; font-weight:700; }}
-            .table {{ width:max-content; min-width:760px; border:1px solid #e5e7eb; border-radius:12px; overflow:hidden; background:#fff; }}
+            .table {{ width:100%; border:1px solid #e5e7eb; border-radius:12px; overflow:hidden; background:#fff; }}
             .thead {{ position:sticky; top:0; z-index:10; background:#f8fafc; border-bottom:1px solid #e5e7eb; }}
-            .thead-top,.thead-bottom,.row {{ display:grid; grid-template-columns:280px 110px 110px 130px 130px; gap:0; align-items:stretch; justify-content:start; }}
+            .thead-top,.thead-bottom {{ min-height:38px; }}
+            .thead-top,.thead-bottom,.row {{ display:grid; grid-template-columns:190px 100px 100px 120px 120px; gap:0; align-items:stretch; justify-content:start; }}
             .th,.td {{ padding:8px 9px; border-right:1px solid #edf0f2; }}
             .th:last-child,.td:last-child {{ border-right:none; }}
-            .th {{ font-size:12px; font-weight:700; color:#475467; }}
-            .th.center {{ text-align:center; }}
+            .th {{ font-size:12px; font-weight:700; color:#475467; min-height:38px; display:flex; align-items:center; }}
+            .thead-top .th,.thead-bottom .th {{ min-height:38px; }}
+            .th.center {{ text-align:center; justify-content:center; }}
             .group-block {{ border-top:8px solid #f8fafc; }}
-            .group-title {{ padding:9px 12px; background:#fafbfc; border-top:1px solid #e5e7eb; border-bottom:1px solid #e5e7eb; font-size:13px; font-weight:700; color:#344054; }}
+            .group-title {{ padding:9px 12px; min-height:40px; background:#fafbfc; border-top:1px solid #e5e7eb; border-bottom:1px solid #e5e7eb; font-size:13px; font-weight:700; color:#344054; display:flex; align-items:center; }}
             .row {{ border-top:1px solid #edf0f2; background:#fff; }}
             .row.not-required {{ background:#fafafa; }}
             .row.not-required .item-name {{ text-decoration:line-through; color:#98a2b3; }}
@@ -2859,14 +2865,15 @@ def popup_get(dialogId: str = ""):
             .status-indicator {{ width:15px; height:15px; border-radius:999px; border:1px solid #d0d7de; flex:0 0 15px; background:#fff; }}
             .status-indicator.green {{ background:#22c55e; border-color:#22c55e; }}
             .status-indicator.gray {{ background:#9ca3af; border-color:#9ca3af; }}
-            .item-name {{ font-size:13px; font-weight:700; color:#1f2328; line-height:1.15; min-width:0; word-break:break-word; max-width:250px; }}
+            .item-name {{ font-size:13px; font-weight:700; color:#1f2328; line-height:1.15; min-width:0; word-break:break-word; max-width:165px; }}
             .status-select,.date-input {{ width:100%; border:1px solid #d0d7de; border-radius:8px; padding:6px 8px; font-size:12px; background:#fff; }}
             .doc-btn,.upload-btn,.add-item-btn {{ display:inline-block; width:100%; text-align:center; padding:6px 8px; border:1px solid #d0d7de; border-radius:8px; background:#f8fafc; color:#1f2328; font-size:12px; text-decoration:none; cursor:pointer; }}
             .doc-btn:hover,.upload-btn:hover,.side-link:hover,.add-item-btn:hover {{ background:#f1f5f9; }}
-            .add-item-row {{ padding:9px 12px 10px; border-top:1px solid #edf0f2; background:#fcfcfd; display:flex; gap:8px; align-items:center; justify-content:flex-start; }}
-            .add-item-input {{ flex:1 1 auto; min-width:0; border:1px solid #d0d7de; border-radius:8px; padding:7px 9px; font-size:12px; }}
-            .add-item-btn {{ flex:0 0 auto; width:auto; min-width:118px; height:32px; border:1px solid #d0d7de; border-radius:8px; padding:0 12px; background:#fff; cursor:pointer; font-size:12px; white-space:nowrap; }}
-            @media (max-width:1180px) {{ .layout {{ grid-template-columns:1fr; }} .side-panel {{ position:static; }} }}
+            .add-item-row {{ padding:9px 12px 10px; min-height:52px; border-top:1px solid #edf0f2; background:#fcfcfd; display:flex; gap:8px; align-items:center; justify-content:flex-start; }}
+            .add-item-input {{ flex:1 1 auto; min-width:0; height:32px; border:1px solid #d0d7de; border-radius:8px; padding:7px 9px; font-size:12px; }}
+            .add-item-btn {{ flex:0 0 auto; min-width:118px; height:32px; border:1px solid #d0d7de; border-radius:8px; padding:0 12px; background:#fff; cursor:pointer; font-size:12px; white-space:nowrap; }}
+            @media (max-width:1320px) {{ .layout {{ grid-template-columns:1fr; }} .side-panel {{ position:static; }} }}
+            @media (max-width:1120px) {{ .tables-grid {{ grid-template-columns:1fr; }} }}
             @media (max-width:980px) {{
                 .thead-top,.thead-bottom,.row {{ grid-template-columns:1fr; }}
                 .th,.td {{ border-right:none; border-bottom:1px solid #edf0f2; }}
@@ -2892,7 +2899,9 @@ def popup_get(dialogId: str = ""):
                 </div>
                 <div class="content">
                     <div class="layout">
-                        <div class="table">
+                        <div class="tables-grid">
+                            <div class="table-panel">
+                                <div class="table">
                             <div class="thead">
                                 <div class="thead-top">
                                     <div class="th">ИД</div>
@@ -2908,7 +2917,29 @@ def popup_get(dialogId: str = ""):
                                     <div class="th">Факт</div>
                                 </div>
                             </div>
-                            <div id="tableBody"></div>
+                            <div id="leftTableBody"></div>
+                                </div>
+                            </div>
+                            <div class="table-panel">
+                                <div class="table">
+                                    <div class="thead">
+                                        <div class="thead-top">
+                                            <div class="th">ИД</div>
+                                            <div class="th">Документ</div>
+                                            <div class="th">Статус</div>
+                                            <div class="th center" style="grid-column: 4 / span 2;">Дата получения</div>
+                                        </div>
+                                        <div class="thead-bottom">
+                                            <div class="th"></div>
+                                            <div class="th"></div>
+                                            <div class="th"></div>
+                                            <div class="th">План</div>
+                                            <div class="th">Факт</div>
+                                        </div>
+                                    </div>
+                                    <div id="rightTableBody"></div>
+                                </div>
+                            </div>
                         </div>
                         <div class="side-panel">
                             <div class="side-panel-title">Список чек-листов по проекту</div>
@@ -2925,7 +2956,8 @@ def popup_get(dialogId: str = ""):
             let items = {items_json};
             let collabTitle = {collab_title_json};
             const saveStateEl = document.getElementById('saveState');
-            const tableBodyEl = document.getElementById('tableBody');
+            const leftTableBodyEl = document.getElementById('leftTableBody');
+            const rightTableBodyEl = document.getElementById('rightTableBody');
             const progressValueEl = document.getElementById('progressValue');
             const progressBarEl = document.getElementById('progressBar');
             const popupTitleEl = document.getElementById('popupTitle');
@@ -3072,6 +3104,9 @@ def popup_get(dialogId: str = ""):
             function getItemsByGroup(groupId) {{
                 return items.filter(item => item.group === groupId).sort((a, b) => a.order - b.order);
             }}
+            function hasItemsInGroup(groupId) {{
+                return getItemsByGroup(groupId).length > 0;
+            }}
             function renderProjectChecklistList() {{
                 projectChecklistListEl.innerHTML = projectChecklists.map(item => {{
                     const active = item.key === 'id' ? 'side-link active' : 'side-link';
@@ -3131,8 +3166,22 @@ def popup_get(dialogId: str = ""):
                     </div>` : '';
                 return `<div class="group-block"><div class="group-title">${{esc(group.title)}}</div>${{rows}}${{addBlock}}</div>`;
             }}
-            function renderTable() {{
-                tableBodyEl.innerHTML = groups.map(renderGroup).join('');
+            function renderTables() {{
+                const leftGroups = groups.filter(g => g.id === 1 || g.id === 3);
+                const rightGroups = groups.filter(g => g.id === 2);
+
+                if (hasItemsInGroup(4)) {{
+                    const notRequiredGroup = groups.find(g => g.id === 4);
+                    if (notRequiredGroup) {{
+                        rightGroups.push(notRequiredGroup);
+                    }}
+                }}
+
+                leftTableBodyEl.innerHTML = leftGroups.map(renderGroup).join('');
+                rightTableBodyEl.innerHTML = rightGroups.map(renderGroup).join('');
+            }}
+            function renderAll() {{
+                renderTables();
                 bindEvents();
                 calculateProgress();
                 renderTitle();
@@ -3150,14 +3199,14 @@ def popup_get(dialogId: str = ""):
                         if (!item) return;
                         const oldItem = JSON.parse(JSON.stringify(item));
                         item.status = this.value;
-                        renderTable();
+                        renderAll();
                         try {{
                             const result = await updateItem(this.dataset.itemId, 'status', this.value);
                             replaceItem(result.item);
-                            renderTable();
+                            renderAll();
                         }} catch (e) {{
                             replaceItem(oldItem);
-                            renderTable();
+                            renderAll();
                             setSaveState('error', 'Ошибка сохранения');
                         }}
                     }});
@@ -3168,14 +3217,14 @@ def popup_get(dialogId: str = ""):
                         if (!item) return;
                         const oldItem = JSON.parse(JSON.stringify(item));
                         item.plan = fromInputDate(this.value);
-                        renderTable();
+                        renderAll();
                         try {{
                             const result = await updateItem(this.dataset.itemId, 'plan', item.plan);
                             replaceItem(result.item);
-                            renderTable();
+                            renderAll();
                         }} catch (e) {{
                             replaceItem(oldItem);
-                            renderTable();
+                            renderAll();
                             setSaveState('error', 'Ошибка сохранения');
                         }}
                     }});
@@ -3186,14 +3235,14 @@ def popup_get(dialogId: str = ""):
                         if (!item) return;
                         const oldItem = JSON.parse(JSON.stringify(item));
                         item.fact = fromInputDate(this.value);
-                        renderTable();
+                        renderAll();
                         try {{
                             const result = await updateItem(this.dataset.itemId, 'fact', item.fact);
                             replaceItem(result.item);
-                            renderTable();
+                            renderAll();
                         }} catch (e) {{
                             replaceItem(oldItem);
-                            renderTable();
+                            renderAll();
                             setSaveState('error', 'Ошибка сохранения');
                         }}
                     }});
@@ -3209,7 +3258,7 @@ def popup_get(dialogId: str = ""):
                             const result = await addItem(groupId, name);
                             replaceItem(result.item);
                             input.value = '';
-                            renderTable();
+                            renderAll();
                         }} catch (e) {{
                             setSaveState('error', 'Ошибка добавления пункта');
                         }}
@@ -3240,7 +3289,7 @@ def popup_get(dialogId: str = ""):
                         try {{
                             const result = await uploadDocument(this.dataset.itemId, file);
                             replaceItem(result.item);
-                            renderTable();
+                            renderAll();
                         }} catch (e) {{
                             setSaveState('error', 'Ошибка загрузки файла');
                         }}
@@ -3253,7 +3302,7 @@ def popup_get(dialogId: str = ""):
                         window.BX24.init(function () {{
                             try {{
                                 if (typeof window.BX24.resizeWindow === 'function') {{
-                                    window.BX24.resizeWindow(980, 620);
+                                    window.BX24.resizeWindow(1180, 680);
                                 }}
                             }} catch (e) {{
                                 console.log('BX24.resizeWindow error:', e);
@@ -3264,7 +3313,7 @@ def popup_get(dialogId: str = ""):
                     console.log('BX24.init skipped:', e);
                 }}
             }}
-            renderTable();
+            renderAll();
             fetchChatTitleIfMissing();
             safeInitBx24ForPopup();
         </script>
