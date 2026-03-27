@@ -53,18 +53,20 @@ CHECKLIST_GROUPS = {
             "Справка вывоза мусора",
         ],
     },
+    4: {
+        "title": "Не требуется",
+        "items": [],
+    },
 }
 
 STATUS_OPTIONS = [
     "",
     "Есть",
     "Нет",
-    "Подписан",
     "Не требуется",
-    "Запрос опросного листа",
 ]
 
-PRIORITY_OPTIONS = ["red", "orange", "yellow"]
+PRIORITY_OPTIONS = ["white", "green", "gray"]
 
 
 def build_default_groups():
@@ -78,6 +80,8 @@ def resolve_group_id(name: str) -> int:
     name = str(name or "").strip()
 
     for group_id, group_data in CHECKLIST_GROUPS.items():
+        if group_id == 4:
+            continue
         if name in group_data["items"]:
             return group_id
 
@@ -95,14 +99,32 @@ def normalize_priority(value: str) -> str:
     value = str(value or "").strip().lower()
     if value in PRIORITY_OPTIONS:
         return value
-    return "yellow"
+    return "white"
 
 
 def normalize_status(value: str) -> str:
     value = clean_cell_value(value)
+
+    if not value:
+        return ""
+
+    normalized_map = {
+        "есть": "Есть",
+        "нет": "Нет",
+        "не требуется": "Не требуется",
+        "подписан": "Есть",
+        "запрос опросного листа": "",
+        "договор тех прис": "",
+    }
+
+    key = value.strip().lower()
+    if key in normalized_map:
+        return normalized_map[key]
+
     if value in STATUS_OPTIONS:
         return value
-    return value
+
+    return ""
 
 
 def normalize_date_string(value: str) -> str:
@@ -122,24 +144,100 @@ def build_item_id(group_id: int, order: int) -> str:
     return f"item_g{group_id}_{order}"
 
 
+def derive_indicator_from_status(status: str) -> str:
+    status = normalize_status(status)
+    if status == "Есть":
+        return "green"
+    if status == "Нет" or status == "Не требуется":
+        return "gray"
+    return "white"
+
+
+def move_item_to_required_group(item: dict) -> int:
+    status = normalize_status(item.get("status"))
+    if status == "Не требуется":
+        return 4
+
+    current_group = item.get("group")
+    if isinstance(current_group, int) and current_group in [1, 2, 3]:
+        return current_group
+
+    return resolve_group_id(item.get("name"))
+
+
+def build_default_checklist_template(dialog_id: str = ""):
+    items = []
+
+    for group_id, group_data in CHECKLIST_GROUPS.items():
+        if group_id == 4:
+            continue
+
+        for order, name in enumerate(group_data["items"], start=1):
+            items.append({
+                "id": build_item_id(group_id, order),
+                "group": group_id,
+                "order": order,
+                "name": name,
+                "priority": "white",
+                "status": "",
+                "plan": "",
+                "fact": "",
+                "documentUrl": "#",
+                "isCustom": False,
+            })
+
+    return normalize_checklist_data({
+        "title": "Чек-лист ИД",
+        "collabTitle": dialog_id or "",
+        "contractDeadline": "",
+        "startDate": "",
+        "groups": build_default_groups(),
+        "items": items,
+        "notice": "",
+    })
+
+
+def calculate_progress(items: list) -> dict:
+    items = items or []
+
+    active_items = [x for x in items if normalize_status(x.get("status")) != "Не требуется"]
+    completed_items = [x for x in active_items if normalize_status(x.get("status")) == "Есть"]
+
+    active_count = len(active_items)
+    completed_count = len(completed_items)
+
+    progress_percent = 0
+    if active_count > 0:
+        progress_percent = round((completed_count / active_count) * 100)
+
+    return {
+        "activeCount": active_count,
+        "completedCount": completed_count,
+        "progressPercent": progress_percent,
+    }
+
+
 def normalize_checklist_data(data: dict) -> dict:
     data = dict(data or {})
 
     raw_items = data.get("items", []) or []
     normalized_items = []
 
-    group_order_counters = {1: 0, 2: 0, 3: 0}
+    group_order_counters = {1: 0, 2: 0, 3: 0, 4: 0}
 
-    for index, item in enumerate(raw_items, start=1):
+    for item in raw_items:
         item = dict(item or {})
 
         name = clean_cell_value(item.get("name"))
         if not name:
             continue
 
-        group_id = item.get("group")
-        if not isinstance(group_id, int) or group_id not in CHECKLIST_GROUPS:
-            group_id = resolve_group_id(name)
+        status = normalize_status(item.get("status"))
+        group_id = move_item_to_required_group({
+            "group": item.get("group"),
+            "name": name,
+            "status": status,
+        })
 
         group_order_counters[group_id] += 1
         default_order = group_order_counters[group_id]
@@ -149,28 +247,36 @@ def normalize_checklist_data(data: dict) -> dict:
             "group": group_id,
             "order": int(item.get("order") or default_order),
             "name": name,
-            "priority": normalize_priority(item.get("priority")),
-            "status": normalize_status(item.get("status")),
+            "priority": derive_indicator_from_status(status),
+            "status": status,
             "plan": normalize_date_string(item.get("plan")),
             "fact": normalize_date_string(item.get("fact")),
+            "documentUrl": clean_cell_value(item.get("documentUrl")) or "#",
+            "isCustom": bool(item.get("isCustom", False)),
         })
 
     normalized_items.sort(key=lambda x: (x["group"], x["order"], x["name"]))
 
-    for group_id in [1, 2, 3]:
+    for group_id in [1, 2, 3, 4]:
         group_items = [x for x in normalized_items if x["group"] == group_id]
         for order, item in enumerate(group_items, start=1):
             item["order"] = order
             if not item.get("id"):
                 item["id"] = build_item_id(group_id, order)
 
+    progress = calculate_progress(normalized_items)
+
     return {
         "title": data.get("title") or "Чек-лист ИД",
+        "collabTitle": clean_cell_value(data.get("collabTitle")),
         "contractDeadline": clean_cell_value(data.get("contractDeadline")),
         "startDate": clean_cell_value(data.get("startDate")),
         "groups": build_default_groups(),
         "items": normalized_items,
         "notice": data.get("notice", ""),
+        "activeCount": progress["activeCount"],
+        "completedCount": progress["completedCount"],
+        "progressPercent": progress["progressPercent"],
     }
 
 
@@ -309,9 +415,6 @@ def parse_xlsx_to_checklist(file_bytes: bytes):
 
     items = []
 
-    # строка 1 = ИД / Статус / Дата получения
-    # строка 2 = План / Факт
-    # данные начинаются со строки 3
     for row in range(3, ws.max_row + 1):
         name = clean_cell_value(ws[f"A{row}"].value)
         status = normalize_status(ws[f"B{row}"].value)
@@ -328,14 +431,17 @@ def parse_xlsx_to_checklist(file_bytes: bytes):
             "group": group_id,
             "order": len([x for x in items if x["group"] == group_id]) + 1,
             "name": name,
-            "priority": "yellow",
+            "priority": derive_indicator_from_status(status),
             "status": status,
             "plan": plan,
             "fact": fact,
+            "documentUrl": "#",
+            "isCustom": False,
         })
 
     data = {
         "title": f"Чек-лист ИД — {ws.title}",
+        "collabTitle": ws.title,
         "contractDeadline": "",
         "startDate": "",
         "groups": build_default_groups(),
@@ -500,10 +606,12 @@ def get_checklist(dialog_id: str):
         data["foundAlias"] = found_alias
         return data
 
-    data = build_demo_checklist()
+    data = build_default_checklist_template(normalized_id)
+    save_checklist(normalized_id, data)
+
     data["resolvedDialogId"] = normalized_id
     data["lookupAliases"] = aliases
-    data["foundAlias"] = None
+    data["foundAlias"] = normalized_id
     return data
 
 
@@ -973,14 +1081,18 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
                 }}
             }}
 
+            function canUseBx24() {{
+                return !!(window.BX24 && typeof window.BX24.init === 'function');
+            }}
+
             if (initialDialogId) {{
                 finish(initialDialogId, 'server-post');
-            }} else if (typeof BX24 !== 'undefined') {{
+            }} else if (canUseBx24()) {{
                 try {{
-                    BX24.init(function () {{
+                    window.BX24.init(function () {{
                         var dialogId = '';
                         try {{
-                            var info = BX24.placement.info();
+                            var info = window.BX24.placement.info();
                             if (info && info.options && info.options.dialogId) {{
                                 dialogId = info.options.dialogId;
                             }}
@@ -1009,9 +1121,12 @@ def health():
 
 
 @app.get("/", response_class=HTMLResponse)
-def home_get(request: Request, dialogId: str = "", mode: str = ""):
-    if mode == "popup":
-        return popup_get(dialogId)
+def home_get(dialogId: str = "", mode: str = ""):
+    dialog_id = normalize_dialog_id(dialogId)
+
+    if dialog_id:
+        return popup_get(dialog_id)
+
     return app_home_html()
 
 
@@ -1266,8 +1381,7 @@ def popup_get_legacy(dialogId: str = ""):
     """
 
 
-@app.get("/popup", response_class=HTMLResponse)
-def popup_get(dialogId: str = ""):
+def popup_get_stage1_legacy(dialogId: str = ""):
     dialog_id = normalize_dialog_id(dialogId)
     data = get_checklist(dialog_id)
 
@@ -1821,17 +1935,790 @@ def popup_get(dialogId: str = ""):
                 }});
             }}
 
-            if (typeof BX24 !== 'undefined') {{
-                BX24.init(function () {{
-                    try {{
-                        BX24.resizeWindow(1100, 720);
-                    }} catch (e) {{
-                        console.log(e);
+            function safeInitBx24ForPopup() {{
+                try {{
+                    if (window.BX24 && typeof window.BX24.init === 'function') {{
+                        window.BX24.init(function () {{
+                            try {{
+                                if (typeof window.BX24.resizeWindow === 'function') {{
+                                    window.BX24.resizeWindow(1100, 720);
+                                }}
+                            }} catch (e) {{
+                                console.log('BX24.resizeWindow error:', e);
+                            }}
+                        }});
                     }}
-                }});
+                }} catch (e) {{
+                    console.log('BX24.init skipped:', e);
+                }}
             }}
 
             renderTable();
+            safeInitBx24ForPopup();
+        </script>
+    </body>
+    </html>
+    """
+
+
+@app.get("/popup", response_class=HTMLResponse)
+def popup_get(dialogId: str = ""):
+    dialog_id = normalize_dialog_id(dialogId)
+    data = get_checklist(dialog_id)
+
+    title = html.escape(data.get("title", "Чек-лист ИД"))
+    collab_title = html.escape(data.get("collabTitle", "") or dialog_id or "Без названия")
+    contract_deadline = html.escape(data.get("contractDeadline", ""))
+    start_date = html.escape(data.get("startDate", ""))
+    progress_percent = int(data.get("progressPercent", 0) or 0)
+
+    items_json = json.dumps(data.get("items", []), ensure_ascii=False)
+    groups_json = json.dumps(data.get("groups", []), ensure_ascii=False)
+    dialog_id_json = json.dumps(dialog_id, ensure_ascii=False)
+    collab_title_json = json.dumps(data.get("collabTitle", "") or "", ensure_ascii=False)
+    contract_deadline_json = json.dumps(data.get("contractDeadline", "") or "", ensure_ascii=False)
+    start_date_json = json.dumps(data.get("startDate", "") or "", ensure_ascii=False)
+
+    return f"""
+    <html>
+    <head>
+        <meta charset="utf-8">
+        <title>{title} — {collab_title}</title>
+        <script src="https://api.bitrix24.com/api/v1/"></script>
+        <style>
+            * {{
+                box-sizing: border-box;
+            }}
+
+            body {{
+                margin: 0;
+                font-family: Arial, sans-serif;
+                background: #f3f6fb;
+                color: #1f2328;
+            }}
+
+            .shell {{
+                padding: 16px;
+            }}
+
+            .modal {{
+                background: #fff;
+                border-radius: 14px;
+                border: 1px solid #e5e7eb;
+                overflow: hidden;
+                box-shadow: 0 16px 40px rgba(0,0,0,0.12);
+            }}
+
+            .header {{
+                padding: 16px 18px 12px;
+                border-bottom: 1px solid #edf0f2;
+                display: flex;
+                justify-content: space-between;
+                align-items: flex-start;
+                gap: 16px;
+            }}
+
+            .title {{
+                font-size: 24px;
+                font-weight: 700;
+                margin-bottom: 8px;
+            }}
+
+            .title small {{
+                font-size: 22px;
+                font-weight: 600;
+                color: #344054;
+            }}
+
+            .meta-grid {{
+                display: flex;
+                gap: 14px;
+                flex-wrap: wrap;
+                align-items: end;
+            }}
+
+            .meta-box {{
+                min-width: 180px;
+            }}
+
+            .meta-label {{
+                font-size: 12px;
+                color: #667085;
+                margin-bottom: 4px;
+            }}
+
+            .meta-input {{
+                width: 100%;
+                border: 1px solid #d0d7de;
+                border-radius: 8px;
+                padding: 7px 10px;
+                font-size: 13px;
+                background: #fff;
+            }}
+
+            .progress-box {{
+                min-width: 170px;
+            }}
+
+            .progress-value {{
+                font-size: 22px;
+                font-weight: 700;
+                margin-bottom: 6px;
+            }}
+
+            .progress-track {{
+                width: 100%;
+                height: 10px;
+                background: #edf2f7;
+                border-radius: 999px;
+                overflow: hidden;
+            }}
+
+            .progress-bar {{
+                height: 100%;
+                width: 0%;
+                background: #22c55e;
+                transition: width 0.2s ease;
+            }}
+
+            .save-state {{
+                font-size: 12px;
+                font-weight: 700;
+                padding: 7px 10px;
+                border-radius: 999px;
+                background: #eef2ff;
+                color: #3730a3;
+                white-space: nowrap;
+            }}
+
+            .save-state.saving {{
+                background: #fff4e5;
+                color: #b26a00;
+            }}
+
+            .save-state.error {{
+                background: #fdecec;
+                color: #b42318;
+            }}
+
+            .content {{
+                padding: 16px 18px 18px;
+                max-height: 78vh;
+                overflow: auto;
+            }}
+
+            .table {{
+                width: 100%;
+                border: 1px solid #e5e7eb;
+                border-radius: 12px;
+                overflow: hidden;
+                background: #fff;
+            }}
+
+            .thead {{
+                position: sticky;
+                top: 0;
+                z-index: 10;
+                background: #f8fafc;
+                border-bottom: 1px solid #e5e7eb;
+            }}
+
+            .thead-top,
+            .thead-bottom,
+            .row {{
+                display: grid;
+                grid-template-columns: 1.7fr 130px 1fr 130px 130px;
+                gap: 0;
+                align-items: stretch;
+            }}
+
+            .th,
+            .td {{
+                padding: 9px 10px;
+                border-right: 1px solid #edf0f2;
+            }}
+
+            .th:last-child,
+            .td:last-child {{
+                border-right: none;
+            }}
+
+            .th {{
+                font-size: 12px;
+                font-weight: 700;
+                color: #475467;
+            }}
+
+            .th.center {{
+                text-align: center;
+            }}
+
+            .group-block {{
+                border-top: 8px solid #f8fafc;
+            }}
+
+            .group-title {{
+                padding: 10px 12px;
+                background: #fafbfc;
+                border-top: 1px solid #e5e7eb;
+                border-bottom: 1px solid #e5e7eb;
+                font-size: 13px;
+                font-weight: 700;
+                color: #344054;
+            }}
+
+            .row {{
+                border-top: 1px solid #edf0f2;
+                background: #fff;
+            }}
+
+            .row.not-required {{
+                background: #fafafa;
+            }}
+
+            .row.not-required .item-name {{
+                text-decoration: line-through;
+                color: #98a2b3;
+            }}
+
+            .cell-name {{
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                min-width: 0;
+            }}
+
+            .status-indicator {{
+                width: 14px;
+                height: 14px;
+                border-radius: 999px;
+                border: 1px solid #d0d7de;
+                flex: 0 0 14px;
+                background: #fff;
+            }}
+
+            .status-indicator.green {{
+                background: #22c55e;
+                border-color: #22c55e;
+            }}
+
+            .status-indicator.gray {{
+                background: #9ca3af;
+                border-color: #9ca3af;
+            }}
+
+            .item-name {{
+                font-size: 13px;
+                font-weight: 700;
+                color: #1f2328;
+                line-height: 1.25;
+                min-width: 0;
+            }}
+
+            .status-select,
+            .date-input {{
+                width: 100%;
+                border: 1px solid #d0d7de;
+                border-radius: 8px;
+                padding: 6px 8px;
+                font-size: 13px;
+                background: #fff;
+            }}
+
+            .doc-btn {{
+                display: inline-block;
+                width: 100%;
+                text-align: center;
+                padding: 6px 8px;
+                border: 1px solid #d0d7de;
+                border-radius: 8px;
+                background: #f8fafc;
+                color: #1f2328;
+                font-size: 12px;
+                text-decoration: none;
+            }}
+
+            .add-item-row {{
+                padding: 10px 12px 12px;
+                border-top: 1px solid #edf0f2;
+                background: #fcfcfd;
+                display: flex;
+                gap: 8px;
+                align-items: center;
+            }}
+
+            .add-item-input {{
+                flex: 1;
+                border: 1px solid #d0d7de;
+                border-radius: 8px;
+                padding: 7px 10px;
+                font-size: 13px;
+            }}
+
+            .add-item-btn {{
+                border: 1px solid #d0d7de;
+                border-radius: 8px;
+                padding: 7px 10px;
+                background: #fff;
+                cursor: pointer;
+                font-size: 12px;
+            }}
+
+            @media (max-width: 1080px) {{
+                .thead-top,
+                .thead-bottom,
+                .row {{
+                    grid-template-columns: 1fr;
+                }}
+
+                .th,
+                .td {{
+                    border-right: none;
+                    border-bottom: 1px solid #edf0f2;
+                }}
+
+                .th:last-child,
+                .td:last-child {{
+                    border-bottom: none;
+                }}
+            }}
+        </style>
+    </head>
+    <body>
+        <div class="shell">
+            <div class="modal">
+                <div class="header">
+                    <div style="flex:1;">
+                        <div class="title">Чек-лист ИД <small>— {collab_title}</small></div>
+
+                        <div class="meta-grid">
+                            <div class="meta-box">
+                                <div class="meta-label">Срок по договору</div>
+                                <input id="contractDeadlineInput" class="meta-input" type="date" value="">
+                            </div>
+
+                            <div class="meta-box">
+                                <div class="meta-label">Начало работ</div>
+                                <input id="startDateInput" class="meta-input" type="date" value="">
+                            </div>
+
+                            <div class="progress-box">
+                                <div class="meta-label">Прогресс</div>
+                                <div class="progress-value" id="progressValue">{progress_percent}%</div>
+                                <div class="progress-track">
+                                    <div class="progress-bar" id="progressBar"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="saveState" class="save-state">Сохранено</div>
+                </div>
+
+                <div class="content">
+                    <div class="table">
+                        <div class="thead">
+                            <div class="thead-top">
+                                <div class="th">ИД</div>
+                                <div class="th">Документ</div>
+                                <div class="th">Статус</div>
+                                <div class="th center" style="grid-column: 4 / span 2;">Дата получения</div>
+                            </div>
+                            <div class="thead-bottom">
+                                <div class="th"></div>
+                                <div class="th"></div>
+                                <div class="th"></div>
+                                <div class="th">План</div>
+                                <div class="th">Факт</div>
+                            </div>
+                        </div>
+
+                        <div id="tableBody"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <script>
+            const dialogId = {dialog_id_json};
+            const groups = {groups_json};
+            let items = {items_json};
+            let collabTitle = {collab_title_json};
+            let contractDeadline = {contract_deadline_json};
+            let startDate = {start_date_json};
+
+            const saveStateEl = document.getElementById('saveState');
+            const tableBodyEl = document.getElementById('tableBody');
+            const progressValueEl = document.getElementById('progressValue');
+            const progressBarEl = document.getElementById('progressBar');
+            const contractDeadlineInput = document.getElementById('contractDeadlineInput');
+            const startDateInput = document.getElementById('startDateInput');
+
+            function setSaveState(mode, text) {{
+                saveStateEl.classList.remove('saving', 'error');
+
+                if (mode === 'saving') {{
+                    saveStateEl.classList.add('saving');
+                }}
+                if (mode === 'error') {{
+                    saveStateEl.classList.add('error');
+                }}
+
+                saveStateEl.textContent = text;
+            }}
+
+            function esc(v) {{
+                if (v === null || v === undefined) return '';
+                return String(v)
+                    .replaceAll('&', '&amp;')
+                    .replaceAll('<', '&lt;')
+                    .replaceAll('>', '&gt;')
+                    .replaceAll('"', '&quot;');
+            }}
+
+            function toInputDate(value) {{
+                if (!value) return '';
+                const parts = value.split('.');
+                if (parts.length !== 3) return '';
+                return `${{parts[2]}}-${{parts[1]}}-${{parts[0]}}`;
+            }}
+
+            function fromInputDate(value) {{
+                if (!value) return '';
+                const parts = value.split('-');
+                if (parts.length !== 3) return '';
+                return `${{parts[2]}}.${{parts[1]}}.${{parts[0]}}`;
+            }}
+
+            function normalizeStatus(status) {{
+                const s = String(status || '').trim();
+                if (s === 'Есть') return 'Есть';
+                if (s === 'Нет') return 'Нет';
+                if (s === 'Не требуется') return 'Не требуется';
+                return '';
+            }}
+
+            function indicatorClass(status) {{
+                const s = normalizeStatus(status);
+                if (s === 'Есть') return 'status-indicator green';
+                if (s === 'Нет' || s === 'Не требуется') return 'status-indicator gray';
+                return 'status-indicator';
+            }}
+
+            function calculateProgress() {{
+                const activeItems = items.filter(x => normalizeStatus(x.status) !== 'Не требуется');
+                const completedItems = activeItems.filter(x => normalizeStatus(x.status) === 'Есть');
+
+                const activeCount = activeItems.length;
+                const completedCount = completedItems.length;
+                const percent = activeCount ? Math.round((completedCount / activeCount) * 100) : 0;
+
+                progressValueEl.textContent = percent + '%';
+                progressBarEl.style.width = percent + '%';
+            }}
+
+            function replaceItemInState(updatedItem) {{
+                if (!updatedItem || !updatedItem.id) {{
+                    return;
+                }}
+
+                items = items.map(item => item.id === updatedItem.id ? updatedItem : item);
+            }}
+
+            async function updateItem(itemId, field, value) {{
+                setSaveState('saving', 'Сохраняем...');
+
+                const response = await fetch('/api/checklist/update-item', {{
+                    method: 'POST',
+                    headers: {{
+                        'Content-Type': 'application/json'
+                    }},
+                    body: JSON.stringify({{
+                        dialogId,
+                        itemId,
+                        field,
+                        value
+                    }})
+                }});
+
+                const result = await response.json();
+
+                if (!response.ok || !result.ok) {{
+                    throw new Error(result.error || 'save failed');
+                }}
+
+                if (result.item) {{
+                    replaceItemInState(result.item);
+                }}
+
+                setSaveState('', 'Сохранено');
+                return result;
+            }}
+
+            async function updateMeta(field, value) {{
+                setSaveState('saving', 'Сохраняем...');
+
+                const response = await fetch('/api/checklist/update-meta', {{
+                    method: 'POST',
+                    headers: {{
+                        'Content-Type': 'application/json'
+                    }},
+                    body: JSON.stringify({{
+                        dialogId,
+                        field,
+                        value
+                    }})
+                }});
+
+                const result = await response.json();
+
+                if (!response.ok || !result.ok) {{
+                    throw new Error(result.error || 'save failed');
+                }}
+
+                setSaveState('', 'Сохранено');
+                return result;
+            }}
+
+            async function addItem(groupId, name) {{
+                setSaveState('saving', 'Сохраняем...');
+
+                const response = await fetch('/api/checklist/add-item', {{
+                    method: 'POST',
+                    headers: {{
+                        'Content-Type': 'application/json'
+                    }},
+                    body: JSON.stringify({{
+                        dialogId,
+                        groupId,
+                        name
+                    }})
+                }});
+
+                const result = await response.json();
+
+                if (!response.ok || !result.ok) {{
+                    throw new Error(result.error || 'add item failed');
+                }}
+
+                setSaveState('', 'Сохранено');
+                return result;
+            }}
+
+            function getItemsByGroup(groupId) {{
+                return items
+                    .filter(item => item.group === groupId)
+                    .sort((a, b) => a.order - b.order);
+            }}
+
+            function renderGroup(group) {{
+                const groupItems = getItemsByGroup(group.id);
+                const allowAdd = group.id !== 4;
+
+                const rows = groupItems.map(item => {{
+                    const rowClass = normalizeStatus(item.status) === 'Не требуется' ? 'row not-required' : 'row';
+
+                    return `
+                        <div class="${{rowClass}}" data-item-id="${{esc(item.id)}}">
+                            <div class="td">
+                                <div class="cell-name">
+                                    <div class="${{indicatorClass(item.status)}}"></div>
+                                    <div class="item-name">${{esc(item.name)}}</div>
+                                </div>
+                            </div>
+
+                            <div class="td">
+                                <a class="doc-btn" href="${{esc(item.documentUrl || '#')}}" target="_blank">Посмотреть</a>
+                            </div>
+
+                            <div class="td">
+                                <select class="status-select" data-role="status" data-item-id="${{esc(item.id)}}">
+                                    <option value="" ${{normalizeStatus(item.status) === '' ? 'selected' : ''}}></option>
+                                    <option value="Есть" ${{normalizeStatus(item.status) === 'Есть' ? 'selected' : ''}}>Есть</option>
+                                    <option value="Нет" ${{normalizeStatus(item.status) === 'Нет' ? 'selected' : ''}}>Нет</option>
+                                    <option value="Не требуется" ${{normalizeStatus(item.status) === 'Не требуется' ? 'selected' : ''}}>Не требуется</option>
+                                </select>
+                            </div>
+
+                            <div class="td">
+                                <input class="date-input" type="date" data-role="plan" data-item-id="${{esc(item.id)}}" value="${{esc(toInputDate(item.plan))}}">
+                            </div>
+
+                            <div class="td">
+                                <input class="date-input" type="date" data-role="fact" data-item-id="${{esc(item.id)}}" value="${{esc(toInputDate(item.fact))}}">
+                            </div>
+                        </div>
+                    `;
+                }}).join('');
+
+                const addBlock = allowAdd ? `
+                    <div class="add-item-row">
+                        <input class="add-item-input" id="addItemInput_${{group.id}}" type="text" placeholder="Новый пункт">
+                        <button class="add-item-btn" type="button" data-role="add-item" data-group-id="${{group.id}}">
+                            Добавить пункт
+                        </button>
+                    </div>
+                ` : '';
+
+                return `
+                    <div class="group-block">
+                        <div class="group-title">${{esc(group.title)}}</div>
+                        ${{rows}}
+                        ${{addBlock}}
+                    </div>
+                `;
+            }}
+
+            function renderTable() {{
+                tableBodyEl.innerHTML = groups.map(renderGroup).join('');
+                bindEvents();
+                calculateProgress();
+            }}
+
+            function bindEvents() {{
+                document.querySelectorAll('[data-role="status"]').forEach(el => {{
+                    el.addEventListener('change', async function() {{
+                        const itemId = this.dataset.itemId;
+                        const item = items.find(x => x.id === itemId);
+                        if (!item) return;
+
+                        const oldItem = {{ ...item }};
+                        const newValue = this.value;
+
+                        item.status = newValue;
+                        renderTable();
+
+                        try {{
+                            await updateItem(itemId, 'status', newValue);
+                            renderTable();
+                        }} catch (e) {{
+                            replaceItemInState(oldItem);
+                            renderTable();
+                            setSaveState('error', 'Ошибка сохранения');
+                        }}
+                    }});
+                }});
+
+                document.querySelectorAll('[data-role="plan"]').forEach(el => {{
+                    el.addEventListener('change', async function() {{
+                        const itemId = this.dataset.itemId;
+                        const item = items.find(x => x.id === itemId);
+                        if (!item) return;
+
+                        const oldItem = {{ ...item }};
+                        const newValue = fromInputDate(this.value);
+
+                        item.plan = newValue;
+                        renderTable();
+
+                        try {{
+                            await updateItem(itemId, 'plan', newValue);
+                            renderTable();
+                        }} catch (e) {{
+                            replaceItemInState(oldItem);
+                            renderTable();
+                            setSaveState('error', 'Ошибка сохранения');
+                        }}
+                    }});
+                }});
+
+                document.querySelectorAll('[data-role="fact"]').forEach(el => {{
+                    el.addEventListener('change', async function() {{
+                        const itemId = this.dataset.itemId;
+                        const item = items.find(x => x.id === itemId);
+                        if (!item) return;
+
+                        const oldItem = {{ ...item }};
+                        const newValue = fromInputDate(this.value);
+
+                        item.fact = newValue;
+                        renderTable();
+
+                        try {{
+                            await updateItem(itemId, 'fact', newValue);
+                            renderTable();
+                        }} catch (e) {{
+                            replaceItemInState(oldItem);
+                            renderTable();
+                            setSaveState('error', 'Ошибка сохранения');
+                        }}
+                    }});
+                }});
+
+                document.querySelectorAll('[data-role="add-item"]').forEach(btn => {{
+                    btn.addEventListener('click', async function() {{
+                        const groupId = Number(this.dataset.groupId);
+                        const input = document.getElementById('addItemInput_' + groupId);
+                        if (!input) return;
+
+                        const name = (input.value || '').trim();
+                        if (!name) return;
+
+                        try {{
+                            const result = await addItem(groupId, name);
+                            if (result.item) {{
+                                items.push(result.item);
+                            }}
+                            input.value = '';
+                            renderTable();
+                        }} catch (e) {{
+                            setSaveState('error', 'Ошибка добавления пункта');
+                        }}
+                    }});
+                }});
+            }}
+
+            contractDeadlineInput.value = toInputDate(contractDeadline);
+            startDateInput.value = toInputDate(startDate);
+
+            contractDeadlineInput.addEventListener('change', async function() {{
+                const oldValue = contractDeadline;
+                const newValue = fromInputDate(this.value);
+                contractDeadline = newValue;
+
+                try {{
+                    await updateMeta('contractDeadline', newValue);
+                }} catch (e) {{
+                    contractDeadline = oldValue;
+                    contractDeadlineInput.value = toInputDate(oldValue);
+                    setSaveState('error', 'Ошибка сохранения');
+                }}
+            }});
+
+            startDateInput.addEventListener('change', async function() {{
+                const oldValue = startDate;
+                const newValue = fromInputDate(this.value);
+                startDate = newValue;
+
+                try {{
+                    await updateMeta('startDate', newValue);
+                }} catch (e) {{
+                    startDate = oldValue;
+                    startDateInput.value = toInputDate(oldValue);
+                    setSaveState('error', 'Ошибка сохранения');
+                }}
+            }});
+
+            function safeInitBx24ForPopup() {{
+                try {{
+                    if (window.BX24 && typeof window.BX24.init === 'function') {{
+                        window.BX24.init(function () {{
+                            try {{
+                                if (typeof window.BX24.resizeWindow === 'function') {{
+                                    window.BX24.resizeWindow(980, 620);
+                                }}
+                            }} catch (e) {{
+                                console.log('BX24.resizeWindow error:', e);
+                            }}
+                        }});
+                    }}
+                }} catch (e) {{
+                    console.log('BX24.init skipped:', e);
+                }}
+            }}
+
+            renderTable();
+            safeInitBx24ForPopup();
         </script>
     </body>
     </html>
@@ -1935,11 +2822,103 @@ async def api_checklist_update_item(request: Request):
 
     data = normalize_checklist_data(data)
     save_checklist(dialog_id, data)
+    updated_item = next(
+        (item for item in data.get("items", []) if str(item.get("id")) == item_id),
+        None,
+    )
 
     return JSONResponse({
         "ok": True,
-        "item": target_item,
-        "dialogId": dialog_id
+        "item": updated_item or target_item,
+        "dialogId": dialog_id,
+        "progressPercent": data.get("progressPercent", 0),
+    })
+
+
+@app.post("/api/checklist/update-meta")
+async def api_checklist_update_meta(request: Request):
+    payload = await request.json()
+
+    dialog_id = normalize_dialog_id(payload.get("dialogId"))
+    field = str(payload.get("field") or "").strip()
+    value = payload.get("value")
+
+    if not dialog_id:
+        return JSONResponse({"ok": False, "error": "dialogId is required"}, status_code=400)
+
+    allowed_fields = {"contractDeadline", "startDate", "collabTitle"}
+    if field not in allowed_fields:
+        return JSONResponse({"ok": False, "error": "invalid field"}, status_code=400)
+
+    data = get_checklist(dialog_id)
+
+    if field in {"contractDeadline", "startDate"}:
+        data[field] = normalize_date_string(value)
+    elif field == "collabTitle":
+        data[field] = clean_cell_value(value)
+
+    data = normalize_checklist_data(data)
+    save_checklist(dialog_id, data)
+
+    return JSONResponse({
+        "ok": True,
+        "dialogId": dialog_id,
+        "field": field,
+        "value": data.get(field, ""),
+        "progressPercent": data.get("progressPercent", 0),
+    })
+
+
+@app.post("/api/checklist/add-item")
+async def api_checklist_add_item(request: Request):
+    payload = await request.json()
+
+    dialog_id = normalize_dialog_id(payload.get("dialogId"))
+    group_id = int(payload.get("groupId") or 0)
+    name = clean_cell_value(payload.get("name"))
+
+    if not dialog_id:
+        return JSONResponse({"ok": False, "error": "dialogId is required"}, status_code=400)
+
+    if group_id not in [1, 2, 3]:
+        return JSONResponse({"ok": False, "error": "invalid groupId"}, status_code=400)
+
+    if not name:
+        return JSONResponse({"ok": False, "error": "name is required"}, status_code=400)
+
+    data = get_checklist(dialog_id)
+    items = data.get("items", [])
+
+    group_items = [x for x in items if x.get("group") == group_id]
+    next_order = len(group_items) + 1
+
+    new_item = {
+        "id": build_item_id(group_id, next_order) + "_custom",
+        "group": group_id,
+        "order": next_order,
+        "name": name,
+        "priority": "white",
+        "status": "",
+        "plan": "",
+        "fact": "",
+        "documentUrl": "#",
+        "isCustom": True,
+    }
+
+    items.append(new_item)
+    data["items"] = items
+    data = normalize_checklist_data(data)
+    save_checklist(dialog_id, data)
+    saved_item = next(
+        (item for item in data.get("items", []) if str(item.get("id")) == str(new_item["id"])),
+        new_item,
+    )
+
+    return JSONResponse({
+        "ok": True,
+        "dialogId": dialog_id,
+        "item": saved_item,
+        "progressPercent": data.get("progressPercent", 0),
     })
 
 def home_get_legacy_disabled():
