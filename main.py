@@ -2032,8 +2032,7 @@ def popup_get_stage1_legacy(dialogId: str = ""):
     """
 
 
-@app.get("/popup", response_class=HTMLResponse)
-def popup_get(dialogId: str = ""):
+def popup_get_compact_legacy(dialogId: str = ""):
     dialog_id = normalize_dialog_id(dialogId)
     data = get_checklist(dialog_id)
 
@@ -2789,6 +2788,473 @@ def popup_get(dialogId: str = ""):
             }}
 
             renderTable();
+            safeInitBx24ForPopup();
+        </script>
+    </body>
+    </html>
+    """
+
+
+@app.get("/popup", response_class=HTMLResponse)
+def popup_get(dialogId: str = ""):
+    dialog_id = normalize_dialog_id(dialogId)
+    data = get_checklist(dialog_id)
+
+    title = html.escape(data.get("title", "Чек-лист ИД"))
+    collab_title_raw = (data.get("collabTitle", "") or "").strip()
+    collab_title = html.escape(collab_title_raw)
+    full_title = f"{title} — {collab_title}" if collab_title_raw else title
+    progress_percent = int(data.get("progressPercent", 0) or 0)
+
+    items_json = json.dumps(data.get("items", []), ensure_ascii=False)
+    groups_json = json.dumps(data.get("groups", []), ensure_ascii=False)
+    project_checklists_json = json.dumps(data.get("projectChecklists", []), ensure_ascii=False)
+    dialog_id_json = json.dumps(dialog_id, ensure_ascii=False)
+    collab_title_json = json.dumps(collab_title_raw, ensure_ascii=False)
+
+    return f"""
+    <html>
+    <head>
+        <meta charset="utf-8">
+        <title>{full_title}</title>
+        <script src="https://api.bitrix24.com/api/v1/"></script>
+        <style>
+            * {{ box-sizing: border-box; }}
+            body {{ margin:0; font-family:Arial,sans-serif; background:#f3f6fb; color:#1f2328; }}
+            .shell {{ padding:14px; }}
+            .modal {{ background:#fff; border:1px solid #e5e7eb; border-radius:14px; overflow:hidden; box-shadow:0 16px 40px rgba(0,0,0,.12); }}
+            .header {{ padding:14px 16px 12px; border-bottom:1px solid #edf0f2; display:flex; justify-content:space-between; align-items:center; gap:14px; }}
+            .title {{ font-size:22px; font-weight:700; line-height:1.2; }}
+            .title small {{ font-size:20px; font-weight:600; color:#344054; }}
+            .header-right {{ display:flex; align-items:center; gap:14px; }}
+            .progress-box {{ min-width:150px; }}
+            .progress-label {{ font-size:12px; color:#667085; margin-bottom:4px; }}
+            .progress-value {{ font-size:21px; font-weight:700; margin-bottom:5px; }}
+            .progress-track {{ width:100%; height:8px; background:#edf2f7; border-radius:999px; overflow:hidden; }}
+            .progress-bar {{ height:100%; width:0%; background:#22c55e; transition:width .2s ease; }}
+            .save-state {{ font-size:12px; font-weight:700; padding:7px 10px; border-radius:999px; background:#eef2ff; color:#3730a3; white-space:nowrap; }}
+            .save-state.saving {{ background:#fff4e5; color:#b26a00; }}
+            .save-state.error {{ background:#fdecec; color:#b42318; }}
+            .content {{ padding:14px 16px 16px; max-height:78vh; overflow:auto; }}
+            .layout {{ display:grid; grid-template-columns:minmax(0,1fr) 250px; gap:14px; align-items:start; }}
+            .side-panel {{ border:1px solid #e5e7eb; border-radius:12px; background:#fff; overflow:hidden; position:sticky; top:0; }}
+            .side-panel-title {{ padding:12px 14px; background:#fafbfc; border-bottom:1px solid #e5e7eb; font-size:13px; font-weight:700; color:#344054; }}
+            .side-panel-list {{ padding:10px; display:flex; flex-direction:column; gap:8px; }}
+            .side-link {{ display:block; width:100%; text-align:left; border:1px solid #d0d7de; border-radius:8px; background:#fff; padding:9px 10px; font-size:13px; cursor:pointer; }}
+            .side-link.active {{ background:#eef2ff; border-color:#c7d2fe; font-weight:700; }}
+            .table {{ width:100%; border:1px solid #e5e7eb; border-radius:12px; overflow:hidden; background:#fff; }}
+            .thead {{ position:sticky; top:0; z-index:10; background:#f8fafc; border-bottom:1px solid #e5e7eb; }}
+            .thead-top,.thead-bottom,.row {{ display:grid; grid-template-columns:.95fr 110px 110px 130px 130px; gap:0; align-items:stretch; }}
+            .th,.td {{ padding:8px 9px; border-right:1px solid #edf0f2; }}
+            .th:last-child,.td:last-child {{ border-right:none; }}
+            .th {{ font-size:12px; font-weight:700; color:#475467; }}
+            .th.center {{ text-align:center; }}
+            .group-block {{ border-top:8px solid #f8fafc; }}
+            .group-title {{ padding:9px 12px; background:#fafbfc; border-top:1px solid #e5e7eb; border-bottom:1px solid #e5e7eb; font-size:13px; font-weight:700; color:#344054; }}
+            .row {{ border-top:1px solid #edf0f2; background:#fff; }}
+            .row.not-required {{ background:#fafafa; }}
+            .row.not-required .item-name {{ text-decoration:line-through; color:#98a2b3; }}
+            .cell-name {{ display:flex; align-items:center; gap:8px; min-width:0; }}
+            .status-indicator {{ width:14px; height:14px; border-radius:999px; border:1px solid #d0d7de; flex:0 0 14px; background:#fff; }}
+            .status-indicator.green {{ background:#22c55e; border-color:#22c55e; }}
+            .status-indicator.gray {{ background:#9ca3af; border-color:#9ca3af; }}
+            .item-name {{ font-size:13px; font-weight:700; color:#1f2328; line-height:1.2; min-width:0; word-break:break-word; }}
+            .status-select,.date-input {{ width:100%; border:1px solid #d0d7de; border-radius:8px; padding:6px 8px; font-size:12px; background:#fff; }}
+            .doc-btn,.upload-btn,.add-item-btn {{ display:inline-block; width:100%; text-align:center; padding:6px 8px; border:1px solid #d0d7de; border-radius:8px; background:#f8fafc; color:#1f2328; font-size:12px; text-decoration:none; cursor:pointer; }}
+            .doc-btn:hover,.upload-btn:hover,.side-link:hover,.add-item-btn:hover {{ background:#f1f5f9; }}
+            .add-item-row {{ padding:9px 12px 10px; border-top:1px solid #edf0f2; background:#fcfcfd; display:flex; gap:8px; align-items:center; }}
+            .add-item-input {{ flex:1; border:1px solid #d0d7de; border-radius:8px; padding:7px 9px; font-size:12px; }}
+            @media (max-width:1180px) {{ .layout {{ grid-template-columns:1fr; }} .side-panel {{ position:static; }} }}
+            @media (max-width:980px) {{
+                .thead-top,.thead-bottom,.row {{ grid-template-columns:1fr; }}
+                .th,.td {{ border-right:none; border-bottom:1px solid #edf0f2; }}
+                .th:last-child,.td:last-child {{ border-bottom:none; }}
+            }}
+        </style>
+    </head>
+    <body>
+        <div class="shell">
+            <div class="modal">
+                <div class="header">
+                    <div class="title" id="popupTitle">Чек-лист ИД</div>
+                    <div class="header-right">
+                        <div class="progress-box">
+                            <div class="progress-label">Прогресс</div>
+                            <div class="progress-value" id="progressValue">{progress_percent}%</div>
+                            <div class="progress-track"><div class="progress-bar" id="progressBar"></div></div>
+                        </div>
+                        <div id="saveState" class="save-state">Сохранено</div>
+                    </div>
+                </div>
+                <div class="content">
+                    <div class="layout">
+                        <div class="table">
+                            <div class="thead">
+                                <div class="thead-top">
+                                    <div class="th">ИД</div>
+                                    <div class="th">Документ</div>
+                                    <div class="th">Статус</div>
+                                    <div class="th center" style="grid-column: 4 / span 2;">Дата получения</div>
+                                </div>
+                                <div class="thead-bottom">
+                                    <div class="th"></div>
+                                    <div class="th"></div>
+                                    <div class="th"></div>
+                                    <div class="th">План</div>
+                                    <div class="th">Факт</div>
+                                </div>
+                            </div>
+                            <div id="tableBody"></div>
+                        </div>
+                        <div class="side-panel">
+                            <div class="side-panel-title">Список чек-листов по проекту</div>
+                            <div class="side-panel-list" id="projectChecklistList"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <script>
+            const dialogId = {dialog_id_json};
+            const groups = {groups_json};
+            const projectChecklists = {project_checklists_json};
+            let items = {items_json};
+            let collabTitle = {collab_title_json};
+            const saveStateEl = document.getElementById('saveState');
+            const tableBodyEl = document.getElementById('tableBody');
+            const progressValueEl = document.getElementById('progressValue');
+            const progressBarEl = document.getElementById('progressBar');
+            const popupTitleEl = document.getElementById('popupTitle');
+            const projectChecklistListEl = document.getElementById('projectChecklistList');
+
+            function setSaveState(mode, text) {{
+                saveStateEl.classList.remove('saving', 'error');
+                if (mode === 'saving') saveStateEl.classList.add('saving');
+                if (mode === 'error') saveStateEl.classList.add('error');
+                saveStateEl.textContent = text;
+            }}
+            function esc(v) {{
+                if (v === null || v === undefined) return '';
+                return String(v).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;');
+            }}
+            function toInputDate(value) {{
+                if (!value) return '';
+                const parts = value.split('.');
+                if (parts.length !== 3) return '';
+                return `${{parts[2]}}-${{parts[1]}}-${{parts[0]}}`;
+            }}
+            function fromInputDate(value) {{
+                if (!value) return '';
+                const parts = value.split('-');
+                if (parts.length !== 3) return '';
+                return `${{parts[2]}}.${{parts[1]}}.${{parts[0]}}`;
+            }}
+            function normalizeStatus(status) {{
+                const s = String(status || '').trim();
+                if (s === 'Есть') return 'Есть';
+                if (s === 'Нет') return 'Нет';
+                if (s === 'Не требуется') return 'Не требуется';
+                return '';
+            }}
+            function indicatorClass(status) {{
+                const s = normalizeStatus(status);
+                if (s === 'Есть') return 'status-indicator green';
+                if (s === 'Нет' || s === 'Не требуется') return 'status-indicator gray';
+                return 'status-indicator';
+            }}
+            function renderTitle() {{
+                if (collabTitle) {{
+                    popupTitleEl.innerHTML = 'Чек-лист ИД <small>— ' + esc(collabTitle) + '</small>';
+                }} else {{
+                    popupTitleEl.textContent = 'Чек-лист ИД';
+                }}
+            }}
+            async function fetchChatTitleIfMissing() {{
+                if (collabTitle) {{ renderTitle(); return; }}
+                try {{
+                    if (!(window.BX24 && typeof window.BX24.init === 'function')) {{ renderTitle(); return; }}
+                    window.BX24.init(function () {{
+                        try {{
+                            window.BX24.callMethod('im.dialog.get', {{ dialog_id: dialogId }}, async function(result) {{
+                                try {{
+                                    if (result.error()) {{ renderTitle(); return; }}
+                                    const data = result.data() || {{}};
+                                    let title = data.title || data.name || (data.dialog && (data.dialog.title || data.dialog.name)) || (data.chat && (data.chat.title || data.chat.name)) || '';
+                                    title = String(title || '').trim();
+                                    if (!title) {{ renderTitle(); return; }}
+                                    collabTitle = title;
+                                    renderTitle();
+                                    try {{
+                                        await fetch('/api/checklist/update-meta', {{
+                                            method: 'POST',
+                                            headers: {{ 'Content-Type': 'application/json' }},
+                                            body: JSON.stringify({{ dialogId, field: 'collabTitle', value: title }})
+                                        }});
+                                    }} catch (e) {{
+                                        console.log('save collabTitle error:', e);
+                                    }}
+                                }} catch (e) {{
+                                    console.log('im.dialog.get parse error:', e);
+                                    renderTitle();
+                                }}
+                            }});
+                        }} catch (e) {{
+                            console.log('im.dialog.get call error:', e);
+                            renderTitle();
+                        }}
+                    }});
+                }} catch (e) {{
+                    console.log('BX24 init for title skipped:', e);
+                    renderTitle();
+                }}
+            }}
+            function calculateProgress() {{
+                const activeItems = items.filter(x => normalizeStatus(x.status) !== 'Не требуется');
+                const completedItems = activeItems.filter(x => normalizeStatus(x.status) === 'Есть');
+                const activeCount = activeItems.length;
+                const completedCount = completedItems.length;
+                const percent = activeCount ? Math.round((completedCount / activeCount) * 100) : 0;
+                progressValueEl.textContent = percent + '%';
+                progressBarEl.style.width = percent + '%';
+            }}
+            async function updateItem(itemId, field, value) {{
+                setSaveState('saving', 'Сохраняем...');
+                const response = await fetch('/api/checklist/update-item', {{
+                    method: 'POST',
+                    headers: {{ 'Content-Type': 'application/json' }},
+                    body: JSON.stringify({{ dialogId, itemId, field, value }})
+                }});
+                const result = await response.json();
+                if (!response.ok || !result.ok) throw new Error(result.error || 'save failed');
+                setSaveState('', 'Сохранено');
+                return result;
+            }}
+            async function addItem(groupId, name) {{
+                setSaveState('saving', 'Сохраняем...');
+                const response = await fetch('/api/checklist/add-item', {{
+                    method: 'POST',
+                    headers: {{ 'Content-Type': 'application/json' }},
+                    body: JSON.stringify({{ dialogId, groupId, name }})
+                }});
+                const result = await response.json();
+                if (!response.ok || !result.ok) throw new Error(result.error || 'add item failed');
+                setSaveState('', 'Сохранено');
+                return result;
+            }}
+            async function removeDocument(itemId) {{
+                setSaveState('saving', 'Сохраняем...');
+                const response = await fetch('/api/checklist/remove-document', {{
+                    method: 'POST',
+                    headers: {{ 'Content-Type': 'application/json' }},
+                    body: JSON.stringify({{ dialogId, itemId }})
+                }});
+                const result = await response.json();
+                if (!response.ok || !result.ok) throw new Error(result.error || 'remove document failed');
+                setSaveState('', 'Сохранено');
+                return result;
+            }}
+            async function uploadDocument(itemId, file) {{
+                setSaveState('saving', 'Сохраняем...');
+                const formData = new FormData();
+                formData.append('dialogId', dialogId);
+                formData.append('itemId', itemId);
+                formData.append('file', file);
+                const response = await fetch('/api/checklist/upload-document', {{ method: 'POST', body: formData }});
+                const result = await response.json();
+                if (!response.ok || !result.ok) throw new Error(result.error || 'upload document failed');
+                setSaveState('', 'Сохранено');
+                return result;
+            }}
+            function getItemsByGroup(groupId) {{
+                return items.filter(item => item.group === groupId).sort((a, b) => a.order - b.order);
+            }}
+            function renderProjectChecklistList() {{
+                projectChecklistListEl.innerHTML = projectChecklists.map(item => {{
+                    const active = item.key === 'id' ? 'side-link active' : 'side-link';
+                    return `<button type="button" class="${{active}}" data-checklist-key="${{esc(item.key)}}">${{esc(item.title)}}</button>`;
+                }}).join('');
+                projectChecklistListEl.querySelectorAll('[data-checklist-key]').forEach(btn => {{
+                    btn.addEventListener('click', function () {{
+                        if (this.dataset.checklistKey !== 'id') alert('Этот чек-лист подключим следующим этапом.');
+                    }});
+                }});
+            }}
+            function buildDocumentCell(item) {{
+                const hasDocument = !!(item.documentUrl && item.documentUrl.trim());
+                if (hasDocument) {{
+                    return `
+                        <a class="doc-btn" href="${{esc(item.documentUrl)}}" target="_blank">Посмотреть</a>
+                        <button class="upload-btn" type="button" data-role="remove-doc" data-item-id="${{esc(item.id)}}" style="margin-top:6px;">Удалить</button>
+                    `;
+                }}
+                return `
+                    <button class="upload-btn" type="button" data-role="upload" data-item-id="${{esc(item.id)}}">Загрузить</button>
+                    <input type="file" data-role="file-input" data-item-id="${{esc(item.id)}}" style="display:none;">
+                `;
+            }}
+            function renderGroup(group) {{
+                const groupItems = getItemsByGroup(group.id);
+                const allowAdd = group.id !== 4;
+                const rows = groupItems.map(item => {{
+                    const rowClass = normalizeStatus(item.status) === 'Не требуется' ? 'row not-required' : 'row';
+                    return `
+                        <div class="${{rowClass}}" data-item-id="${{esc(item.id)}}">
+                            <div class="td"><div class="cell-name"><div class="${{indicatorClass(item.status)}}"></div><div class="item-name">${{esc(item.name)}}</div></div></div>
+                            <div class="td">${{buildDocumentCell(item)}}</div>
+                            <div class="td">
+                                <select class="status-select" data-role="status" data-item-id="${{esc(item.id)}}">
+                                    <option value="" ${{normalizeStatus(item.status) === '' ? 'selected' : ''}}></option>
+                                    <option value="Есть" ${{normalizeStatus(item.status) === 'Есть' ? 'selected' : ''}}>Есть</option>
+                                    <option value="Нет" ${{normalizeStatus(item.status) === 'Нет' ? 'selected' : ''}}>Нет</option>
+                                    <option value="Не требуется" ${{normalizeStatus(item.status) === 'Не требуется' ? 'selected' : ''}}>Не требуется</option>
+                                </select>
+                            </div>
+                            <div class="td"><input class="date-input" type="date" data-role="plan" data-item-id="${{esc(item.id)}}" value="${{esc(toInputDate(item.plan))}}"></div>
+                            <div class="td"><input class="date-input" type="date" data-role="fact" data-item-id="${{esc(item.id)}}" value="${{esc(toInputDate(item.fact))}}"></div>
+                        </div>
+                    `;
+                }}).join('');
+                const addBlock = allowAdd ? `
+                    <div class="add-item-row">
+                        <input class="add-item-input" id="addItemInput_${{group.id}}" type="text" placeholder="Новый пункт">
+                        <button class="add-item-btn" type="button" data-role="add-item" data-group-id="${{group.id}}">Добавить пункт</button>
+                    </div>` : '';
+                return `<div class="group-block"><div class="group-title">${{esc(group.title)}}</div>${{rows}}${{addBlock}}</div>`;
+            }}
+            function renderTable() {{
+                tableBodyEl.innerHTML = groups.map(renderGroup).join('');
+                bindEvents();
+                calculateProgress();
+                renderTitle();
+                renderProjectChecklistList();
+            }}
+            function replaceItem(updatedItem) {{
+                if (!updatedItem) return;
+                const idx = items.findIndex(x => x.id === updatedItem.id);
+                if (idx >= 0) items[idx] = updatedItem; else items.push(updatedItem);
+            }}
+            function bindEvents() {{
+                document.querySelectorAll('[data-role="status"]').forEach(el => {{
+                    el.addEventListener('change', async function() {{
+                        const item = items.find(x => x.id === this.dataset.itemId);
+                        if (!item) return;
+                        const oldItem = JSON.parse(JSON.stringify(item));
+                        item.status = this.value;
+                        renderTable();
+                        try {{
+                            const result = await updateItem(this.dataset.itemId, 'status', this.value);
+                            replaceItem(result.item);
+                            renderTable();
+                        }} catch (e) {{
+                            replaceItem(oldItem);
+                            renderTable();
+                            setSaveState('error', 'Ошибка сохранения');
+                        }}
+                    }});
+                }});
+                document.querySelectorAll('[data-role="plan"]').forEach(el => {{
+                    el.addEventListener('change', async function() {{
+                        const item = items.find(x => x.id === this.dataset.itemId);
+                        if (!item) return;
+                        const oldItem = JSON.parse(JSON.stringify(item));
+                        item.plan = fromInputDate(this.value);
+                        renderTable();
+                        try {{
+                            const result = await updateItem(this.dataset.itemId, 'plan', item.plan);
+                            replaceItem(result.item);
+                            renderTable();
+                        }} catch (e) {{
+                            replaceItem(oldItem);
+                            renderTable();
+                            setSaveState('error', 'Ошибка сохранения');
+                        }}
+                    }});
+                }});
+                document.querySelectorAll('[data-role="fact"]').forEach(el => {{
+                    el.addEventListener('change', async function() {{
+                        const item = items.find(x => x.id === this.dataset.itemId);
+                        if (!item) return;
+                        const oldItem = JSON.parse(JSON.stringify(item));
+                        item.fact = fromInputDate(this.value);
+                        renderTable();
+                        try {{
+                            const result = await updateItem(this.dataset.itemId, 'fact', item.fact);
+                            replaceItem(result.item);
+                            renderTable();
+                        }} catch (e) {{
+                            replaceItem(oldItem);
+                            renderTable();
+                            setSaveState('error', 'Ошибка сохранения');
+                        }}
+                    }});
+                }});
+                document.querySelectorAll('[data-role="add-item"]').forEach(btn => {{
+                    btn.addEventListener('click', async function() {{
+                        const groupId = Number(this.dataset.groupId);
+                        const input = document.getElementById('addItemInput_' + groupId);
+                        if (!input) return;
+                        const name = (input.value || '').trim();
+                        if (!name) return;
+                        try {{
+                            const result = await addItem(groupId, name);
+                            replaceItem(result.item);
+                            input.value = '';
+                            renderTable();
+                        }} catch (e) {{
+                            setSaveState('error', 'Ошибка добавления пункта');
+                        }}
+                    }});
+                }});
+                document.querySelectorAll('[data-role="upload"]').forEach(btn => {{
+                    btn.addEventListener('click', function() {{
+                        const input = document.querySelector('[data-role="file-input"][data-item-id="' + this.dataset.itemId + '"]');
+                        if (input) input.click();
+                    }});
+                }});
+                document.querySelectorAll('[data-role="file-input"]').forEach(input => {{
+                    input.addEventListener('change', async function() {{
+                        const file = this.files && this.files[0];
+                        if (!file) return;
+                        try {{
+                            const result = await uploadDocument(this.dataset.itemId, file);
+                            replaceItem(result.item);
+                            renderTable();
+                        }} catch (e) {{
+                            setSaveState('error', 'Ошибка загрузки файла');
+                        }}
+                    }});
+                }});
+                document.querySelectorAll('[data-role="remove-doc"]').forEach(btn => {{
+                    btn.addEventListener('click', async function() {{
+                        try {{
+                            const result = await removeDocument(this.dataset.itemId);
+                            replaceItem(result.item);
+                            renderTable();
+                        }} catch (e) {{
+                            setSaveState('error', 'Ошибка удаления файла');
+                        }}
+                    }});
+                }});
+            }}
+            function safeInitBx24ForPopup() {{
+                try {{
+                    if (window.BX24 && typeof window.BX24.init === 'function') {{
+                        window.BX24.init(function () {{
+                            try {{
+                                if (typeof window.BX24.resizeWindow === 'function') {{
+                                    window.BX24.resizeWindow(980, 620);
+                                }}
+                            }} catch (e) {{
+                                console.log('BX24.resizeWindow error:', e);
+                            }}
+                        }});
+                    }}
+                }} catch (e) {{
+                    console.log('BX24.init skipped:', e);
+                }}
+            }}
+            renderTable();
+            fetchChatTitleIfMissing();
             safeInitBx24ForPopup();
         </script>
     </body>
