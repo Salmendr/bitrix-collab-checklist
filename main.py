@@ -1,4 +1,8 @@
+import os
+import uuid
+from pathlib import Path
 from fastapi import FastAPI, Request, UploadFile, File, Form
+from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 import requests
 import json
@@ -12,6 +16,18 @@ app = FastAPI()
 
 DB_PATH = "app.db"
 APP_PORTAL_PATH = "/marketplace/app/84/"
+UPLOAD_ROOT = Path("uploads")
+CHECKLIST_UPLOAD_ROOT = UPLOAD_ROOT / "checklists"
+
+PROJECT_CHECKLISTS = [
+    {"key": "id", "title": "Чек-лист ИД"},
+    {"key": "opr", "title": "Чек-лист ОПР"},
+    {"key": "concept", "title": "Чек-лист Концепция"},
+]
+
+UPLOAD_ROOT.mkdir(parents=True, exist_ok=True)
+CHECKLIST_UPLOAD_ROOT.mkdir(parents=True, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=str(UPLOAD_ROOT)), name="uploads")
 
 CHECKLIST_GROUPS = {
     1: {
@@ -144,6 +160,10 @@ def build_item_id(group_id: int, order: int) -> str:
     return f"item_g{group_id}_{order}"
 
 
+def build_project_checklists():
+    return [dict(x) for x in PROJECT_CHECKLISTS]
+
+
 def derive_indicator_from_status(status: str) -> str:
     status = normalize_status(status)
     if status == "Есть":
@@ -165,6 +185,28 @@ def move_item_to_required_group(item: dict) -> int:
     return resolve_group_id(item.get("name"))
 
 
+def build_upload_rel_path(dialog_id: str, item_id: str, filename: str) -> str:
+    dialog_id = normalize_dialog_id(dialog_id)
+    safe_name = Path(filename or "file.bin").name
+    unique_name = f"{uuid.uuid4().hex}_{safe_name}"
+    return f"checklists/{dialog_id}/{item_id}/{unique_name}"
+
+
+def remove_item_document_file(item: dict):
+    doc_url = str(item.get("documentUrl") or "").strip()
+    if not doc_url.startswith("/uploads/"):
+        return
+
+    rel_path = doc_url.replace("/uploads/", "", 1)
+    file_path = UPLOAD_ROOT / rel_path
+
+    try:
+        if file_path.exists():
+            file_path.unlink()
+    except Exception:
+        pass
+
+
 def build_default_checklist_template(dialog_id: str = ""):
     items = []
 
@@ -182,13 +224,14 @@ def build_default_checklist_template(dialog_id: str = ""):
                 "status": "",
                 "plan": "",
                 "fact": "",
-                "documentUrl": "#",
+                "documentUrl": "",
+                "documentName": "",
                 "isCustom": False,
             })
 
     return normalize_checklist_data({
         "title": "Чек-лист ИД",
-        "collabTitle": dialog_id or "",
+        "collabTitle": "",
         "contractDeadline": "",
         "startDate": "",
         "groups": build_default_groups(),
@@ -251,7 +294,8 @@ def normalize_checklist_data(data: dict) -> dict:
             "status": status,
             "plan": normalize_date_string(item.get("plan")),
             "fact": normalize_date_string(item.get("fact")),
-            "documentUrl": clean_cell_value(item.get("documentUrl")) or "#",
+            "documentUrl": clean_cell_value(item.get("documentUrl")),
+            "documentName": clean_cell_value(item.get("documentName")),
             "isCustom": bool(item.get("isCustom", False)),
         })
 
@@ -269,9 +313,15 @@ def normalize_checklist_data(data: dict) -> dict:
     return {
         "title": data.get("title") or "Чек-лист ИД",
         "collabTitle": clean_cell_value(data.get("collabTitle")),
-        "contractDeadline": clean_cell_value(data.get("contractDeadline")),
-        "startDate": clean_cell_value(data.get("startDate")),
-        "groups": build_default_groups(),
+        "contractDeadline": "",
+        "startDate": "",
+        "groups": [
+            {"id": 1, "title": "ИД"},
+            {"id": 2, "title": "ТУ"},
+            {"id": 3, "title": "Прочее"},
+            {"id": 4, "title": "Не требуется"},
+        ],
+        "projectChecklists": build_project_checklists(),
         "items": normalized_items,
         "notice": data.get("notice", ""),
         "activeCount": progress["activeCount"],
@@ -425,12 +475,13 @@ def parse_xlsx_to_checklist(file_bytes: bytes):
             "status": status,
             "plan": plan,
             "fact": fact,
-            "documentUrl": "#",
+            "documentUrl": "",
+            "documentName": "",
             "isCustom": False,
         })
 
     data = {
-        "title": f"Чек-лист ИД — {ws.title}",
+        "title": "Чек-лист ИД",
         "collabTitle": ws.title,
         "contractDeadline": "",
         "startDate": "",
@@ -2834,22 +2885,31 @@ async def api_checklist_update_item(request: Request):
     if field == "priority":
         target_item["priority"] = normalize_priority(value)
     elif field == "status":
-        target_item["status"] = normalize_status(value)
+        new_status = normalize_status(value)
+        target_item["status"] = new_status
+        target_item["priority"] = derive_indicator_from_status(new_status)
+
+        if new_status == "Нет":
+            remove_item_document_file(target_item)
+            target_item["documentUrl"] = ""
+            target_item["documentName"] = ""
     elif field == "plan":
         target_item["plan"] = normalize_date_string(value)
     elif field == "fact":
         target_item["fact"] = normalize_date_string(value)
 
+    data["items"] = items
     data = normalize_checklist_data(data)
     save_checklist(dialog_id, data)
-    updated_item = next(
-        (item for item in data.get("items", []) if str(item.get("id")) == item_id),
-        None,
-    )
+    updated_item = None
+    for item in data.get("items", []):
+        if str(item.get("id")) == item_id:
+            updated_item = item
+            break
 
     return JSONResponse({
         "ok": True,
-        "item": updated_item or target_item,
+        "item": updated_item,
         "dialogId": dialog_id,
         "progressPercent": data.get("progressPercent", 0),
     })
@@ -2866,16 +2926,11 @@ async def api_checklist_update_meta(request: Request):
     if not dialog_id:
         return JSONResponse({"ok": False, "error": "dialogId is required"}, status_code=400)
 
-    allowed_fields = {"contractDeadline", "startDate", "collabTitle"}
-    if field not in allowed_fields:
-        return JSONResponse({"ok": False, "error": "invalid field"}, status_code=400)
+    if field != "collabTitle":
+        return JSONResponse({"ok": False, "error": "only collabTitle is supported now"}, status_code=400)
 
     data = get_checklist(dialog_id)
-
-    if field in {"contractDeadline", "startDate"}:
-        data[field] = normalize_date_string(value)
-    elif field == "collabTitle":
-        data[field] = clean_cell_value(value)
+    data["collabTitle"] = clean_cell_value(value)
 
     data = normalize_checklist_data(data)
     save_checklist(dialog_id, data)
@@ -2884,7 +2939,7 @@ async def api_checklist_update_meta(request: Request):
         "ok": True,
         "dialogId": dialog_id,
         "field": field,
-        "value": data.get(field, ""),
+        "value": data.get("collabTitle", ""),
         "progressPercent": data.get("progressPercent", 0),
     })
 
@@ -2921,7 +2976,8 @@ async def api_checklist_add_item(request: Request):
         "status": "",
         "plan": "",
         "fact": "",
-        "documentUrl": "#",
+        "documentUrl": "",
+        "documentName": "",
         "isCustom": True,
     }
 
@@ -2929,15 +2985,125 @@ async def api_checklist_add_item(request: Request):
     data["items"] = items
     data = normalize_checklist_data(data)
     save_checklist(dialog_id, data)
-    saved_item = next(
-        (item for item in data.get("items", []) if str(item.get("id")) == str(new_item["id"])),
-        new_item,
-    )
+    created_item = None
+    for item in data.get("items", []):
+        if str(item.get("id")) == new_item["id"]:
+            created_item = item
+            break
 
     return JSONResponse({
         "ok": True,
         "dialogId": dialog_id,
-        "item": saved_item,
+        "item": created_item or new_item,
+        "progressPercent": data.get("progressPercent", 0),
+    })
+
+
+@app.post("/api/checklist/upload-document")
+async def api_checklist_upload_document(
+    dialogId: str = Form(...),
+    itemId: str = Form(...),
+    file: UploadFile = File(...)
+):
+    dialog_id = normalize_dialog_id(dialogId)
+    item_id = str(itemId or "").strip()
+
+    if not dialog_id:
+        return JSONResponse({"ok": False, "error": "dialogId is required"}, status_code=400)
+
+    if not item_id:
+        return JSONResponse({"ok": False, "error": "itemId is required"}, status_code=400)
+
+    data = get_checklist(dialog_id)
+    items = data.get("items", [])
+
+    target_item = None
+    for item in items:
+        if str(item.get("id")) == item_id:
+            target_item = item
+            break
+
+    if not target_item:
+        return JSONResponse({"ok": False, "error": "item not found"}, status_code=404)
+
+    remove_item_document_file(target_item)
+
+    rel_path = build_upload_rel_path(dialog_id, item_id, file.filename or "file.bin")
+    abs_path = UPLOAD_ROOT / rel_path
+    abs_path.parent.mkdir(parents=True, exist_ok=True)
+
+    file_bytes = await file.read()
+    with open(abs_path, "wb") as f:
+        f.write(file_bytes)
+
+    target_item["documentUrl"] = "/uploads/" + rel_path.replace("\\", "/")
+    target_item["documentName"] = Path(file.filename or "file.bin").name
+
+    if normalize_status(target_item.get("status")) != "Не требуется":
+        target_item["status"] = "Есть"
+        target_item["priority"] = derive_indicator_from_status("Есть")
+
+    data["items"] = items
+    data = normalize_checklist_data(data)
+    save_checklist(dialog_id, data)
+
+    updated_item = None
+    for item in data.get("items", []):
+        if str(item.get("id")) == item_id:
+            updated_item = item
+            break
+
+    return JSONResponse({
+        "ok": True,
+        "dialogId": dialog_id,
+        "item": updated_item,
+        "progressPercent": data.get("progressPercent", 0),
+    })
+
+
+@app.post("/api/checklist/remove-document")
+async def api_checklist_remove_document(request: Request):
+    payload = await request.json()
+
+    dialog_id = normalize_dialog_id(payload.get("dialogId"))
+    item_id = str(payload.get("itemId") or "").strip()
+
+    if not dialog_id:
+        return JSONResponse({"ok": False, "error": "dialogId is required"}, status_code=400)
+
+    if not item_id:
+        return JSONResponse({"ok": False, "error": "itemId is required"}, status_code=400)
+
+    data = get_checklist(dialog_id)
+    items = data.get("items", [])
+
+    target_item = None
+    for item in items:
+        if str(item.get("id")) == item_id:
+            target_item = item
+            break
+
+    if not target_item:
+        return JSONResponse({"ok": False, "error": "item not found"}, status_code=404)
+
+    remove_item_document_file(target_item)
+    target_item["documentUrl"] = ""
+    target_item["documentName"] = ""
+
+    data["items"] = items
+    data = normalize_checklist_data(data)
+    save_checklist(dialog_id, data)
+
+    updated_item = None
+    for item in data.get("items", []):
+        if str(item.get("id")) == item_id:
+            updated_item = item
+            break
+
+    return JSONResponse({
+        "ok": True,
+        "dialogId": dialog_id,
+        "item": updated_item,
         "progressPercent": data.get("progressPercent", 0),
     })
 
