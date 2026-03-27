@@ -2823,10 +2823,11 @@ def popup_get(dialogId: str = ""):
             body {{ margin:0; font-family:Arial,sans-serif; background:#f3f6fb; color:#1f2328; }}
             .shell {{ padding:14px; }}
             .modal {{ background:#fff; border:1px solid #e5e7eb; border-radius:14px; overflow:hidden; box-shadow:0 16px 40px rgba(0,0,0,.12); }}
-            .header {{ padding:14px 16px 12px; border-bottom:1px solid #edf0f2; display:flex; justify-content:space-between; align-items:center; gap:14px; }}
+            .header {{ padding:14px 16px 12px; border-bottom:1px solid #edf0f2; display:flex; justify-content:space-between; align-items:flex-start; gap:14px; }}
             .title {{ font-size:22px; font-weight:700; line-height:1.2; }}
             .title small {{ font-size:20px; font-weight:600; color:#344054; }}
-            .header-right {{ display:flex; align-items:center; gap:14px; }}
+            .header-main {{ display:flex; align-items:flex-start; gap:18px; flex:1 1 auto; min-width:0; }}
+            .header-right {{ display:flex; align-items:center; gap:14px; flex:0 0 auto; }}
             .progress-box {{ min-width:150px; }}
             .progress-label {{ font-size:12px; color:#667085; margin-bottom:4px; }}
             .progress-value {{ font-size:21px; font-weight:700; margin-bottom:5px; }}
@@ -2842,9 +2843,9 @@ def popup_get(dialogId: str = ""):
             .side-panel-list {{ padding:10px; display:flex; flex-direction:column; gap:8px; }}
             .side-link {{ display:block; width:100%; text-align:left; border:1px solid #d0d7de; border-radius:8px; background:#fff; padding:9px 10px; font-size:13px; cursor:pointer; }}
             .side-link.active {{ background:#eef2ff; border-color:#c7d2fe; font-weight:700; }}
-            .table {{ width:100%; border:1px solid #e5e7eb; border-radius:12px; overflow:hidden; background:#fff; }}
+            .table {{ width:max-content; min-width:760px; border:1px solid #e5e7eb; border-radius:12px; overflow:hidden; background:#fff; }}
             .thead {{ position:sticky; top:0; z-index:10; background:#f8fafc; border-bottom:1px solid #e5e7eb; }}
-            .thead-top,.thead-bottom,.row {{ display:grid; grid-template-columns:.95fr 110px 110px 130px 130px; gap:0; align-items:stretch; }}
+            .thead-top,.thead-bottom,.row {{ display:grid; grid-template-columns:280px 110px 110px 130px 130px; gap:0; align-items:stretch; justify-content:start; }}
             .th,.td {{ padding:8px 9px; border-right:1px solid #edf0f2; }}
             .th:last-child,.td:last-child {{ border-right:none; }}
             .th {{ font-size:12px; font-weight:700; color:#475467; }}
@@ -2855,15 +2856,16 @@ def popup_get(dialogId: str = ""):
             .row.not-required {{ background:#fafafa; }}
             .row.not-required .item-name {{ text-decoration:line-through; color:#98a2b3; }}
             .cell-name {{ display:flex; align-items:center; gap:8px; min-width:0; }}
-            .status-indicator {{ width:14px; height:14px; border-radius:999px; border:1px solid #d0d7de; flex:0 0 14px; background:#fff; }}
+            .status-indicator {{ width:15px; height:15px; border-radius:999px; border:1px solid #d0d7de; flex:0 0 15px; background:#fff; }}
             .status-indicator.green {{ background:#22c55e; border-color:#22c55e; }}
             .status-indicator.gray {{ background:#9ca3af; border-color:#9ca3af; }}
-            .item-name {{ font-size:13px; font-weight:700; color:#1f2328; line-height:1.2; min-width:0; word-break:break-word; }}
+            .item-name {{ font-size:13px; font-weight:700; color:#1f2328; line-height:1.15; min-width:0; word-break:break-word; max-width:250px; }}
             .status-select,.date-input {{ width:100%; border:1px solid #d0d7de; border-radius:8px; padding:6px 8px; font-size:12px; background:#fff; }}
             .doc-btn,.upload-btn,.add-item-btn {{ display:inline-block; width:100%; text-align:center; padding:6px 8px; border:1px solid #d0d7de; border-radius:8px; background:#f8fafc; color:#1f2328; font-size:12px; text-decoration:none; cursor:pointer; }}
             .doc-btn:hover,.upload-btn:hover,.side-link:hover,.add-item-btn:hover {{ background:#f1f5f9; }}
-            .add-item-row {{ padding:9px 12px 10px; border-top:1px solid #edf0f2; background:#fcfcfd; display:flex; gap:8px; align-items:center; }}
-            .add-item-input {{ flex:1; border:1px solid #d0d7de; border-radius:8px; padding:7px 9px; font-size:12px; }}
+            .add-item-row {{ padding:9px 12px 10px; border-top:1px solid #edf0f2; background:#fcfcfd; display:flex; gap:8px; align-items:center; justify-content:flex-start; }}
+            .add-item-input {{ flex:1 1 auto; min-width:0; border:1px solid #d0d7de; border-radius:8px; padding:7px 9px; font-size:12px; }}
+            .add-item-btn {{ flex:0 0 auto; width:auto; min-width:118px; height:32px; border:1px solid #d0d7de; border-radius:8px; padding:0 12px; background:#fff; cursor:pointer; font-size:12px; white-space:nowrap; }}
             @media (max-width:1180px) {{ .layout {{ grid-template-columns:1fr; }} .side-panel {{ position:static; }} }}
             @media (max-width:980px) {{
                 .thead-top,.thead-bottom,.row {{ grid-template-columns:1fr; }}
@@ -2876,13 +2878,15 @@ def popup_get(dialogId: str = ""):
         <div class="shell">
             <div class="modal">
                 <div class="header">
-                    <div class="title" id="popupTitle">Чек-лист ИД</div>
-                    <div class="header-right">
+                    <div class="header-main">
+                        <div class="title" id="popupTitle">Чек-лист ИД</div>
                         <div class="progress-box">
                             <div class="progress-label">Прогресс</div>
                             <div class="progress-value" id="progressValue">{progress_percent}%</div>
                             <div class="progress-track"><div class="progress-bar" id="progressBar"></div></div>
                         </div>
+                    </div>
+                    <div class="header-right">
                         <div id="saveState" class="save-state">Сохранено</div>
                     </div>
                 </div>
@@ -3083,8 +3087,14 @@ def popup_get(dialogId: str = ""):
                 const hasDocument = !!(item.documentUrl && item.documentUrl.trim());
                 if (hasDocument) {{
                     return `
-                        <a class="doc-btn" href="${{esc(item.documentUrl)}}" target="_blank">Посмотреть</a>
-                        <button class="upload-btn" type="button" data-role="remove-doc" data-item-id="${{esc(item.id)}}" style="margin-top:6px;">Удалить</button>
+                        <button
+                            class="doc-btn"
+                            type="button"
+                            data-role="view-document"
+                            data-document-url="${{esc(item.documentUrl)}}"
+                        >
+                            Посмотреть
+                        </button>
                     `;
                 }}
                 return `
@@ -3211,6 +3221,18 @@ def popup_get(dialogId: str = ""):
                         if (input) input.click();
                     }});
                 }});
+                document.querySelectorAll('[data-role="view-document"]').forEach(btn => {{
+                    btn.addEventListener('click', function () {{
+                        const rawUrl = this.dataset.documentUrl || '';
+                        if (!rawUrl) return;
+                        try {{
+                            const absoluteUrl = new URL(rawUrl, window.location.origin).href;
+                            window.open(absoluteUrl, '_blank', 'noopener,noreferrer');
+                        }} catch (e) {{
+                            console.log('open document error:', e);
+                        }}
+                    }});
+                }});
                 document.querySelectorAll('[data-role="file-input"]').forEach(input => {{
                     input.addEventListener('change', async function() {{
                         const file = this.files && this.files[0];
@@ -3221,17 +3243,6 @@ def popup_get(dialogId: str = ""):
                             renderTable();
                         }} catch (e) {{
                             setSaveState('error', 'Ошибка загрузки файла');
-                        }}
-                    }});
-                }});
-                document.querySelectorAll('[data-role="remove-doc"]').forEach(btn => {{
-                    btn.addEventListener('click', async function() {{
-                        try {{
-                            const result = await removeDocument(this.dataset.itemId);
-                            replaceItem(result.item);
-                            renderTable();
-                        }} catch (e) {{
-                            setSaveState('error', 'Ошибка удаления файла');
                         }}
                     }});
                 }});
