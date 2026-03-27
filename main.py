@@ -281,17 +281,7 @@ def normalize_checklist_data(data: dict) -> dict:
 
 
 def build_demo_checklist():
-    return normalize_checklist_data({
-        "title": "Демо-чек-лист",
-        "contractDeadline": "",
-        "startDate": "",
-        "notice": "Для этого dialogId пока не найден реальный Excel.",
-        "items": [
-            {"name": "ППТ", "status": "Есть", "plan": "", "fact": "", "priority": "red"},
-            {"name": "ГПЗУ", "status": "Нет", "plan": "апрель", "fact": "", "priority": "orange"},
-            {"name": "ТУ Свет", "status": "", "plan": "27.03.2026", "fact": "", "priority": "yellow"},
-        ],
-    })
+    return build_default_checklist_template()
 
 
 def get_conn():
@@ -1125,6 +1115,9 @@ def home_get(dialogId: str = "", mode: str = ""):
     dialog_id = normalize_dialog_id(dialogId)
 
     if dialog_id:
+        return popup_get(dialog_id)
+
+    if mode == "popup":
         return popup_get(dialog_id)
 
     return app_home_html()
@@ -2705,7 +2698,7 @@ def popup_get(dialogId: str = ""):
                         window.BX24.init(function () {{
                             try {{
                                 if (typeof window.BX24.resizeWindow === 'function') {{
-                                    window.BX24.resizeWindow(980, 620);
+                                    window.BX24.resizeWindow(1100, 720);
                                 }}
                             }} catch (e) {{
                                 console.log('BX24.resizeWindow error:', e);
