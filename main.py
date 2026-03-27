@@ -612,6 +612,27 @@ def app_home_html():
         <meta charset="utf-8">
         <title>Чек-лист ИД</title>
         <script src="https://api.bitrix24.com/api/v1/"></script>
+        <script>
+            (function () {
+                try {
+                    const raw = localStorage.getItem('checklist_pending_dialog');
+                    if (!raw) return;
+
+                    const payload = JSON.parse(raw);
+                    if (!payload || !payload.dialogId) return;
+
+                    const age = Date.now() - (payload.ts || 0);
+
+                    localStorage.removeItem('checklist_pending_dialog');
+
+                    if (age < 60000) {
+                        window.location.replace('/popup?dialogId=' + encodeURIComponent(payload.dialogId));
+                    }
+                } catch (e) {
+                    console.log('pending dialog redirect skipped:', e);
+                }
+            })();
+        </script>
     </head>
     <body style="font-family:Arial,sans-serif;padding:40px">
         <h1>Чек-лист ИД</h1>
@@ -1026,11 +1047,17 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
                 }}
 
                 try {{
-                    if (typeof BX24 !== 'undefined') {{
-                        BX24.openApplication({{
-                            dialogId: dialogId,
-                            mode: 'popup'
-                        }});
+                    localStorage.setItem('checklist_pending_dialog', JSON.stringify({{
+                        dialogId: dialogId,
+                        ts: Date.now()
+                    }}));
+                }} catch (e) {{
+                    console.log('localStorage save error:', e);
+                }}
+
+                try {{
+                    if (window.BX24 && typeof window.BX24.openApplication === 'function') {{
+                        BX24.openApplication();
                         autoOpened = true;
                         setMeta('Открываем popup для ' + dialogId);
                         return;
