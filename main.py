@@ -2,7 +2,7 @@ import uuid
 from pathlib import Path
 from fastapi import FastAPI, Request, UploadFile, File, Form
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 import requests
 import json
 import html
@@ -1417,6 +1417,317 @@ def popup_get(dialogId: str = ""):
     """
 
 
+@app.get("/view", response_class=HTMLResponse)
+def view_get(dialogId: str = ""):
+    dialog_id = normalize_dialog_id(dialogId)
+    data = get_checklist(dialog_id)
+
+    items_html = ""
+    for item in data.get("items", []):
+        items_html += f"""
+        <div style="border-top:1px solid #eee;padding:12px 0;">
+            <div style="font-weight:700;margin-bottom:4px;">{html.escape(item.get('name', ''))}</div>
+            <div style="font-size:13px;color:#444;">Статус: {html.escape(item.get('status', '—'))}</div>
+            <div style="font-size:13px;color:#666;">План: {html.escape(item.get('plan', '—'))}</div>
+            <div style="font-size:13px;color:#666;">Факт: {html.escape(item.get('fact', '—'))}</div>
+        </div>
+        """
+
+    if not items_html:
+        items_html = '<div style="color:#666;">Нет пунктов чек-листа</div>'
+
+    notice_html = ""
+    if data.get("notice"):
+        notice_html = f"""
+        <div style="background:#fff8e1;border:1px solid #f3d37a;border-radius:10px;padding:12px;margin-bottom:16px;">
+            {html.escape(data.get("notice", ""))}
+        </div>
+        """
+
+    return f"""
+    <html>
+    <head>
+        <meta charset="utf-8">
+        <title>{html.escape(data.get("title", "Чек-лист ИД"))}</title>
+    </head>
+    <body style="font-family:Arial,sans-serif;padding:24px;max-width:900px;margin:0 auto;">
+        <h1 style="margin-bottom:8px;">{html.escape(data.get("title", "Чек-лист ИД"))}</h1>
+        <div style="color:#666;margin-bottom:6px;">dialogId: {html.escape(dialog_id or 'не передан')}</div>
+        <div style="color:#666;margin-bottom:6px;">Срок по договору: {html.escape(data.get("contractDeadline", "—"))}</div>
+        <div style="color:#666;margin-bottom:20px;">Начало работ: {html.escape(data.get("startDate", "—"))}</div>
+
+        {notice_html}
+
+        <div style="border:1px solid #e5e7eb;border-radius:12px;padding:16px;">
+            {items_html}
+        </div>
+    </body>
+    </html>
+    """
+
+
+@app.get("/api/checklist")
+def api_checklist(dialogId: str = ""):
+    dialogId = normalize_dialog_id(dialogId)
+    return JSONResponse(get_checklist(dialogId))
+
+
+@app.post("/api/checklist/update-item")
+async def api_checklist_update_item(request: Request):
+    payload = await request.json()
+
+    dialog_id = normalize_dialog_id(payload.get("dialogId"))
+    item_id = str(payload.get("itemId") or "").strip()
+    field = str(payload.get("field") or "").strip()
+    value = payload.get("value")
+
+    if not dialog_id:
+        return JSONResponse({"ok": False, "error": "dialogId is required"}, status_code=400)
+
+    if not item_id:
+        return JSONResponse({"ok": False, "error": "itemId is required"}, status_code=400)
+
+    allowed_fields = {"priority", "status", "plan", "fact"}
+    if field not in allowed_fields:
+        return JSONResponse({"ok": False, "error": "invalid field"}, status_code=400)
+
+    data = get_checklist(dialog_id)
+    items = data.get("items", [])
+
+    target_item = None
+    for item in items:
+        if str(item.get("id")) == item_id:
+            target_item = item
+            break
+
+    if not target_item:
+        return JSONResponse({"ok": False, "error": "item not found"}, status_code=404)
+
+    if field == "priority":
+        target_item["priority"] = normalize_priority(value)
+    elif field == "status":
+        new_status = normalize_status(value)
+        target_item["status"] = new_status
+        target_item["priority"] = derive_indicator_from_status(new_status)
+
+        if new_status == "Нет":
+            remove_item_document_file(target_item)
+            target_item["documentUrl"] = ""
+            target_item["documentName"] = ""
+    elif field == "plan":
+        target_item["plan"] = normalize_date_string(value)
+    elif field == "fact":
+        target_item["fact"] = normalize_date_string(value)
+
+    data["items"] = items
+    data = normalize_checklist_data(data)
+    save_checklist(dialog_id, data)
+    updated_item = None
+    for item in data.get("items", []):
+        if str(item.get("id")) == item_id:
+            updated_item = item
+            break
+
+    return JSONResponse({
+        "ok": True,
+        "item": updated_item,
+        "dialogId": dialog_id,
+        "progressPercent": data.get("progressPercent", 0),
+    })
+
+
+@app.post("/api/checklist/update-meta")
+async def api_checklist_update_meta(request: Request):
+    payload = await request.json()
+
+    dialog_id = normalize_dialog_id(payload.get("dialogId"))
+    field = str(payload.get("field") or "").strip()
+    value = payload.get("value")
+
+    if not dialog_id:
+        return JSONResponse({"ok": False, "error": "dialogId is required"}, status_code=400)
+
+    if field != "collabTitle":
+        return JSONResponse({"ok": False, "error": "only collabTitle is supported now"}, status_code=400)
+
+    data = get_checklist(dialog_id)
+    data["collabTitle"] = clean_cell_value(value)
+
+    data = normalize_checklist_data(data)
+    save_checklist(dialog_id, data)
+
+    return JSONResponse({
+        "ok": True,
+        "dialogId": dialog_id,
+        "field": field,
+        "value": data.get("collabTitle", ""),
+        "progressPercent": data.get("progressPercent", 0),
+    })
+
+
+@app.post("/api/checklist/add-item")
+async def api_checklist_add_item(request: Request):
+    payload = await request.json()
+
+    dialog_id = normalize_dialog_id(payload.get("dialogId"))
+    group_id = int(payload.get("groupId") or 0)
+    name = clean_cell_value(payload.get("name"))
+
+    if not dialog_id:
+        return JSONResponse({"ok": False, "error": "dialogId is required"}, status_code=400)
+
+    if group_id not in [1, 2, 3]:
+        return JSONResponse({"ok": False, "error": "invalid groupId"}, status_code=400)
+
+    if not name:
+        return JSONResponse({"ok": False, "error": "name is required"}, status_code=400)
+
+    data = get_checklist(dialog_id)
+    items = data.get("items", [])
+
+    group_items = [x for x in items if x.get("group") == group_id]
+    next_order = len(group_items) + 1
+
+    new_item = {
+        "id": build_item_id(group_id, next_order) + "_custom",
+        "group": group_id,
+        "order": next_order,
+        "name": name,
+        "priority": "white",
+        "status": "",
+        "plan": "",
+        "fact": "",
+        "documentUrl": "",
+        "documentName": "",
+        "isCustom": True,
+    }
+
+    items.append(new_item)
+    data["items"] = items
+    data = normalize_checklist_data(data)
+    save_checklist(dialog_id, data)
+    created_item = None
+    for item in data.get("items", []):
+        if str(item.get("id")) == new_item["id"]:
+            created_item = item
+            break
+
+    return JSONResponse({
+        "ok": True,
+        "dialogId": dialog_id,
+        "item": created_item or new_item,
+        "progressPercent": data.get("progressPercent", 0),
+    })
+
+
+@app.post("/api/checklist/upload-document")
+async def api_checklist_upload_document(
+    dialogId: str = Form(...),
+    itemId: str = Form(...),
+    file: UploadFile = File(...)
+):
+    dialog_id = normalize_dialog_id(dialogId)
+    item_id = str(itemId or "").strip()
+
+    if not dialog_id:
+        return JSONResponse({"ok": False, "error": "dialogId is required"}, status_code=400)
+
+    if not item_id:
+        return JSONResponse({"ok": False, "error": "itemId is required"}, status_code=400)
+
+    data = get_checklist(dialog_id)
+    items = data.get("items", [])
+
+    target_item = None
+    for item in items:
+        if str(item.get("id")) == item_id:
+            target_item = item
+            break
+
+    if not target_item:
+        return JSONResponse({"ok": False, "error": "item not found"}, status_code=404)
+
+    remove_item_document_file(target_item)
+
+    rel_path = build_upload_rel_path(dialog_id, item_id, file.filename or "file.bin")
+    abs_path = UPLOAD_ROOT / rel_path
+    abs_path.parent.mkdir(parents=True, exist_ok=True)
+
+    file_bytes = await file.read()
+    with open(abs_path, "wb") as f:
+        f.write(file_bytes)
+
+    target_item["documentUrl"] = "/uploads/" + rel_path.replace("\\", "/")
+    target_item["documentName"] = Path(file.filename or "file.bin").name
+
+    if normalize_status(target_item.get("status")) != "Не требуется":
+        target_item["status"] = "Есть"
+        target_item["priority"] = derive_indicator_from_status("Есть")
+
+    data["items"] = items
+    data = normalize_checklist_data(data)
+    save_checklist(dialog_id, data)
+
+    updated_item = None
+    for item in data.get("items", []):
+        if str(item.get("id")) == item_id:
+            updated_item = item
+            break
+
+    return JSONResponse({
+        "ok": True,
+        "dialogId": dialog_id,
+        "item": updated_item,
+        "progressPercent": data.get("progressPercent", 0),
+    })
+
+
+@app.post("/api/checklist/remove-document")
+async def api_checklist_remove_document(request: Request):
+    payload = await request.json()
+
+    dialog_id = normalize_dialog_id(payload.get("dialogId"))
+    item_id = str(payload.get("itemId") or "").strip()
+
+    if not dialog_id:
+        return JSONResponse({"ok": False, "error": "dialogId is required"}, status_code=400)
+
+    if not item_id:
+        return JSONResponse({"ok": False, "error": "itemId is required"}, status_code=400)
+
+    data = get_checklist(dialog_id)
+    items = data.get("items", [])
+
+    target_item = None
+    for item in items:
+        if str(item.get("id")) == item_id:
+            target_item = item
+            break
+
+    if not target_item:
+        return JSONResponse({"ok": False, "error": "item not found"}, status_code=404)
+
+    remove_item_document_file(target_item)
+    target_item["documentUrl"] = ""
+    target_item["documentName"] = ""
+
+    data["items"] = items
+    data = normalize_checklist_data(data)
+    save_checklist(dialog_id, data)
+
+    updated_item = None
+    for item in data.get("items", []):
+        if str(item.get("id")) == item_id:
+            updated_item = item
+            break
+
+    return JSONResponse({
+        "ok": True,
+        "dialogId": dialog_id,
+        "item": updated_item,
+        "progressPercent": data.get("progressPercent", 0),
+    })
+
 @app.get("/admin", response_class=HTMLResponse)
 def admin():
     conn = get_conn()
@@ -1482,3 +1793,11 @@ async def admin_upload(dialog_id: str = Form(...), file: UploadFile = File(...))
     </body>
     </html>
     """
+
+
+@app.get("/api/test")
+def api_test():
+    return JSONResponse({
+        "ok": True,
+        "message": "API проекта работает"
+    })
