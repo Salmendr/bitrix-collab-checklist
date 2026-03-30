@@ -20,9 +20,9 @@ UPLOAD_ROOT = Path("uploads")
 CHECKLIST_UPLOAD_ROOT = UPLOAD_ROOT / "checklists"
 
 PROJECT_CHECKLISTS = [
-    {"key": "id", "title": "Р В§Р ВµР С”-Р В»Р С‘РЎРѓРЎвЂљ Р В�Р вЂќ"},
-    {"key": "opr", "title": "Р В§Р ВµР С”-Р В»Р С‘РЎРѓРЎвЂљ Р С›Р СџР В "},
-    {"key": "concept", "title": "Р В§Р ВµР С”-Р В»Р С‘РЎРѓРЎвЂљ Р С™Р С•Р Р…РЎвЂ Р ВµР С—РЎвЂ Р С‘РЎРЏ"},
+    {"key": "id", "title": "Чек-лист ИД"},
+    {"key": "opr", "title": "Чек-лист ОПР"},
+    {"key": "concept", "title": "Чек-лист Концепция"},
 ]
 
 UPLOAD_ROOT.mkdir(parents=True, exist_ok=True)
@@ -31,55 +31,55 @@ app.mount("/uploads", StaticFiles(directory=str(UPLOAD_ROOT)), name="uploads")
 
 CHECKLIST_GROUPS = {
     1: {
-        "title": "Р В�Р вЂќ",
+        "title": "ИД",
         "items": [
-            "Р СџР СџР Сћ",
-            "Р РЋР С•Р С”РЎР‚Р В°РЎвЂ°Р ВµР Р…Р С‘Р Вµ Р С›Р С™Р Сњ",
-            "Р вЂ™РЎвЂ№Р С—Р С‘РЎРѓР С”Р В° Р вЂўР вЂњР В Р Сњ",
-            "Р вЂњР СџР вЂ”Р Р€",
-            "Р В�Р вЂњР вЂќР В�",
-            "Р В�Р вЂњР В�",
-            "Р В�Р В­Р В�",
-            "Р В�Р вЂњР СљР В�",
-            "Р В�Р вЂњР В� Р РЋР СљР В ",
+            "ППТ",
+            "Сокращение ОКН",
+            "Выписка ЕГРН",
+            "ГПЗУ",
+            "ИГДИ",
+            "ИГИ",
+            "ИЭИ",
+            "ИГМИ",
+            "ИГИ СМР",
         ],
     },
     2: {
-        "title": "Р СћР Р€",
+        "title": "ТУ",
         "items": [
-            "Р СћР Р€ Р РЋР Р†Р ВµРЎвЂљ",
-            "Р СћР Р€ Р вЂ™Р С•Р Т‘Р С•РЎРѓР Р…Р В°Р В±Р В¶Р ВµР Р…Р С‘Р Вµ",
-            "Р СћР Р€ Р вЂ�РЎвЂ№РЎвЂљР С•Р Р†Р В°РЎРЏ Р С”Р В°Р Р…Р В°Р В»Р С‘Р В·Р В°РЎвЂ Р С‘РЎРЏ",
-            "Р В Р В°РЎРѓР С—Р С•Р В»Р С•Р В¶Р ВµР Р…Р С‘Р Вµ Р С—Р С•Р В¶ Р С–Р С‘Р Т‘РЎР‚Р В°Р Р…РЎвЂљР С•Р Р†",
-            "Р СћР Р€ Р РЋР РЋ",
-            "Р СћР Р€ Р СћР РЋ",
-            "Р СћР Р€ Р вЂњР В°Р В·",
-            "Р СћР Р€ Р вЂєР С‘Р Р†Р Р…Р ВµР Р†Р С”Р В°",
-            "Р СћР Р€ Р Р†РЎвЂ№Р Р…Р С•РЎРѓРЎвЂ№",
-            "Р РЋР СћР Р€",
+            "ТУ Свет",
+            "ТУ Водоснабжение",
+            "ТУ Бытовая канализация",
+            "Расположение пож гидрантов",
+            "ТУ СС",
+            "ТУ ТС",
+            "ТУ Газ",
+            "ТУ Ливневка",
+            "ТУ выносы",
+            "СТУ",
         ],
     },
     3: {
-        "title": "Р СџРЎР‚Р С•РЎвЂЎР ВµР Вµ",
+        "title": "Прочее",
         "items": [
-            "Р вЂ”Р В°Р Т‘Р В°Р Р…Р С‘Р Вµ Р Р…Р В° Р В»Р С‘РЎвЂћРЎвЂљРЎвЂ№",
-            "Р С’РЎРЊРЎР‚Р С•Р С—Р С•РЎР‚РЎвЂљ",
-            "Р СџРЎР‚Р С‘Р С�РЎвЂ№Р С”Р В°Р Р…Р С‘Р Вµ Р С›Р вЂќР вЂќ",
-            "Р СџР С•РЎР‚РЎС“Р В±Р С•РЎвЂЎР Р…РЎвЂ№Р в„– Р В»Р С‘РЎРѓРЎвЂљ",
-            "Р РЋР С—РЎР‚Р В°Р Р†Р С”Р В° Р Р†РЎвЂ№Р Р†Р С•Р В·Р В° Р С�РЎС“РЎРѓР С•РЎР‚Р В°",
+            "Задание на лифты",
+            "Аэропорт",
+            "Примыкание ОДД",
+            "Порубочный лист",
+            "Справка вывоза мусора",
         ],
     },
     4: {
-        "title": "Р СњР Вµ РЎвЂљРЎР‚Р ВµР В±РЎС“Р ВµРЎвЂљРЎРѓРЎРЏ",
+        "title": "Не требуется",
         "items": [],
     },
 }
 
 STATUS_OPTIONS = [
     "",
-    "Р вЂўРЎРѓРЎвЂљРЎРЉ",
-    "Р СњР ВµРЎвЂљ",
-    "Р СњР Вµ РЎвЂљРЎР‚Р ВµР В±РЎС“Р ВµРЎвЂљРЎРѓРЎРЏ",
+    "Есть",
+    "Нет",
+    "Не требуется",
 ]
 
 PRIORITY_OPTIONS = ["white", "green", "gray"]
@@ -106,7 +106,7 @@ def resolve_group_id(name: str) -> int:
 
 def clean_cell_value(value):
     value = str(value or "").strip()
-    if value == "РІР‚вЂќ":
+    if value == "—":
         return ""
     return value
 
@@ -125,12 +125,12 @@ def normalize_status(value: str) -> str:
         return ""
 
     normalized_map = {
-        "Р ВµРЎРѓРЎвЂљРЎРЉ": "Р вЂўРЎРѓРЎвЂљРЎРЉ",
-        "Р Р…Р ВµРЎвЂљ": "Р СњР ВµРЎвЂљ",
-        "Р Р…Р Вµ РЎвЂљРЎР‚Р ВµР В±РЎС“Р ВµРЎвЂљРЎРѓРЎРЏ": "Р СњР Вµ РЎвЂљРЎР‚Р ВµР В±РЎС“Р ВµРЎвЂљРЎРѓРЎРЏ",
-        "Р С—Р С•Р Т‘Р С—Р С‘РЎРѓР В°Р Р…": "Р вЂўРЎРѓРЎвЂљРЎРЉ",
-        "Р В·Р В°Р С—РЎР‚Р С•РЎРѓ Р С•Р С—РЎР‚Р С•РЎРѓР Р…Р С•Р С–Р С• Р В»Р С‘РЎРѓРЎвЂљР В°": "",
-        "Р Т‘Р С•Р С–Р С•Р Р†Р С•РЎР‚ РЎвЂљР ВµРЎвЂ¦ Р С—РЎР‚Р С‘РЎРѓ": "",
+        "есть": "Есть",
+        "нет": "Нет",
+        "не требуется": "Не требуется",
+        "подписан": "Есть",
+        "запрос опросного листа": "",
+        "договор тех прис": "",
     }
 
     key = value.strip().lower()
@@ -148,7 +148,7 @@ def normalize_date_string(value: str) -> str:
     if not value:
         return ""
 
-    # Р С›РЎРѓРЎвЂљР В°Р Р†Р В»РЎРЏР ВµР С� Р С”Р В°Р С” Р ВµРЎРѓРЎвЂљРЎРЉ, Р ВµРЎРѓР В»Р С‘ РЎРЊРЎвЂљР С• РЎС“Р В¶Р Вµ РЎвЂћР С•РЎР‚Р С�Р В°РЎвЂљ Р вЂќР вЂќ.Р СљР Сљ.Р вЂњР вЂњР вЂњР вЂњ
+    # Оставляем как есть, если это уже формат ДД.ММ.ГГГГ
     parts = value.split(".")
     if len(parts) == 3 and len(parts[0]) == 2 and len(parts[1]) == 2 and len(parts[2]) == 4:
         return value
@@ -166,16 +166,16 @@ def build_project_checklists():
 
 def derive_indicator_from_status(status: str) -> str:
     status = normalize_status(status)
-    if status == "Р вЂўРЎРѓРЎвЂљРЎРЉ":
+    if status == "Есть":
         return "green"
-    if status == "Р СњР ВµРЎвЂљ" or status == "Р СњР Вµ РЎвЂљРЎР‚Р ВµР В±РЎС“Р ВµРЎвЂљРЎРѓРЎРЏ":
+    if status == "Нет" or status == "Не требуется":
         return "gray"
     return "white"
 
 
 def move_item_to_required_group(item: dict) -> int:
     status = normalize_status(item.get("status"))
-    if status == "Р СњР Вµ РЎвЂљРЎР‚Р ВµР В±РЎС“Р ВµРЎвЂљРЎРѓРЎРЏ":
+    if status == "Не требуется":
         return 4
 
     current_group = item.get("group")
@@ -230,7 +230,7 @@ def build_default_checklist_template(dialog_id: str = ""):
             })
 
     return normalize_checklist_data({
-        "title": "Р В§Р ВµР С”-Р В»Р С‘РЎРѓРЎвЂљ Р В�Р вЂќ",
+        "title": "Чек-лист ИД",
         "collabTitle": "",
         "contractDeadline": "",
         "startDate": "",
@@ -243,8 +243,8 @@ def build_default_checklist_template(dialog_id: str = ""):
 def calculate_progress(items: list) -> dict:
     items = items or []
 
-    active_items = [x for x in items if normalize_status(x.get("status")) != "Р СњР Вµ РЎвЂљРЎР‚Р ВµР В±РЎС“Р ВµРЎвЂљРЎРѓРЎРЏ"]
-    completed_items = [x for x in active_items if normalize_status(x.get("status")) == "Р вЂўРЎРѓРЎвЂљРЎРЉ"]
+    active_items = [x for x in items if normalize_status(x.get("status")) != "Не требуется"]
+    completed_items = [x for x in active_items if normalize_status(x.get("status")) == "Есть"]
 
     active_count = len(active_items)
     completed_count = len(completed_items)
@@ -311,15 +311,15 @@ def normalize_checklist_data(data: dict) -> dict:
     progress = calculate_progress(normalized_items)
 
     return {
-        "title": data.get("title") or "Р В§Р ВµР С”-Р В»Р С‘РЎРѓРЎвЂљ Р В�Р вЂќ",
+        "title": data.get("title") or "Чек-лист ИД",
         "collabTitle": clean_cell_value(data.get("collabTitle")),
         "contractDeadline": "",
         "startDate": "",
         "groups": [
-            {"id": 1, "title": "Р В�Р вЂќ"},
-            {"id": 2, "title": "Р СћР Р€"},
-            {"id": 3, "title": "Р СџРЎР‚Р С•РЎвЂЎР ВµР Вµ"},
-            {"id": 4, "title": "Р СњР Вµ РЎвЂљРЎР‚Р ВµР В±РЎС“Р ВµРЎвЂљРЎРѓРЎРЏ"},
+            {"id": 1, "title": "ИД"},
+            {"id": 2, "title": "ТУ"},
+            {"id": 3, "title": "Прочее"},
+            {"id": 4, "title": "Не требуется"},
         ],
         "projectChecklists": build_project_checklists(),
         "items": normalized_items,
@@ -328,8 +328,6 @@ def normalize_checklist_data(data: dict) -> dict:
         "completedCount": progress["completedCount"],
         "progressPercent": progress["progressPercent"],
     }
-
-
 
 
 def get_conn():
@@ -438,7 +436,7 @@ def parse_xlsx_to_checklist(file_bytes: bytes):
         })
 
     data = {
-        "title": "Р В§Р ВµР С”-Р В»Р С‘РЎРѓРЎвЂљ Р В�Р вЂќ",
+        "title": "Чек-лист ИД",
         "collabTitle": ws.title,
         "contractDeadline": "",
         "startDate": "",
@@ -474,7 +472,7 @@ def save_checklist(dialog_id: str, data: dict):
         ON CONFLICT(dialog_id) DO UPDATE SET
             title=excluded.title,
             data_json=excluded.data_json
-    """, (dialog_id, data.get("title", "Р В§Р ВµР С”-Р В»Р С‘РЎРѓРЎвЂљ"), json.dumps(data, ensure_ascii=False)))
+    """, (dialog_id, data.get("title", "Чек-лист"), json.dumps(data, ensure_ascii=False)))
     conn.commit()
     conn.close()
 
@@ -509,7 +507,7 @@ def extract_dialog_id_from_form(form: dict) -> str:
         except Exception:
             pass
 
-    # Р СњР В° РЎРѓР В»РЎС“РЎвЂЎР В°Р в„– Р Р…Р ВµР С•Р В¶Р С‘Р Т‘Р В°Р Р…Р Р…РЎвЂ№РЎвЂ¦ Р С‘Р С�Р ВµР Р… Р С—Р С•Р В»Р ВµР в„–
+    # На случай неожиданных имен полей
     for key, value in form.items():
         if "dialog" in str(key).lower():
             value = normalize_dialog_id(value)
@@ -570,7 +568,7 @@ def app_home_html():
     <html>
     <head>
         <meta charset="utf-8">
-        <title>Р§РµРє-Р»РёСЃС‚ Р�Р”</title>
+        <title>Чек-лист ИД</title>
         <script>
             (function () {
                 try {
@@ -594,8 +592,8 @@ def app_home_html():
         </script>
     </head>
     <body style="font-family:Arial,sans-serif;padding:40px">
-        <h1>Р§РµРє-Р»РёСЃС‚ Р�Р”</h1>
-        <p>РћС‚РєСЂС‹РІР°Р№С‚Рµ РїСЂРёР»РѕР¶РµРЅРёРµ РёР· Bitrix24.</p>
+        <h1>Чек-лист ИД</h1>
+        <p>Открывайте приложение из Bitrix24.</p>
     </body>
     </html>
     """
@@ -610,7 +608,7 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
     <html lang="ru">
     <head>
         <meta charset="utf-8">
-        <title>Р§РµРє-Р»РёСЃС‚ Р�Р” вЂ” textarea</title>
+        <title>Чек-лист ИД — textarea</title>
         <script src="https://api.bitrix24.com/api/v1/"></script>
         <style>
             body {{
@@ -673,11 +671,11 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
     </head>
     <body>
         <div class="wrap">
-            <div class="dot">в‰Ў</div>
+            <div class="dot">≡</div>
             <div class="main">
-                <div class="title">Р§РµРє-Р»РёСЃС‚ Р�Р”</div>
-                <div class="meta" id="meta">Р�РЅРёС†РёР°Р»РёР·Р°С†РёСЏ...</div>
-                <button class="btn" id="openBtn" type="button">РћС‚РєСЂС‹С‚СЊ С‡РµРє-Р»РёСЃС‚</button>
+                <div class="title">Чек-лист ИД</div>
+                <div class="meta" id="meta">Инициализация...</div>
+                <button class="btn" id="openBtn" type="button">Открыть чек-лист</button>
                 <div class="error" id="error"></div>
             </div>
         </div>
@@ -697,13 +695,13 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
 
             function openChecklist(dialogId) {{
                 if (!dialogId) {{
-                    setError('dialogId РЅРµ РЅР°Р№РґРµРЅ');
+                    setError('dialogId не найден');
                     return;
                 }}
 
                 try {{
                     localStorage.setItem('checklist_pending_dialog', JSON.stringify({{
-                        dialogId,
+                        dialogId: dialogId,
                         ts: Date.now()
                     }}));
                 }} catch (e) {{
@@ -714,7 +712,7 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
                     if (window.BX24 && typeof window.BX24.openApplication === 'function') {{
                         BX24.openApplication();
                         autoOpened = true;
-                        setMeta('РћС‚РєСЂС‹РІР°РµРј popup РґР»СЏ ' + dialogId);
+                        setMeta('Открываем popup для ' + dialogId);
                         return;
                     }}
                 }} catch (e) {{
@@ -729,7 +727,7 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
                     if (window.__dialogId) {{
                         openChecklist(window.__dialogId);
                     }} else {{
-                        setError('dialogId РµС‰С‘ РЅРµ РѕРїСЂРµРґРµР»С‘РЅ');
+                        setError('dialogId ещё не определён');
                     }}
                 }} catch (e) {{
                     setError(String(e));
@@ -738,11 +736,11 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
 
             function finish(dialogId, sourceText) {{
                 window.__dialogId = dialogId || '';
-                setMeta('dialogId: ' + (window.__dialogId || 'РЅРµ РїРµСЂРµРґР°РЅ') + ' | source: ' + sourceText);
+                setMeta('dialogId: ' + (window.__dialogId || 'не передан') + ' | source: ' + sourceText);
 
                 try {{
-                    if (typeof BX24 !== 'undefined') {{
-                        BX24.fitWindow();
+                    if (window.BX24 && typeof window.BX24.fitWindow === 'function') {{
+                        window.BX24.fitWindow();
                     }}
                 }} catch (e) {{}}
 
@@ -778,7 +776,7 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
                     finish('', 'BX24-init-failed');
                 }}
             }} else {{
-                setError(initialContextText || 'BX24 РЅРµ РЅР°Р№РґРµРЅ');
+                setError(initialContextText || 'BX24 не найден');
                 finish('', 'local');
             }}
         </script>
@@ -816,8 +814,8 @@ def install_get():
         <title>Bitrix24 Install</title>
     </head>
     <body style="font-family:Arial,sans-serif;padding:40px">
-        <h1>Р Р€РЎРѓРЎвЂљР В°Р Р…Р С•Р Р†Р С”Р В° Р С—РЎР‚Р С‘Р В»Р С•Р В¶Р ВµР Р…Р С‘РЎРЏ</h1>
-        <p>Р вЂўРЎРѓР В»Р С‘ РЎРЊРЎвЂљР В° РЎРѓРЎвЂљРЎР‚Р В°Р Р…Р С‘РЎвЂ Р В° Р С•РЎвЂљР С”РЎР‚РЎвЂ№РЎвЂљР В° Р Р†Р Р…РЎС“РЎвЂљРЎР‚Р С‘ Bitrix24, Р С•Р Р…Р В° Р В·Р В°Р Р†Р ВµРЎР‚РЎв‚¬Р С‘РЎвЂљ РЎС“РЎРѓРЎвЂљР В°Р Р…Р С•Р Р†Р С”РЎС“ Р С—РЎР‚Р С‘Р В»Р С•Р В¶Р ВµР Р…Р С‘РЎРЏ.</p>
+        <h1>Установка приложения</h1>
+        <p>Если эта страница открыта внутри Bitrix24, она завершит установку приложения.</p>
         {install_finish_block()}
     </body>
     </html>
@@ -844,7 +842,7 @@ async def install_post(request: Request):
             {
                 "PLACEMENT": "IM_TEXTAREA",
                 "HANDLER": f"{base_url}/textarea",
-                "TITLE": "Р§РµРє-Р»РёСЃС‚ Р�Р”",
+                "TITLE": "Чек-лист ИД",
                 "OPTIONS": {
                     "iconName": "fa-bars",
                     "context": "CHAT"
@@ -859,13 +857,13 @@ async def install_post(request: Request):
         <title>Bitrix24 Install Callback</title>
     </head>
     <body style="font-family:Arial,sans-serif;padding:40px">
-        <h1>Install callback РїРѕР»СѓС‡РµРЅ</h1>
-        <p>Р•СЃР»Рё bind РїСЂРѕС€С‘Р» СѓСЃРїРµС€РЅРѕ, launcher Р±СѓРґРµС‚ Р·Р°СЂРµРіРёСЃС‚СЂРёСЂРѕРІР°РЅ РІ IM_TEXTAREA.</p>
+        <h1>Install callback получен</h1>
+        <p>Если bind прошёл успешно, launcher будет зарегистрирован в IM_TEXTAREA.</p>
 
-        <h2>Р§С‚Рѕ РїСЂРёСЃР»Р°Р» Bitrix24</h2>
+        <h2>Что прислал Bitrix24</h2>
         <pre>{html.escape(json.dumps(form, ensure_ascii=False, indent=2))}</pre>
 
-        <h2>РћС‚РІРµС‚ placement.bind</h2>
+        <h2>Ответ placement.bind</h2>
         <pre>{html.escape(json.dumps(bind_result, ensure_ascii=False, indent=2))}</pre>
 
         {install_finish_block()}
@@ -897,10 +895,10 @@ def popup_get(dialogId: str = ""):
     dialog_id = normalize_dialog_id(dialogId)
     data = get_checklist(dialog_id)
 
-    title = html.escape(data.get("title", "Р В§Р ВµР С”-Р В»Р С‘РЎРѓРЎвЂљ Р В�Р вЂќ"))
+    title = html.escape(data.get("title", "Чек-лист ИД"))
     collab_title_raw = (data.get("collabTitle", "") or "").strip()
     collab_title = html.escape(collab_title_raw)
-    full_title = f"{title} РІР‚вЂќ {collab_title}" if collab_title_raw else title
+    full_title = f"{title} — {collab_title}" if collab_title_raw else title
     progress_percent = int(data.get("progressPercent", 0) or 0)
 
     items_json = json.dumps(data.get("items", []), ensure_ascii=False)
@@ -982,15 +980,15 @@ def popup_get(dialogId: str = ""):
             <div class="modal">
                 <div class="header">
                     <div class="header-main">
-                        <div class="title" id="popupTitle">Р В§Р ВµР С”-Р В»Р С‘РЎРѓРЎвЂљ Р В�Р вЂќ</div>
+                        <div class="title" id="popupTitle">Чек-лист ИД</div>
                         <div class="progress-box">
-                            <div class="progress-label">Р СџРЎР‚Р С•Р С–РЎР‚Р ВµРЎРѓРЎРѓ</div>
+                            <div class="progress-label">Прогресс</div>
                             <div class="progress-value" id="progressValue">{progress_percent}%</div>
                             <div class="progress-track"><div class="progress-bar" id="progressBar"></div></div>
                         </div>
                     </div>
                     <div class="header-right">
-                        <div id="saveState" class="save-state">Р РЋР С•РЎвЂ¦РЎР‚Р В°Р Р…Р ВµР Р…Р С•</div>
+                        <div id="saveState" class="save-state">Сохранено</div>
                     </div>
                 </div>
                 <div class="content">
@@ -1000,17 +998,17 @@ def popup_get(dialogId: str = ""):
                                 <div class="table">
                             <div class="thead">
                                 <div class="thead-top">
-                                    <div class="th">Р В�Р вЂќ</div>
-                                    <div class="th">Р вЂќР С•Р С”РЎС“Р С�Р ВµР Р…РЎвЂљ</div>
-                                    <div class="th">Р РЋРЎвЂљР В°РЎвЂљРЎС“РЎРѓ</div>
-                                    <div class="th center" style="grid-column: 4 / span 2;">Р вЂќР В°РЎвЂљР В° Р С—Р С•Р В»РЎС“РЎвЂЎР ВµР Р…Р С‘РЎРЏ</div>
+                                    <div class="th">ИД</div>
+                                    <div class="th">Документ</div>
+                                    <div class="th">Статус</div>
+                                    <div class="th center" style="grid-column: 4 / span 2;">Дата получения</div>
                                 </div>
                                 <div class="thead-bottom">
                                     <div class="th"></div>
                                     <div class="th"></div>
                                     <div class="th"></div>
-                                    <div class="th">Р СџР В»Р В°Р Р…</div>
-                                    <div class="th">Р В¤Р В°Р С”РЎвЂљ</div>
+                                    <div class="th">План</div>
+                                    <div class="th">Факт</div>
                                 </div>
                             </div>
                             <div id="leftTableBody"></div>
@@ -1020,17 +1018,17 @@ def popup_get(dialogId: str = ""):
                                 <div class="table">
                                     <div class="thead">
                                         <div class="thead-top">
-                                            <div class="th">Р В�Р вЂќ</div>
-                                            <div class="th">Р вЂќР С•Р С”РЎС“Р С�Р ВµР Р…РЎвЂљ</div>
-                                            <div class="th">Р РЋРЎвЂљР В°РЎвЂљРЎС“РЎРѓ</div>
-                                            <div class="th center" style="grid-column: 4 / span 2;">Р вЂќР В°РЎвЂљР В° Р С—Р С•Р В»РЎС“РЎвЂЎР ВµР Р…Р С‘РЎРЏ</div>
+                                            <div class="th">ИД</div>
+                                            <div class="th">Документ</div>
+                                            <div class="th">Статус</div>
+                                            <div class="th center" style="grid-column: 4 / span 2;">Дата получения</div>
                                         </div>
                                         <div class="thead-bottom">
                                             <div class="th"></div>
                                             <div class="th"></div>
                                             <div class="th"></div>
-                                            <div class="th">Р СџР В»Р В°Р Р…</div>
-                                            <div class="th">Р В¤Р В°Р С”РЎвЂљ</div>
+                                            <div class="th">План</div>
+                                            <div class="th">Факт</div>
                                         </div>
                                     </div>
                                     <div id="rightTableBody"></div>
@@ -1038,7 +1036,7 @@ def popup_get(dialogId: str = ""):
                             </div>
                         </div>
                         <div class="side-panel">
-                            <div class="side-panel-title">Р РЋР С—Р С‘РЎРѓР С•Р С” РЎвЂЎР ВµР С”-Р В»Р С‘РЎРѓРЎвЂљР С•Р Р† Р С—Р С• Р С—РЎР‚Р С•Р ВµР С”РЎвЂљРЎС“</div>
+                            <div class="side-panel-title">Список чек-листов по проекту</div>
                             <div class="side-panel-list" id="projectChecklistList"></div>
                         </div>
                     </div>
@@ -1083,22 +1081,22 @@ def popup_get(dialogId: str = ""):
             }}
             function normalizeStatus(status) {{
                 const s = String(status || '').trim();
-                if (s === 'Р вЂўРЎРѓРЎвЂљРЎРЉ') return 'Р вЂўРЎРѓРЎвЂљРЎРЉ';
-                if (s === 'Р СњР ВµРЎвЂљ') return 'Р СњР ВµРЎвЂљ';
-                if (s === 'Р СњР Вµ РЎвЂљРЎР‚Р ВµР В±РЎС“Р ВµРЎвЂљРЎРѓРЎРЏ') return 'Р СњР Вµ РЎвЂљРЎР‚Р ВµР В±РЎС“Р ВµРЎвЂљРЎРѓРЎРЏ';
+                if (s === 'Есть') return 'Есть';
+                if (s === 'Нет') return 'Нет';
+                if (s === 'Не требуется') return 'Не требуется';
                 return '';
             }}
             function indicatorClass(status) {{
                 const s = normalizeStatus(status);
-                if (s === 'Р вЂўРЎРѓРЎвЂљРЎРЉ') return 'status-indicator green';
-                if (s === 'Р СњР ВµРЎвЂљ' || s === 'Р СњР Вµ РЎвЂљРЎР‚Р ВµР В±РЎС“Р ВµРЎвЂљРЎРѓРЎРЏ') return 'status-indicator gray';
+                if (s === 'Есть') return 'status-indicator green';
+                if (s === 'Нет' || s === 'Не требуется') return 'status-indicator gray';
                 return 'status-indicator';
             }}
             function renderTitle() {{
                 if (collabTitle) {{
-                    popupTitleEl.innerHTML = 'Р В§Р ВµР С”-Р В»Р С‘РЎРѓРЎвЂљ Р В�Р вЂќ <small>РІР‚вЂќ ' + esc(collabTitle) + '</small>';
+                    popupTitleEl.innerHTML = 'Чек-лист ИД <small>— ' + esc(collabTitle) + '</small>';
                 }} else {{
-                    popupTitleEl.textContent = 'Р В§Р ВµР С”-Р В»Р С‘РЎРѓРЎвЂљ Р В�Р вЂќ';
+                    popupTitleEl.textContent = 'Чек-лист ИД';
                 }}
             }}
             async function fetchChatTitleIfMissing() {{
@@ -1141,8 +1139,8 @@ def popup_get(dialogId: str = ""):
                 }}
             }}
             function calculateProgress() {{
-                const activeItems = items.filter(x => normalizeStatus(x.status) !== 'Р СњР Вµ РЎвЂљРЎР‚Р ВµР В±РЎС“Р ВµРЎвЂљРЎРѓРЎРЏ');
-                const completedItems = activeItems.filter(x => normalizeStatus(x.status) === 'Р вЂўРЎРѓРЎвЂљРЎРЉ');
+                const activeItems = items.filter(x => normalizeStatus(x.status) !== 'Не требуется');
+                const completedItems = activeItems.filter(x => normalizeStatus(x.status) === 'Есть');
                 const activeCount = activeItems.length;
                 const completedCount = completedItems.length;
                 const percent = activeCount ? Math.round((completedCount / activeCount) * 100) : 0;
@@ -1150,7 +1148,7 @@ def popup_get(dialogId: str = ""):
                 progressBarEl.style.width = percent + '%';
             }}
             async function updateItem(itemId, field, value) {{
-                setSaveState('saving', 'Р РЋР С•РЎвЂ¦РЎР‚Р В°Р Р…РЎРЏР ВµР С�...');
+                setSaveState('saving', 'Сохраняем...');
                 const response = await fetch('/api/checklist/update-item', {{
                     method: 'POST',
                     headers: {{ 'Content-Type': 'application/json' }},
@@ -1158,11 +1156,11 @@ def popup_get(dialogId: str = ""):
                 }});
                 const result = await response.json();
                 if (!response.ok || !result.ok) throw new Error(result.error || 'save failed');
-                setSaveState('', 'Р РЋР С•РЎвЂ¦РЎР‚Р В°Р Р…Р ВµР Р…Р С•');
+                setSaveState('', 'Сохранено');
                 return result;
             }}
             async function addItem(groupId, name) {{
-                setSaveState('saving', 'Р РЋР С•РЎвЂ¦РЎР‚Р В°Р Р…РЎРЏР ВµР С�...');
+                setSaveState('saving', 'Сохраняем...');
                 const response = await fetch('/api/checklist/add-item', {{
                     method: 'POST',
                     headers: {{ 'Content-Type': 'application/json' }},
@@ -1170,11 +1168,11 @@ def popup_get(dialogId: str = ""):
                 }});
                 const result = await response.json();
                 if (!response.ok || !result.ok) throw new Error(result.error || 'add item failed');
-                setSaveState('', 'Р РЋР С•РЎвЂ¦РЎР‚Р В°Р Р…Р ВµР Р…Р С•');
+                setSaveState('', 'Сохранено');
                 return result;
             }}
             async function removeDocument(itemId) {{
-                setSaveState('saving', 'Р РЋР С•РЎвЂ¦РЎР‚Р В°Р Р…РЎРЏР ВµР С�...');
+                setSaveState('saving', 'Сохраняем...');
                 const response = await fetch('/api/checklist/remove-document', {{
                     method: 'POST',
                     headers: {{ 'Content-Type': 'application/json' }},
@@ -1182,11 +1180,11 @@ def popup_get(dialogId: str = ""):
                 }});
                 const result = await response.json();
                 if (!response.ok || !result.ok) throw new Error(result.error || 'remove document failed');
-                setSaveState('', 'Р РЋР С•РЎвЂ¦РЎР‚Р В°Р Р…Р ВµР Р…Р С•');
+                setSaveState('', 'Сохранено');
                 return result;
             }}
             async function uploadDocument(itemId, file) {{
-                setSaveState('saving', 'Р РЋР С•РЎвЂ¦РЎР‚Р В°Р Р…РЎРЏР ВµР С�...');
+                setSaveState('saving', 'Сохраняем...');
                 const formData = new FormData();
                 formData.append('dialogId', dialogId);
                 formData.append('itemId', itemId);
@@ -1194,7 +1192,7 @@ def popup_get(dialogId: str = ""):
                 const response = await fetch('/api/checklist/upload-document', {{ method: 'POST', body: formData }});
                 const result = await response.json();
                 if (!response.ok || !result.ok) throw new Error(result.error || 'upload document failed');
-                setSaveState('', 'Р РЋР С•РЎвЂ¦РЎР‚Р В°Р Р…Р ВµР Р…Р С•');
+                setSaveState('', 'Сохранено');
                 return result;
             }}
             function getItemsByGroup(groupId) {{
@@ -1210,7 +1208,7 @@ def popup_get(dialogId: str = ""):
                 }}).join('');
                 projectChecklistListEl.querySelectorAll('[data-checklist-key]').forEach(btn => {{
                     btn.addEventListener('click', function () {{
-                        if (this.dataset.checklistKey !== 'id') alert('Р В­РЎвЂљР С•РЎвЂљ РЎвЂЎР ВµР С”-Р В»Р С‘РЎРѓРЎвЂљ Р С—Р С•Р Т‘Р С”Р В»РЎР‹РЎвЂЎР С‘Р С� РЎРѓР В»Р ВµР Т‘РЎС“РЎР‹РЎвЂ°Р С‘Р С� РЎРЊРЎвЂљР В°Р С—Р С•Р С�.');
+                        if (this.dataset.checklistKey !== 'id') alert('Этот чек-лист подключим следующим этапом.');
                     }});
                 }});
             }}
@@ -1224,12 +1222,12 @@ def popup_get(dialogId: str = ""):
                             data-role="view-document"
                             data-document-url="${{esc(item.documentUrl)}}"
                         >
-                            Р СџР С•РЎРѓР С�Р С•РЎвЂљРЎР‚Р ВµРЎвЂљРЎРЉ
+                            Посмотреть
                         </button>
                     `;
                 }}
                 return `
-                    <button class="upload-btn" type="button" data-role="upload" data-item-id="${{esc(item.id)}}">Р вЂ”Р В°Р С–РЎР‚РЎС“Р В·Р С‘РЎвЂљРЎРЉ</button>
+                    <button class="upload-btn" type="button" data-role="upload" data-item-id="${{esc(item.id)}}">Загрузить</button>
                     <input type="file" data-role="file-input" data-item-id="${{esc(item.id)}}" style="display:none;">
                 `;
             }}
@@ -1237,7 +1235,7 @@ def popup_get(dialogId: str = ""):
                 const groupItems = getItemsByGroup(group.id);
                 const allowAdd = group.id !== 4;
                 const rows = groupItems.map(item => {{
-                    const rowClass = normalizeStatus(item.status) === 'Р СњР Вµ РЎвЂљРЎР‚Р ВµР В±РЎС“Р ВµРЎвЂљРЎРѓРЎРЏ' ? 'row not-required' : 'row';
+                    const rowClass = normalizeStatus(item.status) === 'Не требуется' ? 'row not-required' : 'row';
                     return `
                         <div class="${{rowClass}}" data-item-id="${{esc(item.id)}}">
                             <div class="td"><div class="cell-name"><div class="${{indicatorClass(item.status)}}"></div><div class="item-name">${{esc(item.name)}}</div></div></div>
@@ -1245,9 +1243,9 @@ def popup_get(dialogId: str = ""):
                             <div class="td">
                                 <select class="status-select" data-role="status" data-item-id="${{esc(item.id)}}">
                                     <option value="" ${{normalizeStatus(item.status) === '' ? 'selected' : ''}}></option>
-                                    <option value="Р вЂўРЎРѓРЎвЂљРЎРЉ" ${{normalizeStatus(item.status) === 'Р вЂўРЎРѓРЎвЂљРЎРЉ' ? 'selected' : ''}}>Р вЂўРЎРѓРЎвЂљРЎРЉ</option>
-                                    <option value="Р СњР ВµРЎвЂљ" ${{normalizeStatus(item.status) === 'Р СњР ВµРЎвЂљ' ? 'selected' : ''}}>Р СњР ВµРЎвЂљ</option>
-                                    <option value="Р СњР Вµ РЎвЂљРЎР‚Р ВµР В±РЎС“Р ВµРЎвЂљРЎРѓРЎРЏ" ${{normalizeStatus(item.status) === 'Р СњР Вµ РЎвЂљРЎР‚Р ВµР В±РЎС“Р ВµРЎвЂљРЎРѓРЎРЏ' ? 'selected' : ''}}>Р СњР Вµ РЎвЂљРЎР‚Р ВµР В±РЎС“Р ВµРЎвЂљРЎРѓРЎРЏ</option>
+                                    <option value="Есть" ${{normalizeStatus(item.status) === 'Есть' ? 'selected' : ''}}>Есть</option>
+                                    <option value="Нет" ${{normalizeStatus(item.status) === 'Нет' ? 'selected' : ''}}>Нет</option>
+                                    <option value="Не требуется" ${{normalizeStatus(item.status) === 'Не требуется' ? 'selected' : ''}}>Не требуется</option>
                                 </select>
                             </div>
                             <div class="td"><input class="date-input" type="date" data-role="plan" data-item-id="${{esc(item.id)}}" value="${{esc(toInputDate(item.plan))}}"></div>
@@ -1257,8 +1255,8 @@ def popup_get(dialogId: str = ""):
                 }}).join('');
                 const addBlock = allowAdd ? `
                     <div class="add-item-row">
-                        <input class="add-item-input" id="addItemInput_${{group.id}}" type="text" placeholder="Р СњР С•Р Р†РЎвЂ№Р в„– Р С—РЎС“Р Р…Р С”РЎвЂљ">
-                        <button class="add-item-btn" type="button" data-role="add-item" data-group-id="${{group.id}}">Р вЂќР С•Р В±Р В°Р Р†Р С‘РЎвЂљРЎРЉ Р С—РЎС“Р Р…Р С”РЎвЂљ</button>
+                        <input class="add-item-input" id="addItemInput_${{group.id}}" type="text" placeholder="Новый пункт">
+                        <button class="add-item-btn" type="button" data-role="add-item" data-group-id="${{group.id}}">Добавить пункт</button>
                     </div>` : '';
                 return `<div class="group-block"><div class="group-title">${{esc(group.title)}}</div>${{rows}}${{addBlock}}</div>`;
             }}
@@ -1303,7 +1301,7 @@ def popup_get(dialogId: str = ""):
                         }} catch (e) {{
                             replaceItem(oldItem);
                             renderAll();
-                            setSaveState('error', 'Р С›РЎв‚¬Р С‘Р В±Р С”Р В° РЎРѓР С•РЎвЂ¦РЎР‚Р В°Р Р…Р ВµР Р…Р С‘РЎРЏ');
+                            setSaveState('error', 'Ошибка сохранения');
                         }}
                     }});
                 }});
@@ -1321,7 +1319,7 @@ def popup_get(dialogId: str = ""):
                         }} catch (e) {{
                             replaceItem(oldItem);
                             renderAll();
-                            setSaveState('error', 'Р С›РЎв‚¬Р С‘Р В±Р С”Р В° РЎРѓР С•РЎвЂ¦РЎР‚Р В°Р Р…Р ВµР Р…Р С‘РЎРЏ');
+                            setSaveState('error', 'Ошибка сохранения');
                         }}
                     }});
                 }});
@@ -1339,7 +1337,7 @@ def popup_get(dialogId: str = ""):
                         }} catch (e) {{
                             replaceItem(oldItem);
                             renderAll();
-                            setSaveState('error', 'Р С›РЎв‚¬Р С‘Р В±Р С”Р В° РЎРѓР С•РЎвЂ¦РЎР‚Р В°Р Р…Р ВµР Р…Р С‘РЎРЏ');
+                            setSaveState('error', 'Ошибка сохранения');
                         }}
                     }});
                 }});
@@ -1356,7 +1354,7 @@ def popup_get(dialogId: str = ""):
                             input.value = '';
                             renderAll();
                         }} catch (e) {{
-                            setSaveState('error', 'Р С›РЎв‚¬Р С‘Р В±Р С”Р В° Р Т‘Р С•Р В±Р В°Р Р†Р В»Р ВµР Р…Р С‘РЎРЏ Р С—РЎС“Р Р…Р С”РЎвЂљР В°');
+                            setSaveState('error', 'Ошибка добавления пункта');
                         }}
                     }});
                 }});
@@ -1387,7 +1385,7 @@ def popup_get(dialogId: str = ""):
                             replaceItem(result.item);
                             renderAll();
                         }} catch (e) {{
-                            setSaveState('error', 'Р С›РЎв‚¬Р С‘Р В±Р С”Р В° Р В·Р В°Р С–РЎР‚РЎС“Р В·Р С”Р С‘ РЎвЂћР В°Р в„–Р В»Р В°');
+                            setSaveState('error', 'Ошибка загрузки файла');
                         }}
                     }});
                 }});
@@ -1413,6 +1411,55 @@ def popup_get(dialogId: str = ""):
             fetchChatTitleIfMissing();
             safeInitBx24ForPopup();
         </script>
+    </body>
+    </html>
+    """
+
+
+@app.get("/view", response_class=HTMLResponse)
+def view_get(dialogId: str = ""):
+    dialog_id = normalize_dialog_id(dialogId)
+    data = get_checklist(dialog_id)
+
+    items_html = ""
+    for item in data.get("items", []):
+        items_html += f"""
+        <div style="border-top:1px solid #eee;padding:12px 0;">
+            <div style="font-weight:700;margin-bottom:4px;">{html.escape(item.get('name', ''))}</div>
+            <div style="font-size:13px;color:#444;">Статус: {html.escape(item.get('status', '—'))}</div>
+            <div style="font-size:13px;color:#666;">План: {html.escape(item.get('plan', '—'))}</div>
+            <div style="font-size:13px;color:#666;">Факт: {html.escape(item.get('fact', '—'))}</div>
+        </div>
+        """
+
+    if not items_html:
+        items_html = '<div style="color:#666;">Нет пунктов чек-листа</div>'
+
+    notice_html = ""
+    if data.get("notice"):
+        notice_html = f"""
+        <div style="background:#fff8e1;border:1px solid #f3d37a;border-radius:10px;padding:12px;margin-bottom:16px;">
+            {html.escape(data.get("notice", ""))}
+        </div>
+        """
+
+    return f"""
+    <html>
+    <head>
+        <meta charset="utf-8">
+        <title>{html.escape(data.get("title", "Чек-лист ИД"))}</title>
+    </head>
+    <body style="font-family:Arial,sans-serif;padding:24px;max-width:900px;margin:0 auto;">
+        <h1 style="margin-bottom:8px;">{html.escape(data.get("title", "Чек-лист ИД"))}</h1>
+        <div style="color:#666;margin-bottom:6px;">dialogId: {html.escape(dialog_id or 'не передан')}</div>
+        <div style="color:#666;margin-bottom:6px;">Срок по договору: {html.escape(data.get("contractDeadline", "—"))}</div>
+        <div style="color:#666;margin-bottom:20px;">Начало работ: {html.escape(data.get("startDate", "—"))}</div>
+
+        {notice_html}
+
+        <div style="border:1px solid #e5e7eb;border-radius:12px;padding:16px;">
+            {items_html}
+        </div>
     </body>
     </html>
     """
@@ -1462,7 +1509,7 @@ async def api_checklist_update_item(request: Request):
         target_item["status"] = new_status
         target_item["priority"] = derive_indicator_from_status(new_status)
 
-        if new_status == "Р СњР ВµРЎвЂљ":
+        if new_status == "Нет":
             remove_item_document_file(target_item)
             target_item["documentUrl"] = ""
             target_item["documentName"] = ""
@@ -1612,9 +1659,9 @@ async def api_checklist_upload_document(
     target_item["documentUrl"] = "/uploads/" + rel_path.replace("\\", "/")
     target_item["documentName"] = Path(file.filename or "file.bin").name
 
-    if normalize_status(target_item.get("status")) != "Р СњР Вµ РЎвЂљРЎР‚Р ВµР В±РЎС“Р ВµРЎвЂљРЎРѓРЎРЏ":
-        target_item["status"] = "Р вЂўРЎРѓРЎвЂљРЎРЉ"
-        target_item["priority"] = derive_indicator_from_status("Р вЂўРЎРѓРЎвЂљРЎРЉ")
+    if normalize_status(target_item.get("status")) != "Не требуется":
+        target_item["status"] = "Есть"
+        target_item["priority"] = derive_indicator_from_status("Есть")
 
     data["items"] = items
     data = normalize_checklist_data(data)
@@ -1687,20 +1734,20 @@ def admin():
     conn.close()
 
     items = "".join(
-        f"<li><b>{html.escape(row['dialog_id'])}</b> РІР‚вЂќ {html.escape(row['title'])}</li>"
+        f"<li><b>{html.escape(row['dialog_id'])}</b> — {html.escape(row['title'])}</li>"
         for row in rows
-    ) or "<li>Р СџР С•Р С”Р В° Р Р…Р С‘РЎвЂЎР ВµР С–Р С• Р Р…Р Вµ Р В·Р В°Р С–РЎР‚РЎС“Р В¶Р ВµР Р…Р С•</li>"
+    ) or "<li>Пока ничего не загружено</li>"
 
     return f"""
     <html>
     <head>
         <meta charset="utf-8">
-        <title>Р вЂ”Р В°Р С–РЎР‚РЎС“Р В·Р С”Р В° РЎвЂЎР ВµР С”-Р В»Р С‘РЎРѓРЎвЂљР В°</title>
+        <title>Загрузка чек-листа</title>
     </head>
     <body style="font-family:Arial,sans-serif;padding:40px;max-width:900px">
-        <h1>Р вЂ”Р В°Р С–РЎР‚РЎС“Р В·Р С”Р В° Excel Р Т‘Р В»РЎРЏ Р С”Р С•Р В»Р В»Р В°Р В±РЎвЂ№</h1>
-        <p>Р РЃР В°Р С– 1: Р С•РЎвЂљР С”РЎР‚Р С•Р в„–РЎвЂљР Вµ Р С”Р С•Р В»Р В»Р В°Р В±РЎС“ Р С‘ Р С—Р С•РЎРѓР С�Р С•РЎвЂљРЎР‚Р С‘РЎвЂљР Вµ Р В·Р Р…Р В°РЎвЂЎР ВµР Р…Р С‘Р Вµ <b>dialogId</b> Р Р† sidebar.</p>
-        <p>Р РЃР В°Р С– 2: Р Р†РЎРѓРЎвЂљР В°Р Р†РЎРЉРЎвЂљР Вµ РЎРЊРЎвЂљР С•РЎвЂљ dialogId РЎРѓРЎР‹Р Т‘Р В° Р С‘ Р В·Р В°Р С–РЎР‚РЎС“Р В·Р С‘РЎвЂљР Вµ .xlsx РЎвЂћР В°Р в„–Р В».</p>
+        <h1>Загрузка Excel для коллабы</h1>
+        <p>Шаг 1: откройте коллабу и посмотрите значение <b>dialogId</b> в sidebar.</p>
+        <p>Шаг 2: вставьте этот dialogId сюда и загрузите .xlsx файл.</p>
 
         <form action="/admin/upload" method="post" enctype="multipart/form-data" style="margin:30px 0">
             <div style="margin-bottom:16px">
@@ -1709,14 +1756,14 @@ def admin():
             </div>
 
             <div style="margin-bottom:16px">
-                <label>XLSX РЎвЂћР В°Р в„–Р В»</label><br>
+                <label>XLSX файл</label><br>
                 <input type="file" name="file" accept=".xlsx" required>
             </div>
 
-            <button type="submit" style="padding:10px 16px">Р вЂ”Р В°Р С–РЎР‚РЎС“Р В·Р С‘РЎвЂљРЎРЉ РЎвЂЎР ВµР С”-Р В»Р С‘РЎРѓРЎвЂљ</button>
+            <button type="submit" style="padding:10px 16px">Загрузить чек-лист</button>
         </form>
 
-        <h2>Р Р€Р В¶Р Вµ Р В·Р В°Р С–РЎР‚РЎС“Р В¶Р ВµР Р…Р Р…РЎвЂ№Р Вµ РЎвЂЎР ВµР С”-Р В»Р С‘РЎРѓРЎвЂљРЎвЂ№</h2>
+        <h2>Уже загруженные чек-листы</h2>
         <ul>{items}</ul>
     </body>
     </html>
@@ -1734,15 +1781,22 @@ async def admin_upload(dialog_id: str = Form(...), file: UploadFile = File(...))
     <html>
     <head>
         <meta charset="utf-8">
-        <title>Р вЂњР С•РЎвЂљР С•Р Р†Р С•</title>
+        <title>Готово</title>
     </head>
     <body style="font-family:Arial,sans-serif;padding:40px">
-        <h1>Р В§Р ВµР С”-Р В»Р С‘РЎРѓРЎвЂљ РЎРѓР С•РЎвЂ¦РЎР‚Р В°Р Р…РЎвЂ�Р Р…</h1>
+        <h1>Чек-лист сохранён</h1>
         <p><b>dialogId:</b> {html.escape(dialog_id)}</p>
-        <p><b>Р В¤Р В°Р в„–Р В»:</b> {html.escape(file.filename or '')}</p>
-        <p>Р СћР ВµР С—Р ВµРЎР‚РЎРЉ Р Р†Р ВµРЎР‚Р Р…Р С‘РЎвЂљР ВµРЎРѓРЎРЉ Р Р† Р С”Р С•Р В»Р В»Р В°Р В±РЎС“ Р С‘ Р С•Р В±Р Р…Р С•Р Р†Р С‘РЎвЂљР Вµ sidebar.</p>
-        <p><a href="/admin">Р СњР В°Р В·Р В°Р Т‘ Р Р† /admin</a></p>
+        <p><b>Файл:</b> {html.escape(file.filename or '')}</p>
+        <p>Теперь вернитесь в коллабу и обновите sidebar.</p>
+        <p><a href="/admin">Назад в /admin</a></p>
     </body>
     </html>
     """
 
+
+@app.get("/api/test")
+def api_test():
+    return JSONResponse({
+        "ok": True,
+        "message": "API проекта работает"
+    })
