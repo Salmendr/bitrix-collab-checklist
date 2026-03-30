@@ -1,0 +1,101 @@
+### Проверка health
+GET http://127.0.0.1:8000/health
+
+###
+
+### Получить чек-лист по dialogId
+GET http://127.0.0.1:8000/api/checklist?dialogId=chat9999
+
+###
+
+### Обновить статус пункта
+POST http://127.0.0.1:8000/api/checklist/update-item
+Content-Type: application/json
+
+{
+  "dialogId": "chat9999",
+  "itemId": "item_g1_1",
+  "field": "status",
+  "value": "Есть"
+}
+
+###
+
+### Поставить статус Нет и проверить очистку документа
+POST http://127.0.0.1:8000/api/checklist/update-item
+Content-Type: application/json
+
+{
+  "dialogId": "chat9999",
+  "itemId": "item_g1_1",
+  "field": "status",
+  "value": "Нет"
+}
+
+###
+
+### Поставить статус Не требуется
+POST http://127.0.0.1:8000/api/checklist/update-item
+Content-Type: application/json
+
+{
+  "dialogId": "chat9999",
+  "itemId": "item_g1_2",
+  "field": "status",
+  "value": "Не требуется"
+}
+
+###
+
+### Обновить дату План
+POST http://127.0.0.1:8000/api/checklist/update-item
+Content-Type: application/json
+
+{
+  "dialogId": "chat9999",
+  "itemId": "item_g2_1",
+  "field": "plan",
+  "value": "06.04.2026"
+}
+
+###
+
+### Обновить дату Факт
+POST http://127.0.0.1:8000/api/checklist/update-item
+Content-Type: application/json
+
+{
+  "dialogId": "chat9999",
+  "itemId": "item_g2_1",
+  "field": "fact",
+  "value": "08.04.2026"
+}
+
+###
+
+### Обновить название коллабы
+POST http://127.0.0.1:8000/api/checklist/update-meta
+Content-Type: application/json
+
+{
+  "dialogId": "chat9999",
+  "field": "collabTitle",
+  "value": "ЖК Яблоневый сад"
+}
+
+###
+
+### Добавить новый пункт в группу ТУ
+POST http://127.0.0.1:8000/api/checklist/add-item
+Content-Type: application/json
+
+{
+  "dialogId": "chat9999",
+  "groupId": 2,
+  "name": "Новый тестовый пункт"
+}
+
+###
+
+### Открыть popup локально
+GET http://127.0.0.1:8000/popup?dialogId=chat9999
