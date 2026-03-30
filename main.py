@@ -14,9 +14,10 @@ import openpyxl
 
 app = FastAPI()
 
-DB_PATH = "app.db"
+DB_PATH = "db/app.db"
 APP_PORTAL_PATH = "/marketplace/app/84/"
 UPLOAD_ROOT = Path("uploads")
+Path("db")
 CHECKLIST_UPLOAD_ROOT = UPLOAD_ROOT / "checklists"
 
 PROJECT_CHECKLISTS = [
