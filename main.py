@@ -944,7 +944,7 @@ def popup_get(dialogId: str = ""):
             .table {{ width:100%; border:1px solid #e5e7eb; border-radius:12px; overflow:hidden; background:#fff; }}
             .thead {{ position:sticky; top:0; z-index:10; background:#f8fafc; border-bottom:1px solid #e5e7eb; }}
             .thead-top,.thead-bottom {{ min-height:38px; }}
-            .thead-top,.thead-bottom,.row {{ display:grid; grid-template-columns:190px 100px 100px 120px 120px; gap:0; align-items:stretch; justify-content:start; }}
+            .thead-top,.thead-bottom,.row {{ display:grid; grid-template-columns:190px 100px 100px 136px 136px; gap:0; align-items:stretch; justify-content:start; }}
             .th,.td {{ padding:8px 9px; border-right:1px solid #edf0f2; }}
             .th:last-child,.td:last-child {{ border-right:none; }}
             .th {{ font-size:12px; font-weight:700; color:#475467; min-height:38px; display:flex; align-items:center; }}
@@ -964,8 +964,9 @@ def popup_get(dialogId: str = ""):
             .doc-btn,.upload-btn,.add-item-btn {{ display:inline-block; width:100%; text-align:center; padding:6px 8px; border:1px solid #d0d7de; border-radius:8px; background:#f8fafc; color:#1f2328; font-size:12px; text-decoration:none; cursor:pointer; }}
             .doc-btn:hover,.upload-btn:hover,.side-link:hover,.add-item-btn:hover {{ background:#f1f5f9; }}
             .add-item-row {{ padding:9px 12px 10px; min-height:52px; border-top:1px solid #edf0f2; background:#fcfcfd; display:flex; gap:8px; align-items:center; justify-content:flex-start; }}
-            .add-item-input {{ flex:1 1 auto; min-width:0; height:32px; border:1px solid #d0d7de; border-radius:8px; padding:7px 9px; font-size:12px; }}
-            .add-item-btn {{ flex:0 0 auto; min-width:118px; height:32px; border:1px solid #d0d7de; border-radius:8px; padding:0 12px; background:#fff; cursor:pointer; font-size:12px; white-space:nowrap; }}
+            .add-item-row::after {{ content:''; flex:1 1 auto; }}
+            .add-item-input {{ flex:0 0 190px; width:190px; min-width:190px; height:32px; border:1px solid #d0d7de; border-radius:8px; padding:7px 9px; font-size:12px; }}
+            .add-item-btn {{ flex:0 0 100px; width:100px; min-width:100px; height:32px; border:1px solid #d0d7de; border-radius:8px; padding:6px 8px; background:#f8fafc; cursor:pointer; font-size:12px; white-space:nowrap; }}
             @media (max-width:1320px) {{ .layout {{ grid-template-columns:1fr; }} .side-panel {{ position:static; }} }}
             @media (max-width:1120px) {{ .tables-grid {{ grid-template-columns:1fr; }} }}
             @media (max-width:980px) {{
