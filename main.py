@@ -1586,10 +1586,15 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
         </div>
         <script>
             const dialogId = {dialog_id_json};
-            let groups = {groups_json};
-            const projectChecklists = {project_checklists_json};
-            let items = {items_json};
+            const rawGroups = {groups_json};
+            const rawProjectChecklists = {project_checklists_json};
+            let rawItems = {items_json};
             let collabTitle = {collab_title_json};
+
+            const groups = Array.isArray(rawGroups) ? rawGroups : [];
+            const projectChecklists = Array.isArray(rawProjectChecklists) ? rawProjectChecklists : [];
+            let items = Array.isArray(rawItems) ? rawItems : [];
+
             let currentChecklistKey = {checklist_key_json};
             let checklistTitle = {checklist_title_json};
             let sessionChanges = [];
@@ -1735,6 +1740,37 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                     setDebugText(event + ' | js error');
                 }}
             }}
+            function logRenderState(stage) {{
+                debugLog('render_state', {{
+                    stage,
+                    groupsType: typeof rawGroups,
+                    itemsType: typeof rawItems,
+                    projectChecklistsType: typeof rawProjectChecklists,
+                    groupsIsArray: Array.isArray(groups),
+                    itemsIsArray: Array.isArray(items),
+                    projectChecklistsIsArray: Array.isArray(projectChecklists),
+                    groupsLength: groups.length,
+                    itemsLength: items.length,
+                    projectChecklistsLength: projectChecklists.length,
+                    leftTableExists: !!leftTableBodyEl,
+                    rightTableExists: !!rightTableBodyEl,
+                    titleExists: !!popupTitleEl,
+                    sidePanelExists: !!projectChecklistListEl
+                }});
+            }}
+
+            function logRenderError(stage, error) {{
+                const message = (error && error.message) ? error.message : String(error || 'unknown error');
+                const stack = (error && error.stack) ? error.stack : '';
+
+                setDebugText(stage + ' | ERROR: ' + message);
+
+                debugLog('render_error', {{
+                    stage,
+                    message,
+                    stack
+                }});
+            }}
 
             function sendCloseSummaryOnce(eventName) {{
                 if (closeSummarySent) {{
@@ -1846,6 +1882,9 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                 }}
             }}
             function calculateProgress() {{
+                if (!progressValueEl || !progressBarEl) {{
+                    return;
+                }}
                 if (currentChecklistKey !== 'id') {{
                     progressValueEl.textContent = '';
                     progressBarEl.style.width = '0%';
@@ -1909,12 +1948,23 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                 return result;
             }}
             function getItemsByGroup(groupId) {{
-                return items.filter(item => item.group === groupId).sort((a, b) => a.order - b.order);
+                return items
+                    .filter(item => Number(item.group) === Number(groupId))
+                    .sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
             }}
             function hasItemsInGroup(groupId) {{
                 return getItemsByGroup(groupId).length > 0;
             }}
             function renderProjectChecklistList() {{
+                if (!projectChecklistListEl) {{
+                    return;
+                }}
+
+                if (!Array.isArray(projectChecklists) || !projectChecklists.length) {{
+                    projectChecklistListEl.innerHTML = '';
+                    return;
+                }}
+
                 projectChecklistListEl.innerHTML = projectChecklists.map(item => {{
                     const active = item.key === currentChecklistKey ? 'side-link active' : 'side-link';
                     return `<button type="button" class="${{active}}" data-checklist-key="${{esc(item.key)}}">${{esc(item.title)}}</button>`;
@@ -2049,6 +2099,9 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                     renderConceptTable();
                     return;
                 }}
+                if (!leftTableBodyEl || !rightTableBodyEl) {{
+                    throw new Error('leftTableBodyEl or rightTableBodyEl not found');
+                }}
                 if (tablesGridEl) {{
                     tablesGridEl.style.gridTemplateColumns = '1fr 1fr';
                 }}
@@ -2057,20 +2110,18 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                 }}
                 if (leftTableEl) leftTableEl.innerHTML = idLeftTableHtml;
                 if (rightTableEl) rightTableEl.innerHTML = idRightTableHtml;
-                const leftBody = document.getElementById('leftTableBody');
-                const rightBody = document.getElementById('rightTableBody');
-                const leftGroups = groups.filter(g => g.id === 1 || g.id === 3);
-                const rightGroups = groups.filter(g => g.id === 2);
+                const leftGroups = groups.filter(g => Number(g.id) === 1 || Number(g.id) === 3);
+                const rightGroups = groups.filter(g => Number(g.id) === 2);
 
                 if (hasItemsInGroup(4)) {{
-                    const notRequiredGroup = groups.find(g => g.id === 4);
+                    const notRequiredGroup = groups.find(g => Number(g.id) === 4);
                     if (notRequiredGroup) {{
                         rightGroups.push(notRequiredGroup);
                     }}
                 }}
 
-                if (leftBody) leftBody.innerHTML = leftGroups.map(renderGroup).join('');
-                if (rightBody) rightBody.innerHTML = rightGroups.map(renderGroup).join('');
+                leftTableBodyEl.innerHTML = leftGroups.map(renderGroup).join('');
+                rightTableBodyEl.innerHTML = rightGroups.map(renderGroup).join('');
             }}
             function renderAll() {{
                 renderTables();
@@ -2390,14 +2441,36 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                     console.log('BX24.init skipped:', e);
                 }}
             }}
-            renderAll();
-            debugLog('popup_loaded', {{
-                href: window.location.href,
-                hasDialogId: !!dialogId
-            }});
-            fetchChatTitleIfMissing();
-            fetchCurrentUserIfPossible();
-            safeInitBx24ForPopup();
+            try {{
+                logRenderState('before_renderAll');
+                renderAll();
+                logRenderState('after_renderAll');
+
+                debugLog('popup_loaded', {{
+                    href: window.location.href,
+                    hasDialogId: !!dialogId
+                }});
+            }} catch (e) {{
+                logRenderError('renderAll', e);
+            }}
+
+            try {{
+                fetchChatTitleIfMissing();
+            }} catch (e) {{
+                logRenderError('fetchChatTitleIfMissing', e);
+            }}
+
+            try {{
+                fetchCurrentUserIfPossible();
+            }} catch (e) {{
+                logRenderError('fetchCurrentUserIfPossible', e);
+            }}
+
+            try {{
+                safeInitBx24ForPopup();
+            }} catch (e) {{
+                logRenderError('safeInitBx24ForPopup', e);
+            }}
         </script>
     </body>
     </html>
