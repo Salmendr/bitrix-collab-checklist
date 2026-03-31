@@ -1126,6 +1126,20 @@ def popup_get(dialogId: str = ""):
                     </div>
                 </div>
                 <div class="content">
+                    <div id="debugPanel" style="
+                        margin-bottom:12px;
+                        padding:10px 12px;
+                        border:1px solid #e5e7eb;
+                        border-radius:10px;
+                        background:#fafbfc;
+                        font-size:12px;
+                        color:#344054;
+                    ">
+                        <div><b>Debug:</b> <span id="debugLastEvent">popup init</span></div>
+                        <div style="margin-top:4px;">
+                            <a href="/debug/logs" target="_blank">Открыть /debug/logs</a>
+                        </div>
+                    </div>
                     <div class="layout">
                         <div class="tables-grid">
                             <div class="table-panel">
@@ -1195,6 +1209,10 @@ def popup_get(dialogId: str = ""):
             const progressBarEl = document.getElementById('progressBar');
             const popupTitleEl = document.getElementById('popupTitle');
             const projectChecklistListEl = document.getElementById('projectChecklistList');
+            const debugLastEventEl = document.getElementById('debugLastEvent');
+            const APP_BASE_URL = window.location.origin;
+            let closeSummarySent = false;
+            let sessionDirty = false;
 
             function setSaveState(mode, text) {{
                 saveStateEl.classList.remove('saving', 'error');
@@ -1271,51 +1289,118 @@ def popup_get(dialogId: str = ""):
                     console.log('fetchCurrentUserIfPossible skipped:', e);
                 }}
             }}
+            function setDebugText(text) {{
+                if (debugLastEventEl) {{
+                    debugLastEventEl.textContent = text;
+                }}
+            }}
             function debugLog(event, payload = {{}}, useBeacon = false) {{
                 const body = JSON.stringify({{
                     event,
                     dialogId,
                     payload,
+                    href: window.location.href,
                     ts: new Date().toISOString()
                 }});
 
+                setDebugText(event);
+
                 try {{
+                    const url = APP_BASE_URL + '/api/debug/event';
+
                     if (useBeacon && navigator.sendBeacon) {{
                         const blob = new Blob([body], {{ type: 'application/json' }});
-                        navigator.sendBeacon('/api/debug/event', blob);
+                        const ok = navigator.sendBeacon(url, blob);
+                        setDebugText(event + ' | beacon=' + ok);
                         return;
                     }}
 
-                    fetch('/api/debug/event', {{
+                    fetch(url, {{
                         method: 'POST',
                         headers: {{
                             'Content-Type': 'application/json'
                         }},
                         body
-                    }}).catch(err => {{
+                    }})
+                    .then(r => {{
+                        setDebugText(event + ' | http=' + r.status);
+                    }})
+                    .catch(err => {{
                         console.log('debugLog fetch error:', err);
+                        setDebugText(event + ' | fetch error');
                     }});
                 }} catch (e) {{
                     console.log('debugLog error:', e);
+                    setDebugText(event + ' | js error');
                 }}
             }}
-            function sendCloseDebug(eventName) {{
-                debugLog(eventName, {{
-                    changesCount: sessionChanges.length,
+
+            function sendCloseSummaryOnce(eventName) {{
+                if (closeSummarySent) {{
+                    return;
+                }}
+
+                closeSummarySent = true;
+
+                const payload = {{
+                    dialogId,
+                    editor: currentEditor,
                     changes: sessionChanges,
-                    editor: currentEditor
-                }}, true);
+                    closeEvent: eventName,
+                    ts: new Date().toISOString()
+                }};
+
+                debugLog('close_summary_start', payload, true);
+
+                try {{
+                    const closeUrl = APP_BASE_URL + '/api/checklist/close-session';
+                    const debugUrl = APP_BASE_URL + '/api/debug/event';
+
+                    const closeBlob = new Blob([JSON.stringify(payload)], {{
+                        type: 'application/json'
+                    }});
+
+                    const closeOk = navigator.sendBeacon
+                        ? navigator.sendBeacon(closeUrl, closeBlob)
+                        : false;
+
+                    const debugBlob = new Blob([JSON.stringify({{
+                        event: 'close_summary_beacon_sent',
+                        dialogId,
+                        payload: {{
+                            closeEvent: eventName,
+                            closeOk,
+                            changesCount: sessionChanges.length,
+                            editor: currentEditor
+                        }},
+                        ts: new Date().toISOString()
+                    }})], {{
+                        type: 'application/json'
+                    }});
+
+                    if (navigator.sendBeacon) {{
+                        navigator.sendBeacon(debugUrl, debugBlob);
+                    }}
+
+                    setDebugText('close_summary_sent | beacon=' + closeOk + ' | changes=' + sessionChanges.length);
+                }} catch (e) {{
+                    console.log('sendCloseSummaryOnce error:', e);
+                    setDebugText('close_summary_error');
+                }}
             }}
+
             document.addEventListener('visibilitychange', function () {{
                 if (document.visibilityState === 'hidden') {{
-                    sendCloseDebug('popup_hidden');
+                    sendCloseSummaryOnce('popup_hidden');
                 }}
             }});
+
             window.addEventListener('pagehide', function () {{
-                sendCloseDebug('popup_pagehide');
+                sendCloseSummaryOnce('popup_pagehide');
             }});
+
             window.addEventListener('beforeunload', function () {{
-                sendCloseDebug('popup_beforeunload');
+                sendCloseSummaryOnce('popup_beforeunload');
             }});
             async function fetchChatTitleIfMissing() {{
                 if (collabTitle) {{ renderTitle(); return; }}
@@ -1524,6 +1609,7 @@ def popup_get(dialogId: str = ""):
                             oldValue: oldItem.status || '',
                             newValue: newValue || ''
                         }});
+                        sessionDirty = true;
                         debugLog('status_changed', {{
                             itemId: item.id,
                             itemName: item.name,
@@ -1539,6 +1625,7 @@ def popup_get(dialogId: str = ""):
                                 oldValue: 'uploaded',
                                 newValue: 'removed'
                             }});
+                            sessionDirty = true;
                             debugLog('document_removed_by_status', {{
                                 itemId: item.id,
                                 itemName: item.name,
@@ -1578,6 +1665,7 @@ def popup_get(dialogId: str = ""):
                             oldValue: oldItem.plan || '',
                             newValue: newValue || ''
                         }});
+                        sessionDirty = true;
                         debugLog('plan_changed', {{
                             itemId: item.id,
                             itemName: item.name,
@@ -1616,6 +1704,7 @@ def popup_get(dialogId: str = ""):
                             oldValue: oldItem.fact || '',
                             newValue: newValue || ''
                         }});
+                        sessionDirty = true;
                         debugLog('fact_changed', {{
                             itemId: item.id,
                             itemName: item.name,
@@ -1657,6 +1746,7 @@ def popup_get(dialogId: str = ""):
                                     oldValue: '',
                                     newValue: result.item.name
                                 }});
+                                sessionDirty = true;
                                 debugLog('item_added', {{
                                     itemId: result.item.id,
                                     itemName: result.item.name,
@@ -1709,6 +1799,7 @@ def popup_get(dialogId: str = ""):
                                     oldValue: '',
                                     newValue: 'uploaded'
                                 }});
+                                sessionDirty = true;
                                 debugLog('document_uploaded', {{
                                     itemId: result.item.id,
                                     itemName: result.item.name,
@@ -1723,6 +1814,7 @@ def popup_get(dialogId: str = ""):
                                         oldValue: oldStatus || '',
                                         newValue: result.item.status || ''
                                     }});
+                                    sessionDirty = true;
                                     debugLog('status_changed_by_upload', {{
                                         itemId: result.item.id,
                                         itemName: result.item.name,
@@ -2104,16 +2196,29 @@ async def api_checklist_close_session(request: Request):
         payload = await request.json()
     except Exception:
         raw = await request.body()
-        payload = json.loads(raw.decode("utf-8") or "{}")
+        try:
+            payload = json.loads(raw.decode("utf-8") or "{}")
+        except Exception:
+            payload = {"raw": raw.decode("utf-8", errors="ignore")}
+
+    write_debug_log("close_session_received", payload)
 
     dialog_id = normalize_dialog_id(payload.get("dialogId"))
     changes = payload.get("changes") or []
     editor = payload.get("editor") or {}
 
     if not dialog_id:
+        write_debug_log("close_session_invalid", {
+            "reason": "dialogId is required",
+            "payload": payload
+        })
         return JSONResponse({"ok": False, "error": "dialogId is required"}, status_code=400)
 
     if not changes:
+        write_debug_log("close_session_skipped", {
+            "dialogId": dialog_id,
+            "reason": "no changes"
+        })
         return JSONResponse({"ok": True, "skipped": True, "reason": "no changes"})
 
     data = get_checklist(dialog_id)
@@ -2122,6 +2227,13 @@ async def api_checklist_close_session(request: Request):
     result = bitrix_webhook_call("im.message.add", {
         "DIALOG_ID": dialog_id,
         "MESSAGE": message,
+    })
+
+    write_debug_log("close_session_im_message_add_result", {
+        "dialogId": dialog_id,
+        "changesCount": len(changes),
+        "editor": editor,
+        "result": result
     })
 
     return JSONResponse({
