@@ -418,7 +418,178 @@ def write_debug_log(event: str, payload: dict):
         f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
 
-def build_checklist_full_text(data: dict) -> str:
+def status_emoji(status: str) -> str:
+    status = normalize_status(status)
+
+    if status == "????":
+        return "??"
+    if status == "???":
+        return "??"
+    if status == "?? ?????????":
+        return "??"
+    return "??"
+
+
+def display_status_text(status: str) -> str:
+    status = normalize_status(status)
+    return status if status else ""
+
+
+def format_plan_suffix(plan: str) -> str:
+    plan = str(plan or "").strip()
+    if not plan or plan == "?":
+        return ""
+    return f" | ?? {plan}"
+
+
+def split_changes(changes: list) -> tuple[list, list]:
+    status_changes = []
+    date_changes = []
+
+    for change in changes or []:
+        field = str(change.get("field") or "").strip()
+
+        if field == "status":
+            status_changes.append(change)
+        elif field == "plan":
+            date_changes.append(change)
+        # fact ????????? ??????????
+        # document/add-item ? ??????? ????? ?? ??????????
+
+    return status_changes, date_changes
+
+
+def format_change_arrow(old_value: str, new_value: str) -> str:
+    old_value = str(old_value or "").strip()
+    new_value = str(new_value or "").strip()
+
+    if not old_value or old_value == "?":
+        return f"? {new_value}"
+    return f"{old_value} ? {new_value}"
+
+
+def format_status_change_line(change: dict) -> str:
+    item_name = str(change.get("itemName") or "").strip() or "??? ????????"
+    new_value = normalize_status(change.get("newValue"))
+    old_value = normalize_status(change.get("oldValue"))
+
+    emoji = status_emoji(new_value)
+    arrow = format_change_arrow(old_value, new_value)
+
+    return f"{emoji}{item_name} / ??????: {arrow}"
+
+
+def format_plan_change_line(change: dict) -> str:
+    item_name = str(change.get("itemName") or "").strip() or "??? ????????"
+    old_value = str(change.get("oldValue") or "").strip()
+    new_value = str(change.get("newValue") or "").strip()
+
+    arrow = format_change_arrow(old_value, new_value)
+    return f"??{item_name} / ????: {arrow}"
+
+
+def collect_item_change_meta(item_id: str, changes: list) -> dict:
+    meta = {
+        "changed": False,
+        "status_changed": False,
+        "plan_changed": False,
+    }
+
+    for change in changes or []:
+        if str(change.get("itemId") or "") != str(item_id):
+            continue
+
+        meta["changed"] = True
+
+        field = str(change.get("field") or "").strip()
+        if field == "status":
+            meta["status_changed"] = True
+        elif field == "plan":
+            meta["plan_changed"] = True
+
+    return meta
+
+
+def build_item_change_flags(item: dict, changes: list) -> str:
+    meta = collect_item_change_meta(str(item.get("id") or ""), changes)
+
+    if not meta["changed"]:
+        return ""
+
+    parts = ["??"]
+
+    if meta["status_changed"]:
+        parts.append(status_emoji(item.get("status")))
+
+    if meta["plan_changed"]:
+        parts.append("??")
+
+    return "".join(parts)
+
+
+def build_checklist_line(item: dict, changes: list) -> str:
+    name = str(item.get("name") or "").strip()
+    status = display_status_text(item.get("status"))
+    plan = str(item.get("plan") or "").strip()
+
+    emoji = status_emoji(status)
+    line = f"{emoji}{name}"
+
+    if status:
+        line += f" ? {status}"
+
+    line += format_plan_suffix(plan)
+
+    flags = build_item_change_flags(item, changes)
+    if flags:
+        line += f" {flags}"
+
+    return line
+
+
+def build_recent_changes_text(changes: list) -> str:
+    status_changes, date_changes = split_changes(changes)
+
+    lines = [
+        "[B]??????????? ? ???-???? ??[/B]",
+        "",
+    ]
+
+    if status_changes:
+        lines.append("[B]???????:[/B]")
+        lines.append("")
+        for change in status_changes:
+            lines.append(format_status_change_line(change))
+        lines.append("")
+
+    if date_changes:
+        lines.append("[B]????:[/B]")
+        lines.append("")
+        for change in date_changes:
+            lines.append(format_plan_change_line(change))
+        lines.append("")
+
+    if not status_changes and not date_changes:
+        lines.append("????????? ???")
+        lines.append("")
+
+    return "\n".join(lines).strip()
+
+
+def build_editor_text(editor: dict) -> str:
+    editor_name = str(editor.get("name") or "").strip()
+    editor_id = str(editor.get("id") or "").strip()
+
+    if editor_name and editor_id:
+        return f"????? ????????: {editor_name} (ID {editor_id})"
+    if editor_name:
+        return f"????? ????????: {editor_name}"
+    if editor_id:
+        return f"????? ????????: ID {editor_id}"
+    return "????? ????????: ??????????"
+
+
+def build_checklist_full_text(data: dict, changes: list) -> str:
     groups = data.get("groups", [])
     items = data.get("items", [])
 
@@ -427,87 +598,46 @@ def build_checklist_full_text(data: dict) -> str:
         items_by_group[int(item.get("group") or 0)].append(item)
 
     lines = []
-    title = (data.get("title") or "Чек-лист ИД").strip()
+    title = (data.get("title") or "???-???? ??").strip()
     collab_title = (data.get("collabTitle") or "").strip()
 
+    lines.append("_________________________________")
+
     if collab_title:
-        lines.append(f"{title} — {collab_title}")
+        lines.append(f"[B]{title} ? {collab_title}[/B]")
     else:
-        lines.append(title)
+        lines.append(f"[B]{title}[/B]")
 
     lines.append("")
 
     for group in groups:
         group_id = int(group.get("id") or 0)
         group_title = str(group.get("title") or "").strip()
-        group_items = sorted(items_by_group.get(group_id, []), key=lambda x: (x.get("order", 0), x.get("name", "")))
+        group_items = sorted(
+            items_by_group.get(group_id, []),
+            key=lambda x: (x.get("order", 0), x.get("name", ""))
+        )
 
         if not group_items:
             continue
 
-        lines.append(f"[{group_title}]")
+        lines.append(f"[B]{group_title}[/B]")
 
         for item in group_items:
-            name = str(item.get("name") or "").strip()
-            status = str(item.get("status") or "").strip() or "—"
-            plan = str(item.get("plan") or "").strip() or "—"
-            fact = str(item.get("fact") or "").strip() or "—"
-
-            lines.append(f"• {name} — {status} | План: {plan} | Факт: {fact}")
+            lines.append(build_checklist_line(item, changes))
 
         lines.append("")
 
     return "\n".join(lines).strip()
 
 
-def build_recent_changes_text(changes: list) -> str:
-    if not changes:
-        return "Что изменено:\n—"
-
-    lines = ["Что изменено:"]
-    for change in changes:
-        item_name = str(change.get("itemName") or "").strip() or "Без названия"
-        field = str(change.get("field") or "").strip()
-        old_value = str(change.get("oldValue") or "").strip() or "—"
-        new_value = str(change.get("newValue") or "").strip() or "—"
-
-        field_map = {
-            "status": "Статус",
-            "plan": "План",
-            "fact": "Факт",
-            "document": "Документ",
-            "add-item": "Добавлен пункт",
-        }
-        field_title = field_map.get(field, field)
-
-        if field == "add-item":
-            lines.append(f"• {item_name}: добавлен новый пункт")
-        else:
-            lines.append(f"• {item_name} / {field_title}: {old_value} → {new_value}")
-
-    return "\n".join(lines)
-
-
-def build_editor_text(editor: dict) -> str:
-    editor_name = str(editor.get("name") or "").strip()
-    editor_id = str(editor.get("id") or "").strip()
-
-    if editor_name and editor_id:
-        return f"Кем изменено: {editor_name} (ID {editor_id})"
-    if editor_name:
-        return f"Кем изменено: {editor_name}"
-    if editor_id:
-        return f"Кем изменено: ID {editor_id}"
-    return "Кем изменено: неизвестно"
-
-
 def build_checklist_chat_message(data: dict, changes: list, editor: dict) -> str:
     parts = [
-        build_editor_text(editor),
-        "",
         build_recent_changes_text(changes),
         "",
-        build_checklist_full_text(data),
+        build_editor_text(editor),
+        "",
+        build_checklist_full_text(data, changes),
     ]
     return "\n".join(parts).strip()
 
