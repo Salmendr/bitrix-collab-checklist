@@ -1,4 +1,6 @@
+import os
 import uuid
+from collections import defaultdict
 from pathlib import Path
 from fastapi import FastAPI, Request, UploadFile, File, Form
 from fastapi.staticfiles import StaticFiles
@@ -15,6 +17,8 @@ app = FastAPI()
 
 DB_PATH = "db/app.db"
 APP_PORTAL_PATH = "/marketplace/app/84/"
+TECH_USER_ID = 138
+BITRIX_TECH_WEBHOOK_URL = os.getenv("BITRIX_TECH_WEBHOOK_URL", "").strip()
 UPLOAD_ROOT = Path("uploads")
 Path("db").mkdir(parents=True, exist_ok=True)
 CHECKLIST_UPLOAD_ROOT = UPLOAD_ROOT / "checklists"
@@ -377,6 +381,121 @@ def bitrix_rest_call(domain: str, method: str, access_token: str, payload: dict)
             "http_status": response.status_code,
             "text": response.text
         }
+
+
+def bitrix_webhook_call(method: str, payload: dict):
+    if not BITRIX_TECH_WEBHOOK_URL:
+        return {
+            "error": "TECH_WEBHOOK_NOT_CONFIGURED",
+            "error_description": "BITRIX_TECH_WEBHOOK_URL is empty"
+        }
+
+    base = BITRIX_TECH_WEBHOOK_URL.rstrip("/")
+    url = f"{base}/{method}.json"
+
+    response = requests.post(url, data=payload, timeout=30)
+
+    try:
+        return response.json()
+    except Exception:
+        return {
+            "http_status": response.status_code,
+            "text": response.text
+        }
+
+
+def build_checklist_full_text(data: dict) -> str:
+    groups = data.get("groups", [])
+    items = data.get("items", [])
+
+    items_by_group = defaultdict(list)
+    for item in items:
+        items_by_group[int(item.get("group") or 0)].append(item)
+
+    lines = []
+    title = (data.get("title") or "Чек-лист ИД").strip()
+    collab_title = (data.get("collabTitle") or "").strip()
+
+    if collab_title:
+        lines.append(f"{title} — {collab_title}")
+    else:
+        lines.append(title)
+
+    lines.append("")
+
+    for group in groups:
+        group_id = int(group.get("id") or 0)
+        group_title = str(group.get("title") or "").strip()
+        group_items = sorted(items_by_group.get(group_id, []), key=lambda x: (x.get("order", 0), x.get("name", "")))
+
+        if not group_items:
+            continue
+
+        lines.append(f"[{group_title}]")
+
+        for item in group_items:
+            name = str(item.get("name") or "").strip()
+            status = str(item.get("status") or "").strip() or "—"
+            plan = str(item.get("plan") or "").strip() or "—"
+            fact = str(item.get("fact") or "").strip() or "—"
+
+            lines.append(f"• {name} — {status} | План: {plan} | Факт: {fact}")
+
+        lines.append("")
+
+    return "\n".join(lines).strip()
+
+
+def build_recent_changes_text(changes: list) -> str:
+    if not changes:
+        return "Что изменено:\n—"
+
+    lines = ["Что изменено:"]
+    for change in changes:
+        item_name = str(change.get("itemName") or "").strip() or "Без названия"
+        field = str(change.get("field") or "").strip()
+        old_value = str(change.get("oldValue") or "").strip() or "—"
+        new_value = str(change.get("newValue") or "").strip() or "—"
+
+        field_map = {
+            "status": "Статус",
+            "plan": "План",
+            "fact": "Факт",
+            "document": "Документ",
+            "add-item": "Добавлен пункт",
+        }
+        field_title = field_map.get(field, field)
+
+        if field == "add-item":
+            lines.append(f"• {item_name}: добавлен новый пункт")
+        else:
+            lines.append(f"• {item_name} / {field_title}: {old_value} → {new_value}")
+
+    return "\n".join(lines)
+
+
+def build_editor_text(editor: dict) -> str:
+    editor_name = str(editor.get("name") or "").strip()
+    editor_id = str(editor.get("id") or "").strip()
+
+    if editor_name and editor_id:
+        return f"Кем изменено: {editor_name} (ID {editor_id})"
+    if editor_name:
+        return f"Кем изменено: {editor_name}"
+    if editor_id:
+        return f"Кем изменено: ID {editor_id}"
+    return "Кем изменено: неизвестно"
+
+
+def build_checklist_chat_message(data: dict, changes: list, editor: dict) -> str:
+    parts = [
+        build_editor_text(editor),
+        "",
+        build_recent_changes_text(changes),
+        "",
+        build_checklist_full_text(data),
+    ]
+    return "\n".join(parts).strip()
 
 
 def install_finish_block():
@@ -1050,6 +1169,13 @@ def popup_get(dialogId: str = ""):
             const projectChecklists = {project_checklists_json};
             let items = {items_json};
             let collabTitle = {collab_title_json};
+            let sessionChanges = [];
+            let sessionDirty = false;
+            let closeBeaconSent = false;
+            let currentEditor = {{
+                id: "",
+                name: ""
+            }};
             const saveStateEl = document.getElementById('saveState');
             const leftTableBodyEl = document.getElementById('leftTableBody');
             const rightTableBodyEl = document.getElementById('rightTableBody');
@@ -1100,6 +1226,84 @@ def popup_get(dialogId: str = ""):
                     popupTitleEl.textContent = 'Чек-лист ИД';
                 }}
             }}
+            function fetchCurrentUserIfPossible() {{
+                try {{
+                    if (!(window.BX24 && typeof window.BX24.init === 'function')) {{
+                        return;
+                    }}
+
+                    window.BX24.init(function () {{
+                        try {{
+                            window.BX24.callMethod('user.current', {{}}, function(result) {{
+                                try {{
+                                    if (result.error()) {{
+                                        return;
+                                    }}
+
+                                    const data = result.data() || {{}};
+                                    const fullName = [data.NAME, data.LAST_NAME].filter(Boolean).join(' ').trim();
+
+                                    currentEditor = {{
+                                        id: String(data.ID || ''),
+                                        name: fullName || String(data.NAME || '') || ''
+                                    }};
+                                }} catch (e) {{
+                                    console.log('user.current parse error:', e);
+                                }}
+                            }});
+                        }} catch (e) {{
+                            console.log('user.current call error:', e);
+                        }}
+                    }});
+                }} catch (e) {{
+                    console.log('fetchCurrentUserIfPossible skipped:', e);
+                }}
+            }}
+            function pushSessionChange(itemName, field, oldValue, newValue) {{
+                if (String(oldValue || '') === String(newValue || '')) {{
+                    return;
+                }}
+
+                sessionChanges.push({{
+                    itemName: itemName || '',
+                    field,
+                    oldValue: oldValue || '',
+                    newValue: newValue || ''
+                }});
+
+                sessionDirty = true;
+            }}
+            function sendCloseSummaryOnce() {{
+                if (closeBeaconSent || !sessionDirty || !sessionChanges.length) {{
+                    return;
+                }}
+
+                closeBeaconSent = true;
+
+                const payload = {{
+                    dialogId,
+                    editor: currentEditor,
+                    changes: sessionChanges
+                }};
+
+                try {{
+                    const blob = new Blob(
+                        [JSON.stringify(payload)],
+                        {{ type: 'application/json' }}
+                    );
+                    navigator.sendBeacon('/api/checklist/close-session', blob);
+                }} catch (e) {{
+                    console.log('sendBeacon error:', e);
+                }}
+            }}
+            document.addEventListener('visibilitychange', function () {{
+                if (document.visibilityState === 'hidden') {{
+                    sendCloseSummaryOnce();
+                }}
+            }});
+            window.addEventListener('pagehide', function () {{
+                sendCloseSummaryOnce();
+            }});
             async function fetchChatTitleIfMissing() {{
                 if (collabTitle) {{ renderTitle(); return; }}
                 try {{
@@ -1293,13 +1497,20 @@ def popup_get(dialogId: str = ""):
                         const item = items.find(x => x.id === this.dataset.itemId);
                         if (!item) return;
                         const oldItem = JSON.parse(JSON.stringify(item));
+                        const changeCountBefore = sessionChanges.length;
                         item.status = this.value;
+                        pushSessionChange(item.name, 'status', oldItem.status, this.value);
+                        if (this.value === 'Нет' && oldItem.documentUrl) {{
+                            pushSessionChange(item.name, 'document', 'загружен', 'удалён');
+                        }}
                         renderAll();
                         try {{
                             const result = await updateItem(this.dataset.itemId, 'status', this.value);
                             replaceItem(result.item);
                             renderAll();
                         }} catch (e) {{
+                            sessionChanges.splice(changeCountBefore);
+                            sessionDirty = sessionChanges.length > 0;
                             replaceItem(oldItem);
                             renderAll();
                             setSaveState('error', 'Ошибка сохранения');
@@ -1311,13 +1522,17 @@ def popup_get(dialogId: str = ""):
                         const item = items.find(x => x.id === this.dataset.itemId);
                         if (!item) return;
                         const oldItem = JSON.parse(JSON.stringify(item));
+                        const changeCountBefore = sessionChanges.length;
                         item.plan = fromInputDate(this.value);
+                        pushSessionChange(item.name, 'plan', oldItem.plan, item.plan);
                         renderAll();
                         try {{
                             const result = await updateItem(this.dataset.itemId, 'plan', item.plan);
                             replaceItem(result.item);
                             renderAll();
                         }} catch (e) {{
+                            sessionChanges.splice(changeCountBefore);
+                            sessionDirty = sessionChanges.length > 0;
                             replaceItem(oldItem);
                             renderAll();
                             setSaveState('error', 'Ошибка сохранения');
@@ -1329,13 +1544,17 @@ def popup_get(dialogId: str = ""):
                         const item = items.find(x => x.id === this.dataset.itemId);
                         if (!item) return;
                         const oldItem = JSON.parse(JSON.stringify(item));
+                        const changeCountBefore = sessionChanges.length;
                         item.fact = fromInputDate(this.value);
+                        pushSessionChange(item.name, 'fact', oldItem.fact, item.fact);
                         renderAll();
                         try {{
                             const result = await updateItem(this.dataset.itemId, 'fact', item.fact);
                             replaceItem(result.item);
                             renderAll();
                         }} catch (e) {{
+                            sessionChanges.splice(changeCountBefore);
+                            sessionDirty = sessionChanges.length > 0;
                             replaceItem(oldItem);
                             renderAll();
                             setSaveState('error', 'Ошибка сохранения');
@@ -1352,6 +1571,9 @@ def popup_get(dialogId: str = ""):
                         try {{
                             const result = await addItem(groupId, name);
                             replaceItem(result.item);
+                            if (result.item) {{
+                                pushSessionChange(result.item.name, 'add-item', '', result.item.name);
+                            }}
                             input.value = '';
                             renderAll();
                         }} catch (e) {{
@@ -1381,9 +1603,17 @@ def popup_get(dialogId: str = ""):
                     input.addEventListener('change', async function() {{
                         const file = this.files && this.files[0];
                         if (!file) return;
+                        const item = items.find(x => x.id === this.dataset.itemId);
+                        const oldStatus = item ? normalizeStatus(item.status) : '';
                         try {{
                             const result = await uploadDocument(this.dataset.itemId, file);
                             replaceItem(result.item);
+                            if (result.item) {{
+                                pushSessionChange(result.item.name, 'document', '', 'загружен');
+                                if (normalizeStatus(result.item.status) === 'Есть') {{
+                                    pushSessionChange(result.item.name, 'status', oldStatus, 'Есть');
+                                }}
+                            }}
                             renderAll();
                         }} catch (e) {{
                             setSaveState('error', 'Ошибка загрузки файла');
@@ -1410,6 +1640,7 @@ def popup_get(dialogId: str = ""):
             }}
             renderAll();
             fetchChatTitleIfMissing();
+            fetchCurrentUserIfPossible();
             safeInitBx24ForPopup();
         </script>
     </body>
@@ -1726,6 +1957,39 @@ async def api_checklist_remove_document(request: Request):
         "dialogId": dialog_id,
         "item": updated_item,
         "progressPercent": data.get("progressPercent", 0),
+    })
+
+
+@app.post("/api/checklist/close-session")
+async def api_checklist_close_session(request: Request):
+    try:
+        payload = await request.json()
+    except Exception:
+        raw = await request.body()
+        payload = json.loads(raw.decode("utf-8") or "{}")
+
+    dialog_id = normalize_dialog_id(payload.get("dialogId"))
+    changes = payload.get("changes") or []
+    editor = payload.get("editor") or {}
+
+    if not dialog_id:
+        return JSONResponse({"ok": False, "error": "dialogId is required"}, status_code=400)
+
+    if not changes:
+        return JSONResponse({"ok": True, "skipped": True, "reason": "no changes"})
+
+    data = get_checklist(dialog_id)
+    message = build_checklist_chat_message(data, changes, editor)
+
+    result = bitrix_webhook_call("im.message.add", {
+        "DIALOG_ID": dialog_id,
+        "MESSAGE": message,
+    })
+
+    return JSONResponse({
+        "ok": "error" not in result,
+        "dialogId": dialog_id,
+        "result": result,
     })
 
 @app.get("/admin", response_class=HTMLResponse)
