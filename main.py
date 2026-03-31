@@ -15,26 +15,35 @@ import openpyxl
 
 app = FastAPI()
 
-DB_PATH = "db/app.db"
+BASE_DIR = Path(__file__).resolve().parent
+
+DB_DIR = BASE_DIR / "db"
+DB_DIR.mkdir(parents=True, exist_ok=True)
+
+DB_PATH = str(DB_DIR / "app.db")
+
 APP_PORTAL_PATH = "/marketplace/app/84/"
 TECH_USER_ID = 138
 BITRIX_TECH_WEBHOOK_URL = os.getenv("BITRIX_TECH_WEBHOOK_URL", "").strip()
-UPLOAD_ROOT = Path("uploads")
-DEBUG_DIR = Path("debug")
-Path("db").mkdir(parents=True, exist_ok=True)
-DEBUG_DIR.mkdir(parents=True, exist_ok=True)
+
+UPLOAD_ROOT = BASE_DIR / "uploads"
+UPLOAD_ROOT.mkdir(parents=True, exist_ok=True)
+
 CHECKLIST_UPLOAD_ROOT = UPLOAD_ROOT / "checklists"
+CHECKLIST_UPLOAD_ROOT.mkdir(parents=True, exist_ok=True)
+
+DEBUG_DIR = BASE_DIR / "debug"
+DEBUG_DIR.mkdir(parents=True, exist_ok=True)
+
 DEBUG_LOG_PATH = DEBUG_DIR / "close_popup.log"
+
+app.mount("/uploads", StaticFiles(directory=str(UPLOAD_ROOT)), name="uploads")
 
 PROJECT_CHECKLISTS = [
     {"key": "id", "title": "Чек-лист ИД"},
     {"key": "opr", "title": "Чек-лист ОПР"},
     {"key": "concept", "title": "Чек-лист Концепция"},
 ]
-
-UPLOAD_ROOT.mkdir(parents=True, exist_ok=True)
-CHECKLIST_UPLOAD_ROOT.mkdir(parents=True, exist_ok=True)
-app.mount("/uploads", StaticFiles(directory=str(UPLOAD_ROOT)), name="uploads")
 
 CHECKLIST_GROUPS = {
     1: {
@@ -570,6 +579,10 @@ def init_db():
     conn.close()
 
 
+# Страховочный вызов при импорте модуля
+init_db()
+
+
 @app.on_event("startup")
 def startup_event():
     init_db()
@@ -936,8 +949,24 @@ def normalize_dialog_id(value: str) -> str:
 
     return s
 
-def save_checklist(dialog_id: str, data: dict):
+
+def normalize_checklist_key(value: str) -> str:
+    value = str(value or "").strip().lower()
+    if value in {"id", "opr", "concept"}:
+        return value
+    return "id"
+
+
+def make_storage_dialog_id(dialog_id: str, checklist_key: str = "id") -> str:
     dialog_id = normalize_dialog_id(dialog_id)
+    checklist_key = normalize_checklist_key(checklist_key)
+    return dialog_id if checklist_key == "id" else f"{dialog_id}::{checklist_key}"
+
+
+def save_checklist(dialog_id: str, data: dict, checklist_key: str = "id"):
+    dialog_id = make_storage_dialog_id(dialog_id, checklist_key)
+    checklist_key = normalize_checklist_key(checklist_key)
+    data = normalize_checklist_data(data, checklist_key)
 
     conn = get_conn()
     conn.execute("""
@@ -991,12 +1020,12 @@ def extract_dialog_id_from_form(form: dict) -> str:
     return ""
 
 def get_checklist(dialog_id: str, checklist_key: str = "id"):
-    raw_id = str(dialog_id or "").strip()
-    normalized_id = normalize_dialog_id(raw_id)
-    checklist_key = str(checklist_key or "id").strip() or "id"
+    checklist_key = normalize_checklist_key(checklist_key)
+    normalized_id = normalize_dialog_id(dialog_id)
 
     aliases = []
-    for candidate in [raw_id, normalized_id]:
+    for candidate in [dialog_id, normalized_id]:
+        candidate = str(candidate or "").strip()
         if candidate and candidate not in aliases:
             aliases.append(candidate)
 
@@ -1005,7 +1034,8 @@ def get_checklist(dialog_id: str, checklist_key: str = "id"):
         if numeric_id not in aliases:
             aliases.append(numeric_id)
 
-    storage_aliases = [build_storage_dialog_id(candidate, checklist_key) for candidate in aliases if candidate]
+    storage_aliases = [make_storage_dialog_id(alias, checklist_key) for alias in aliases]
+    storage_dialog_id = make_storage_dialog_id(normalized_id, checklist_key)
 
     conn = get_conn()
 
@@ -1013,10 +1043,24 @@ def get_checklist(dialog_id: str, checklist_key: str = "id"):
     found_alias = None
 
     for candidate in storage_aliases:
-        row = conn.execute(
-            "SELECT data_json FROM checklists WHERE dialog_id = ?",
-            (candidate,)
-        ).fetchone()
+        try:
+            row = conn.execute(
+                "SELECT data_json FROM checklists WHERE dialog_id = ?",
+                (candidate,)
+            ).fetchone()
+        except sqlite3.OperationalError as e:
+            if "no such table" in str(e).lower():
+                conn.close()
+                init_db()
+                conn = get_conn()
+                row = conn.execute(
+                    "SELECT data_json FROM checklists WHERE dialog_id = ?",
+                    (candidate,)
+                ).fetchone()
+            else:
+                conn.close()
+                raise
+
         if row:
             found_alias = candidate
             break
@@ -1027,7 +1071,7 @@ def get_checklist(dialog_id: str, checklist_key: str = "id"):
         data = json.loads(row["data_json"])
         data = normalize_checklist_data(data, checklist_key)
         data["resolvedDialogId"] = normalized_id
-        data["lookupAliases"] = storage_aliases
+        data["lookupAliases"] = aliases
         data["foundAlias"] = found_alias
         return data
 
@@ -1035,8 +1079,8 @@ def get_checklist(dialog_id: str, checklist_key: str = "id"):
     save_checklist(normalized_id, data, checklist_key)
 
     data["resolvedDialogId"] = normalized_id
-    data["lookupAliases"] = storage_aliases
-    data["foundAlias"] = build_storage_dialog_id(normalized_id, checklist_key)
+    data["lookupAliases"] = aliases
+    data["foundAlias"] = storage_dialog_id
     return data
 
 
