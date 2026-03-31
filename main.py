@@ -20,8 +20,11 @@ APP_PORTAL_PATH = "/marketplace/app/84/"
 TECH_USER_ID = 138
 BITRIX_TECH_WEBHOOK_URL = os.getenv("BITRIX_TECH_WEBHOOK_URL", "").strip()
 UPLOAD_ROOT = Path("uploads")
+DEBUG_DIR = Path("debug")
 Path("db").mkdir(parents=True, exist_ok=True)
+DEBUG_DIR.mkdir(parents=True, exist_ok=True)
 CHECKLIST_UPLOAD_ROOT = UPLOAD_ROOT / "checklists"
+DEBUG_LOG_PATH = DEBUG_DIR / "close_popup.log"
 
 PROJECT_CHECKLISTS = [
     {"key": "id", "title": "Чек-лист ИД"},
@@ -402,6 +405,17 @@ def bitrix_webhook_call(method: str, payload: dict):
             "http_status": response.status_code,
             "text": response.text
         }
+
+
+def write_debug_log(event: str, payload: dict):
+    record = {
+        "ts": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "event": event,
+        "payload": payload,
+    }
+
+    with open(DEBUG_LOG_PATH, "a", encoding="utf-8") as f:
+        f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
 
 def build_checklist_full_text(data: dict) -> str:
@@ -1170,8 +1184,6 @@ def popup_get(dialogId: str = ""):
             let items = {items_json};
             let collabTitle = {collab_title_json};
             let sessionChanges = [];
-            let sessionDirty = false;
-            let closeBeaconSent = false;
             let currentEditor = {{
                 id: "",
                 name: ""
@@ -1243,11 +1255,11 @@ def popup_get(dialogId: str = ""):
                                     const data = result.data() || {{}};
                                     const fullName = [data.NAME, data.LAST_NAME].filter(Boolean).join(' ').trim();
 
-                                    currentEditor = {{
-                                        id: String(data.ID || ''),
-                                        name: fullName || String(data.NAME || '') || ''
-                                    }};
-                                }} catch (e) {{
+                    currentEditor = {{
+                        id: String(data.ID || ''),
+                        name: fullName || String(data.NAME || '') || ''
+                    }};
+                }} catch (e) {{
                                     console.log('user.current parse error:', e);
                                 }}
                             }});
@@ -1259,50 +1271,51 @@ def popup_get(dialogId: str = ""):
                     console.log('fetchCurrentUserIfPossible skipped:', e);
                 }}
             }}
-            function pushSessionChange(itemName, field, oldValue, newValue) {{
-                if (String(oldValue || '') === String(newValue || '')) {{
-                    return;
-                }}
-
-                sessionChanges.push({{
-                    itemName: itemName || '',
-                    field,
-                    oldValue: oldValue || '',
-                    newValue: newValue || ''
+            function debugLog(event, payload = {{}}, useBeacon = false) {{
+                const body = JSON.stringify({{
+                    event,
+                    dialogId,
+                    payload,
+                    ts: new Date().toISOString()
                 }});
 
-                sessionDirty = true;
-            }}
-            function sendCloseSummaryOnce() {{
-                if (closeBeaconSent || !sessionDirty || !sessionChanges.length) {{
-                    return;
-                }}
-
-                closeBeaconSent = true;
-
-                const payload = {{
-                    dialogId,
-                    editor: currentEditor,
-                    changes: sessionChanges
-                }};
-
                 try {{
-                    const blob = new Blob(
-                        [JSON.stringify(payload)],
-                        {{ type: 'application/json' }}
-                    );
-                    navigator.sendBeacon('/api/checklist/close-session', blob);
+                    if (useBeacon && navigator.sendBeacon) {{
+                        const blob = new Blob([body], {{ type: 'application/json' }});
+                        navigator.sendBeacon('/api/debug/event', blob);
+                        return;
+                    }}
+
+                    fetch('/api/debug/event', {{
+                        method: 'POST',
+                        headers: {{
+                            'Content-Type': 'application/json'
+                        }},
+                        body
+                    }}).catch(err => {{
+                        console.log('debugLog fetch error:', err);
+                    }});
                 }} catch (e) {{
-                    console.log('sendBeacon error:', e);
+                    console.log('debugLog error:', e);
                 }}
+            }}
+            function sendCloseDebug(eventName) {{
+                debugLog(eventName, {{
+                    changesCount: sessionChanges.length,
+                    changes: sessionChanges,
+                    editor: currentEditor
+                }}, true);
             }}
             document.addEventListener('visibilitychange', function () {{
                 if (document.visibilityState === 'hidden') {{
-                    sendCloseSummaryOnce();
+                    sendCloseDebug('popup_hidden');
                 }}
             }});
             window.addEventListener('pagehide', function () {{
-                sendCloseSummaryOnce();
+                sendCloseDebug('popup_pagehide');
+            }});
+            window.addEventListener('beforeunload', function () {{
+                sendCloseDebug('popup_beforeunload');
             }});
             async function fetchChatTitleIfMissing() {{
                 if (collabTitle) {{ renderTitle(); return; }}
@@ -1319,6 +1332,9 @@ def popup_get(dialogId: str = ""):
                                     if (!title) {{ renderTitle(); return; }}
                                     collabTitle = title;
                                     renderTitle();
+                                    debugLog('chat_title_loaded', {{
+                                        title: title
+                                    }});
                                     try {{
                                         await fetch('/api/checklist/update-meta', {{
                                             method: 'POST',
@@ -1498,69 +1514,130 @@ def popup_get(dialogId: str = ""):
                         if (!item) return;
                         const oldItem = JSON.parse(JSON.stringify(item));
                         const changeCountBefore = sessionChanges.length;
-                        item.status = this.value;
-                        pushSessionChange(item.name, 'status', oldItem.status, this.value);
-                        if (this.value === 'Нет' && oldItem.documentUrl) {{
-                            pushSessionChange(item.name, 'document', 'загружен', 'удалён');
+                        const newValue = this.value;
+
+                        item.status = newValue;
+                        sessionChanges.push({{
+                            field: 'status',
+                            itemId: item.id,
+                            itemName: item.name,
+                            oldValue: oldItem.status || '',
+                            newValue: newValue || ''
+                        }});
+                        debugLog('status_changed', {{
+                            itemId: item.id,
+                            itemName: item.name,
+                            oldValue: oldItem.status || '',
+                            newValue: newValue || ''
+                        }});
+
+                        if (this.selectedIndex === 2 && oldItem.documentUrl) {{
+                            sessionChanges.push({{
+                                field: 'document',
+                                itemId: item.id,
+                                itemName: item.name,
+                                oldValue: 'uploaded',
+                                newValue: 'removed'
+                            }});
+                            debugLog('document_removed_by_status', {{
+                                itemId: item.id,
+                                itemName: item.name,
+                                oldValue: 'uploaded',
+                                newValue: 'removed'
+                            }});
                         }}
+
                         renderAll();
+
                         try {{
-                            const result = await updateItem(this.dataset.itemId, 'status', this.value);
+                            const result = await updateItem(this.dataset.itemId, 'status', newValue);
                             replaceItem(result.item);
                             renderAll();
                         }} catch (e) {{
                             sessionChanges.splice(changeCountBefore);
-                            sessionDirty = sessionChanges.length > 0;
                             replaceItem(oldItem);
                             renderAll();
-                            setSaveState('error', 'Ошибка сохранения');
+                            setSaveState('error', 'Save error');
                         }}
                     }});
                 }});
+
                 document.querySelectorAll('[data-role="plan"]').forEach(el => {{
                     el.addEventListener('change', async function() {{
                         const item = items.find(x => x.id === this.dataset.itemId);
                         if (!item) return;
                         const oldItem = JSON.parse(JSON.stringify(item));
                         const changeCountBefore = sessionChanges.length;
-                        item.plan = fromInputDate(this.value);
-                        pushSessionChange(item.name, 'plan', oldItem.plan, item.plan);
+                        const newValue = fromInputDate(this.value);
+
+                        item.plan = newValue;
+                        sessionChanges.push({{
+                            field: 'plan',
+                            itemId: item.id,
+                            itemName: item.name,
+                            oldValue: oldItem.plan || '',
+                            newValue: newValue || ''
+                        }});
+                        debugLog('plan_changed', {{
+                            itemId: item.id,
+                            itemName: item.name,
+                            oldValue: oldItem.plan || '',
+                            newValue: newValue || ''
+                        }});
+
                         renderAll();
+
                         try {{
-                            const result = await updateItem(this.dataset.itemId, 'plan', item.plan);
+                            const result = await updateItem(this.dataset.itemId, 'plan', newValue);
                             replaceItem(result.item);
                             renderAll();
                         }} catch (e) {{
                             sessionChanges.splice(changeCountBefore);
-                            sessionDirty = sessionChanges.length > 0;
                             replaceItem(oldItem);
                             renderAll();
-                            setSaveState('error', 'Ошибка сохранения');
+                            setSaveState('error', 'Save error');
                         }}
                     }});
                 }});
+
                 document.querySelectorAll('[data-role="fact"]').forEach(el => {{
                     el.addEventListener('change', async function() {{
                         const item = items.find(x => x.id === this.dataset.itemId);
                         if (!item) return;
                         const oldItem = JSON.parse(JSON.stringify(item));
                         const changeCountBefore = sessionChanges.length;
-                        item.fact = fromInputDate(this.value);
-                        pushSessionChange(item.name, 'fact', oldItem.fact, item.fact);
+                        const newValue = fromInputDate(this.value);
+
+                        item.fact = newValue;
+                        sessionChanges.push({{
+                            field: 'fact',
+                            itemId: item.id,
+                            itemName: item.name,
+                            oldValue: oldItem.fact || '',
+                            newValue: newValue || ''
+                        }});
+                        debugLog('fact_changed', {{
+                            itemId: item.id,
+                            itemName: item.name,
+                            oldValue: oldItem.fact || '',
+                            newValue: newValue || ''
+                        }});
+
                         renderAll();
+
                         try {{
-                            const result = await updateItem(this.dataset.itemId, 'fact', item.fact);
+                            const result = await updateItem(this.dataset.itemId, 'fact', newValue);
                             replaceItem(result.item);
                             renderAll();
                         }} catch (e) {{
                             sessionChanges.splice(changeCountBefore);
-                            sessionDirty = sessionChanges.length > 0;
                             replaceItem(oldItem);
                             renderAll();
-                            setSaveState('error', 'Ошибка сохранения');
+                            setSaveState('error', 'Save error');
                         }}
                     }});
                 }});
+
                 document.querySelectorAll('[data-role="add-item"]').forEach(btn => {{
                     btn.addEventListener('click', async function() {{
                         const groupId = Number(this.dataset.groupId);
@@ -1568,25 +1645,39 @@ def popup_get(dialogId: str = ""):
                         if (!input) return;
                         const name = (input.value || '').trim();
                         if (!name) return;
+
                         try {{
                             const result = await addItem(groupId, name);
                             replaceItem(result.item);
                             if (result.item) {{
-                                pushSessionChange(result.item.name, 'add-item', '', result.item.name);
+                                sessionChanges.push({{
+                                    field: 'add-item',
+                                    itemId: result.item.id,
+                                    itemName: result.item.name,
+                                    oldValue: '',
+                                    newValue: result.item.name
+                                }});
+                                debugLog('item_added', {{
+                                    itemId: result.item.id,
+                                    itemName: result.item.name,
+                                    groupId: groupId
+                                }});
                             }}
                             input.value = '';
                             renderAll();
                         }} catch (e) {{
-                            setSaveState('error', 'Ошибка добавления пункта');
+                            setSaveState('error', 'Add item error');
                         }}
                     }});
                 }});
+
                 document.querySelectorAll('[data-role="upload"]').forEach(btn => {{
                     btn.addEventListener('click', function() {{
                         const input = document.querySelector('[data-role="file-input"][data-item-id="' + this.dataset.itemId + '"]');
                         if (input) input.click();
                     }});
                 }});
+
                 document.querySelectorAll('[data-role="view-document"]').forEach(btn => {{
                     btn.addEventListener('click', function () {{
                         const rawUrl = this.dataset.documentUrl || '';
@@ -1599,24 +1690,50 @@ def popup_get(dialogId: str = ""):
                         }}
                     }});
                 }});
+
                 document.querySelectorAll('[data-role="file-input"]').forEach(input => {{
                     input.addEventListener('change', async function() {{
                         const file = this.files && this.files[0];
                         if (!file) return;
                         const item = items.find(x => x.id === this.dataset.itemId);
                         const oldStatus = item ? normalizeStatus(item.status) : '';
+
                         try {{
                             const result = await uploadDocument(this.dataset.itemId, file);
                             replaceItem(result.item);
                             if (result.item) {{
-                                pushSessionChange(result.item.name, 'document', '', 'загружен');
-                                if (normalizeStatus(result.item.status) === 'Есть') {{
-                                    pushSessionChange(result.item.name, 'status', oldStatus, 'Есть');
+                                sessionChanges.push({{
+                                    field: 'document',
+                                    itemId: result.item.id,
+                                    itemName: result.item.name,
+                                    oldValue: '',
+                                    newValue: 'uploaded'
+                                }});
+                                debugLog('document_uploaded', {{
+                                    itemId: result.item.id,
+                                    itemName: result.item.name,
+                                    documentUrl: result.item.documentUrl || ''
+                                }});
+
+                                if ((result.item.status || '') && (result.item.status || '') !== (oldStatus || '')) {{
+                                    sessionChanges.push({{
+                                        field: 'status',
+                                        itemId: result.item.id,
+                                        itemName: result.item.name,
+                                        oldValue: oldStatus || '',
+                                        newValue: result.item.status || ''
+                                    }});
+                                    debugLog('status_changed_by_upload', {{
+                                        itemId: result.item.id,
+                                        itemName: result.item.name,
+                                        oldValue: oldStatus || '',
+                                        newValue: result.item.status || ''
+                                    }});
                                 }}
                             }}
                             renderAll();
                         }} catch (e) {{
-                            setSaveState('error', 'Ошибка загрузки файла');
+                            setSaveState('error', 'Upload error');
                         }}
                     }});
                 }});
@@ -1639,6 +1756,10 @@ def popup_get(dialogId: str = ""):
                 }}
             }}
             renderAll();
+            debugLog('popup_loaded', {{
+                href: window.location.href,
+                hasDialogId: !!dialogId
+            }});
             fetchChatTitleIfMissing();
             fetchCurrentUserIfPossible();
             safeInitBx24ForPopup();
@@ -1960,6 +2081,23 @@ async def api_checklist_remove_document(request: Request):
     })
 
 
+@app.post("/api/debug/event")
+async def api_debug_event(request: Request):
+    try:
+        payload = await request.json()
+    except Exception:
+        raw = await request.body()
+        try:
+            payload = json.loads(raw.decode("utf-8"))
+        except Exception:
+            payload = {"raw": raw.decode("utf-8", errors="ignore")}
+
+    event = str(payload.get("event") or "unknown").strip()
+    write_debug_log(event, payload)
+
+    return JSONResponse({"ok": True})
+
+
 @app.post("/api/checklist/close-session")
 async def api_checklist_close_session(request: Request):
     try:
@@ -1991,6 +2129,28 @@ async def api_checklist_close_session(request: Request):
         "dialogId": dialog_id,
         "result": result,
     })
+
+
+@app.get("/debug/logs", response_class=HTMLResponse)
+def debug_logs():
+    if not DEBUG_LOG_PATH.exists():
+        content = "Логов пока нет"
+    else:
+        with open(DEBUG_LOG_PATH, "r", encoding="utf-8") as f:
+            content = f.read() or "Логов пока нет"
+
+    return f"""
+    <html>
+    <head>
+        <meta charset="utf-8">
+        <title>Debug Logs</title>
+    </head>
+    <body style="font-family:Arial,sans-serif;padding:24px">
+        <h1>Debug logs</h1>
+        <pre style="white-space:pre-wrap;word-break:break-word;">{html.escape(content)}</pre>
+    </body>
+    </html>
+    """
 
 @app.get("/admin", response_class=HTMLResponse)
 def admin():
