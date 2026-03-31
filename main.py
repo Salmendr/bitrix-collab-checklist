@@ -82,6 +82,108 @@ CHECKLIST_GROUPS = {
     },
 }
 
+CONCEPT_GROUPS = [
+    {
+        "id": 1,
+        "title": "Общее",
+        "items": [
+            {"name": "Участок сформирован", "source": "ИД", "statusKind": "bool", "extraPlaceholder": "Например: 2%"},
+            {"name": "Наличие ГПЗУ", "source": "ИД", "statusKind": "bool", "extraPlaceholder": "№"},
+            {"name": "Наличие проекта планировки", "source": "ИД", "statusKind": "bool", "extraPlaceholder": "Например: проект межевания от 03.07.2024 №3135"},
+            {"name": "Наличие ТЗ", "source": "ИД", "statusKind": "bool", "extraPlaceholder": ""},
+        ],
+    },
+    {
+        "id": 2,
+        "title": "Градостроительные ограничения",
+        "items": [
+            {"name": "Предельная высота", "source": "ГПЗУ, ПЗЗ", "statusKind": "text", "statusPlaceholder": "___м", "extraPlaceholder": "По проекту: ___"},
+            {"name": "Предельная этажность", "source": "ГПЗУ, ПЗЗ", "statusKind": "text", "statusPlaceholder": "___эт.", "extraPlaceholder": "По проекту: ___"},
+            {"name": "Процент застройки", "source": "ГПЗУ, ПЗЗ", "statusKind": "text", "statusPlaceholder": "__%", "extraPlaceholder": "По проекту: ___"},
+            {"name": "Плотность застройки", "source": "ГПЗУ, ПЗЗ", "statusKind": "text", "statusPlaceholder": "______м2/ГА", "extraPlaceholder": "По проекту: ___"},
+            {"name": "Процент озеленения", "source": "ГПЗУ, ПЗЗ", "statusKind": "text", "statusPlaceholder": "__%", "extraPlaceholder": "По проекту: ___"},
+            {"name": "Отступы от границ участка", "source": "ГПЗУ, ПЗЗ", "statusKind": "text", "statusPlaceholder": "_м", "extraPlaceholder": "Выполнено / не выполнено"},
+            {
+                "name": "Вид разрешенного использования",
+                "source": "ГПЗУ, ПЗЗ",
+                "statusKind": "select",
+                "statusOptions": ["Основные", "Условно разрешенные", "Вспомогательные"],
+                "extraPlaceholder": "Разрешенный"
+            },
+        ],
+    },
+    {
+        "id": 3,
+        "title": "Приаэродромные территории",
+        "items": [
+            {"name": "Макс. высота приаэродромных терр.:", "source": "ГПЗУ, Акт ПАТ аэропорта", "statusKind": "text", "statusPlaceholder": "___м", "extraPlaceholder": "По концепции: ___м"},
+            {"name": "3 подзона", "source": "ГПЗУ, Акт ПАТ аэропорта", "statusKind": "text", "statusPlaceholder": "___м", "extraPlaceholder": "По концепции: ___м"},
+            {"name": "4 подзона", "source": "ГПЗУ, Акт ПАТ аэропорта", "statusKind": "text", "statusPlaceholder": "___м", "extraPlaceholder": "По концепции: ___м"},
+            {"name": "Согласование от военного аэропорта", "source": "", "statusKind": "bool", "extraPlaceholder": "Требуется: да/нет"},
+        ],
+    },
+    {
+        "id": 4,
+        "title": "Зоны затопления и подтопления",
+        "items": [
+            {"name": "Участок в зоне затопления/подтопления", "source": "ГПЗУ, ПЗЗ", "statusKind": "bool", "extraPlaceholder": "Минимальная отметка земли: ___м"},
+        ],
+    },
+    {
+        "id": 5,
+        "title": "Дорожно-транспортная сеть",
+        "items": [
+            {"name": "Требуется согласование примыканий", "source": "", "statusKind": "bool", "extraPlaceholder": ""},
+        ],
+    },
+    {
+        "id": 6,
+        "title": "Охранные и санитарно-защитные зоны",
+        "items": [
+            {"name": "Требуется согласование размещения объекта в охранных зонах сетей", "source": "ГПЗУ / СП 124.13330 / Приказ N 197", "statusKind": "bool", "extraPlaceholder": "В т.ч.: ____________"},
+            {"name": "Требуется вынос сетей", "source": "ГПЗУ / СП 124.13330 / Приказ N 197", "statusKind": "bool", "extraPlaceholder": "В т.ч.: ____________"},
+            {"name": "Учтены отступы от наружных ТС до зданий, парковок, площадок", "source": "ГПЗУ / СП 124.13330 / Приказ N 197", "statusKind": "bool", "extraPlaceholder": ""},
+            {"name": "Размещение в зонах ОКН", "source": "ГПЗУ / СП 124.13330 / Приказ N 197", "statusKind": "bool", "extraPlaceholder": "В т.ч.: ____________"},
+            {"name": "Учтены санитарные разрывы от парковочных мест (кроме гостевых жилых домов)", "source": "СанПиН 2.2.1/2.1.1.1200-03", "statusKind": "bool", "extraPlaceholder": "До жилых домов, площадок благоустройства, школ, ДОУ, больниц и т.п."},
+            {"name": "Учтены санитарно-защитные зоны существующих объектов", "source": "СанПиН 2.2.1/2.1.1.1200-03", "statusKind": "bool", "extraPlaceholder": "В т.ч.: ____________"},
+            {"name": "Учтены санитарно-защитные зоны проектируемых объектов", "source": "СанПиН 2.2.1/2.1.1.1200-03", "statusKind": "bool", "extraPlaceholder": "В т.ч.: площадки ТКО, парковки, ТП, КНС, ________"},
+        ],
+    },
+    {
+        "id": 7,
+        "title": "Пожарные требования",
+        "items": [
+            {"name": "Требуется разработка СТУ", "source": "ФЗ 123 / СП 4.13130", "statusKind": "bool", "extraPlaceholder": "При отступлениях от требований СП"},
+            {"name": "Пожарные проезды в границах участка", "source": "ФЗ 123 / СП 4.13130", "statusKind": "bool", "extraPlaceholder": ""},
+            {"name": "Требуется разработка ПТП по проездам", "source": "ФЗ 123 / СП 4.13130", "statusKind": "bool", "extraPlaceholder": "При отступлениях от требований СП"},
+            {"name": "Пожарные разрывы от зданий и сооружений", "source": "ФЗ 123 / СП 4.13130", "statusKind": "bool", "extraPlaceholder": "Выполнено: да/нет"},
+        ],
+    },
+    {
+        "id": 8,
+        "title": "Инсоляция",
+        "items": [
+            {"name": "Обеспечена инсоляция проектируемого объекта", "source": "СанПиН 1.2.3685-21 пп.165-168", "statusKind": "bool", "extraPlaceholder": "в т.ч. площадок"},
+            {"name": "Обеспечена инсоляция окружающей застройки", "source": "СанПиН 1.2.3685-21 пп.165-168", "statusKind": "bool", "extraPlaceholder": "Запрошены тех. паспорта зданий по адресам: 1. __________"},
+        ],
+    },
+    {
+        "id": 9,
+        "title": "Прочие требования",
+        "items": [
+            {"name": "Размещена площадка ТКО", "source": "СанПиН", "statusKind": "bool", "extraPlaceholder": "min 20м до домов и площадок (8м при раздельном сборе мусора)"},
+            {"name": "К ТП, ТКО и проч. обеспечен проезд", "source": "", "statusKind": "bool", "extraPlaceholder": ""},
+            {"name": "Объект обеспечен требуемым количеством машиномест в границах ЗУ*", "source": "РНГП", "statusKind": "bool", "extraPlaceholder": ""},
+            {"name": "Объект обеспечен требуемым количеством площадок благоустройства в границах ЗУ*", "source": "РНГП", "statusKind": "bool", "extraPlaceholder": ""},
+        ],
+    },
+    {
+        "id": 10,
+        "title": "Не требуется",
+        "items": [],
+    },
+]
+
 STATUS_OPTIONS = [
     "",
     "Есть",
@@ -92,7 +194,10 @@ STATUS_OPTIONS = [
 PRIORITY_OPTIONS = ["white", "green", "gray"]
 
 
-def build_default_groups():
+def build_default_groups(checklist_key: str = "id"):
+    if checklist_key == "concept":
+        return [{"id": group["id"], "title": group["title"]} for group in CONCEPT_GROUPS]
+
     return [
         {"id": group_id, "title": group_data["title"]}
         for group_id, group_data in CHECKLIST_GROUPS.items()
@@ -109,6 +214,23 @@ def resolve_group_id(name: str) -> int:
             return group_id
 
     return 3
+
+
+def resolve_concept_group_id_by_item_id_or_name(item: dict) -> int:
+    item_id = str(item.get("id") or "")
+    name = str(item.get("name") or "").strip()
+
+    for group in CONCEPT_GROUPS:
+        if group["id"] == 10:
+            continue
+
+        for order, spec in enumerate(group["items"], start=1):
+            expected_id = f"concept_g{group['id']}_{order}"
+            if item_id == expected_id or name == spec["name"]:
+                return group["id"]
+
+    current_group = int(item.get("group") or 1)
+    return 1 if current_group == 10 else current_group
 
 
 def clean_cell_value(value):
@@ -214,8 +336,42 @@ def remove_item_document_file(item: dict):
         pass
 
 
-def build_default_checklist_template(dialog_id: str = ""):
+def build_default_checklist_template(dialog_id: str = "", checklist_key: str = "id"):
     items = []
+
+    if checklist_key == "concept":
+        for group in CONCEPT_GROUPS:
+            if group["id"] == 10:
+                continue
+
+            for order, spec in enumerate(group["items"], start=1):
+                items.append({
+                    "id": f"concept_g{group['id']}_{order}",
+                    "group": group["id"],
+                    "order": order,
+                    "name": spec["name"],
+                    "source": spec.get("source", ""),
+                    "statusKind": spec.get("statusKind", "bool"),
+                    "statusOptions": spec.get("statusOptions", []),
+                    "statusPlaceholder": spec.get("statusPlaceholder", ""),
+                    "status": "",
+                    "extraInfo": "",
+                    "extraInfoPlaceholder": spec.get("extraPlaceholder", ""),
+                    "documentUrl": "",
+                    "documentName": "",
+                    "isCustom": False,
+                })
+
+        return normalize_checklist_data({
+            "title": "???-???? ?????????",
+            "checklistKey": "concept",
+            "collabTitle": "",
+            "contractDeadline": "",
+            "startDate": "",
+            "groups": build_default_groups("concept"),
+            "items": items,
+            "notice": "",
+        }, "concept")
 
     for group_id, group_data in CHECKLIST_GROUPS.items():
         if group_id == 4:
@@ -237,14 +393,15 @@ def build_default_checklist_template(dialog_id: str = ""):
             })
 
     return normalize_checklist_data({
-        "title": "Чек-лист ИД",
+        "title": "???-???? ??",
+        "checklistKey": "id",
         "collabTitle": "",
         "contractDeadline": "",
         "startDate": "",
-        "groups": build_default_groups(),
+        "groups": build_default_groups("id"),
         "items": items,
         "notice": "",
-    })
+    }, "id")
 
 
 def calculate_progress(items: list) -> dict:
@@ -267,8 +424,61 @@ def calculate_progress(items: list) -> dict:
     }
 
 
-def normalize_checklist_data(data: dict) -> dict:
+def normalize_checklist_data(data: dict, checklist_key: str = "id") -> dict:
     data = dict(data or {})
+    checklist_key = str(checklist_key or data.get("checklistKey") or "id").strip() or "id"
+
+    if checklist_key == "concept":
+        raw_items = data.get("items", []) or []
+        normalized_items = []
+
+        for item in raw_items:
+            item = dict(item or {})
+            name = clean_cell_value(item.get("name"))
+            if not name:
+                continue
+
+            normalized_items.append({
+                "id": str(item.get("id") or ""),
+                "group": int(item.get("group") or 0),
+                "order": int(item.get("order") or 0),
+                "name": clean_cell_value(item.get("name")),
+                "source": clean_cell_value(item.get("source")),
+                "statusKind": clean_cell_value(item.get("statusKind")) or "bool",
+                "statusOptions": item.get("statusOptions") or [],
+                "statusPlaceholder": clean_cell_value(item.get("statusPlaceholder")),
+                "status": clean_cell_value(item.get("status")),
+                "extraInfo": clean_cell_value(item.get("extraInfo")),
+                "extraInfoPlaceholder": clean_cell_value(item.get("extraInfoPlaceholder")),
+                "documentUrl": clean_cell_value(item.get("documentUrl")),
+                "documentName": clean_cell_value(item.get("documentName")),
+                "isCustom": bool(item.get("isCustom", False)),
+                "priority": clean_cell_value(item.get("priority")) or "white",
+            })
+
+        normalized_items.sort(key=lambda x: (x["group"], x["order"], x["name"]))
+
+        for group in CONCEPT_GROUPS:
+            group_items = [x for x in normalized_items if x["group"] == group["id"]]
+            for order, item in enumerate(group_items, start=1):
+                item["order"] = order
+                if not item.get("id"):
+                    item["id"] = f"concept_g{group['id']}_{order}"
+
+        return {
+            "title": data.get("title") or "???-???? ?????????",
+            "checklistKey": "concept",
+            "collabTitle": clean_cell_value(data.get("collabTitle")),
+            "contractDeadline": "",
+            "startDate": "",
+            "groups": [{"id": group["id"], "title": group["title"]} for group in CONCEPT_GROUPS],
+            "projectChecklists": build_project_checklists(),
+            "items": normalized_items,
+            "notice": data.get("notice", ""),
+            "activeCount": 0,
+            "completedCount": 0,
+            "progressPercent": 0,
+        }
 
     raw_items = data.get("items", []) or []
     normalized_items = []
@@ -318,15 +528,16 @@ def normalize_checklist_data(data: dict) -> dict:
     progress = calculate_progress(normalized_items)
 
     return {
-        "title": data.get("title") or "Чек-лист ИД",
+        "title": data.get("title") or "???-???? ??",
+        "checklistKey": "id",
         "collabTitle": clean_cell_value(data.get("collabTitle")),
         "contractDeadline": "",
         "startDate": "",
         "groups": [
-            {"id": 1, "title": "ИД"},
-            {"id": 2, "title": "ТУ"},
-            {"id": 3, "title": "Прочее"},
-            {"id": 4, "title": "Не требуется"},
+            {"id": 1, "title": "??"},
+            {"id": 2, "title": "??"},
+            {"id": 3, "title": "??????"},
+            {"id": 4, "title": "?? ?????????"},
         ],
         "projectChecklists": build_project_checklists(),
         "items": normalized_items,
@@ -779,9 +990,10 @@ def extract_dialog_id_from_form(form: dict) -> str:
 
     return ""
 
-def get_checklist(dialog_id: str):
+def get_checklist(dialog_id: str, checklist_key: str = "id"):
     raw_id = str(dialog_id or "").strip()
     normalized_id = normalize_dialog_id(raw_id)
+    checklist_key = str(checklist_key or "id").strip() or "id"
 
     aliases = []
     for candidate in [raw_id, normalized_id]:
@@ -793,12 +1005,14 @@ def get_checklist(dialog_id: str):
         if numeric_id not in aliases:
             aliases.append(numeric_id)
 
+    storage_aliases = [build_storage_dialog_id(candidate, checklist_key) for candidate in aliases if candidate]
+
     conn = get_conn()
 
     row = None
     found_alias = None
 
-    for candidate in aliases:
+    for candidate in storage_aliases:
         row = conn.execute(
             "SELECT data_json FROM checklists WHERE dialog_id = ?",
             (candidate,)
@@ -811,18 +1025,18 @@ def get_checklist(dialog_id: str):
 
     if row:
         data = json.loads(row["data_json"])
-        data = normalize_checklist_data(data)
+        data = normalize_checklist_data(data, checklist_key)
         data["resolvedDialogId"] = normalized_id
-        data["lookupAliases"] = aliases
+        data["lookupAliases"] = storage_aliases
         data["foundAlias"] = found_alias
         return data
 
-    data = build_default_checklist_template(normalized_id)
-    save_checklist(normalized_id, data)
+    data = build_default_checklist_template(normalized_id, checklist_key)
+    save_checklist(normalized_id, data, checklist_key)
 
     data["resolvedDialogId"] = normalized_id
-    data["lookupAliases"] = aliases
-    data["foundAlias"] = normalized_id
+    data["lookupAliases"] = storage_aliases
+    data["foundAlias"] = build_storage_dialog_id(normalized_id, checklist_key)
     return data
 
 
@@ -1154,14 +1368,16 @@ async def textarea_post(request: Request):
 
 
 @app.get("/popup", response_class=HTMLResponse)
-def popup_get(dialogId: str = ""):
+def popup_get(dialogId: str = "", checklistKey: str = "id"):
     dialog_id = normalize_dialog_id(dialogId)
-    data = get_checklist(dialog_id)
+    checklist_key = str(checklistKey or "id").strip() or "id"
+    data = get_checklist(dialog_id, checklist_key)
 
-    title = html.escape(data.get("title", "Чек-лист ИД"))
+    title_raw = data.get("title", "???-???? ??")
+    title = html.escape(title_raw)
     collab_title_raw = (data.get("collabTitle", "") or "").strip()
     collab_title = html.escape(collab_title_raw)
-    full_title = f"{title} — {collab_title}" if collab_title_raw else title
+    full_title = f"{title} ? {collab_title}" if collab_title_raw else title
     progress_percent = int(data.get("progressPercent", 0) or 0)
 
     items_json = json.dumps(data.get("items", []), ensure_ascii=False)
@@ -1169,6 +1385,9 @@ def popup_get(dialogId: str = ""):
     project_checklists_json = json.dumps(data.get("projectChecklists", []), ensure_ascii=False)
     dialog_id_json = json.dumps(dialog_id, ensure_ascii=False)
     collab_title_json = json.dumps(collab_title_raw, ensure_ascii=False)
+    checklist_key_json = json.dumps(checklist_key, ensure_ascii=False)
+    checklist_title_json = json.dumps(title_raw, ensure_ascii=False)
+    checklist_title_json = json.dumps(title_raw, ensure_ascii=False)
 
     return f"""
     <html>
@@ -1323,10 +1542,12 @@ def popup_get(dialogId: str = ""):
         </div>
         <script>
             const dialogId = {dialog_id_json};
-            const groups = {groups_json};
+            let groups = {groups_json};
             const projectChecklists = {project_checklists_json};
             let items = {items_json};
             let collabTitle = {collab_title_json};
+            let currentChecklistKey = {checklist_key_json};
+            let checklistTitle = {checklist_title_json};
             let sessionChanges = [];
             let currentEditor = {{
                 id: "",
@@ -1339,6 +1560,12 @@ def popup_get(dialogId: str = ""):
             const progressBarEl = document.getElementById('progressBar');
             const popupTitleEl = document.getElementById('popupTitle');
             const projectChecklistListEl = document.getElementById('projectChecklistList');
+            const tablePanels = document.querySelectorAll('.table-panel');
+            const tablesGridEl = document.querySelector('.tables-grid');
+            const leftTableEl = tablePanels[0] ? tablePanels[0].querySelector('.table') : null;
+            const rightTableEl = tablePanels[1] ? tablePanels[1].querySelector('.table') : null;
+            const idLeftTableHtml = leftTableEl ? leftTableEl.innerHTML : '';
+            const idRightTableHtml = rightTableEl ? rightTableEl.innerHTML : '';
             const debugLastEventEl = document.getElementById('debugLastEvent');
             const APP_BASE_URL = window.location.origin;
             let closeSummarySent = false;
@@ -1381,9 +1608,9 @@ def popup_get(dialogId: str = ""):
             }}
             function renderTitle() {{
                 if (collabTitle) {{
-                    popupTitleEl.innerHTML = 'Чек-лист ИД <small>— ' + esc(collabTitle) + '</small>';
+                    popupTitleEl.innerHTML = esc(checklistTitle) + ' <small>? ' + esc(collabTitle) + '</small>';
                 }} else {{
-                    popupTitleEl.textContent = 'Чек-лист ИД';
+                    popupTitleEl.textContent = checklistTitle;
                 }}
             }}
             function fetchCurrentUserIfPossible() {{
@@ -1554,7 +1781,7 @@ def popup_get(dialogId: str = ""):
                                         await fetch('/api/checklist/update-meta', {{
                                             method: 'POST',
                                             headers: {{ 'Content-Type': 'application/json' }},
-                                            body: JSON.stringify({{ dialogId, field: 'collabTitle', value: title }})
+                                            body: JSON.stringify({{ dialogId, checklistKey: currentChecklistKey, field: 'collabTitle', value: title }})
                                         }});
                                     }} catch (e) {{
                                         console.log('save collabTitle error:', e);
@@ -1575,32 +1802,37 @@ def popup_get(dialogId: str = ""):
                 }}
             }}
             function calculateProgress() {{
-                const activeItems = items.filter(x => normalizeStatus(x.status) !== 'Не требуется');
-                const completedItems = activeItems.filter(x => normalizeStatus(x.status) === 'Есть');
+                if (currentChecklistKey !== 'id') {{
+                    progressValueEl.textContent = '';
+                    progressBarEl.style.width = '0%';
+                    return;
+                }}
+                const activeItems = items.filter(x => normalizeStatus(x.status) !== '?? ?????????');
+                const completedItems = activeItems.filter(x => normalizeStatus(x.status) === '????');
                 const activeCount = activeItems.length;
                 const completedCount = completedItems.length;
                 const percent = activeCount ? Math.round((completedCount / activeCount) * 100) : 0;
                 progressValueEl.textContent = percent + '%';
                 progressBarEl.style.width = percent + '%';
             }}
-            async function updateItem(itemId, field, value) {{
+            async function updateItem(itemId, field, value, checklistKey = currentChecklistKey) {{
                 setSaveState('saving', 'Сохраняем...');
                 const response = await fetch('/api/checklist/update-item', {{
                     method: 'POST',
                     headers: {{ 'Content-Type': 'application/json' }},
-                    body: JSON.stringify({{ dialogId, itemId, field, value }})
+                    body: JSON.stringify({{ dialogId, checklistKey, itemId, field, value }})
                 }});
                 const result = await response.json();
                 if (!response.ok || !result.ok) throw new Error(result.error || 'save failed');
                 setSaveState('', 'Сохранено');
                 return result;
             }}
-            async function addItem(groupId, name) {{
+            async function addItem(groupId, name, checklistKey = currentChecklistKey) {{
                 setSaveState('saving', 'Сохраняем...');
                 const response = await fetch('/api/checklist/add-item', {{
                     method: 'POST',
                     headers: {{ 'Content-Type': 'application/json' }},
-                    body: JSON.stringify({{ dialogId, groupId, name }})
+                    body: JSON.stringify({{ dialogId, checklistKey, groupId, name }})
                 }});
                 const result = await response.json();
                 if (!response.ok || !result.ok) throw new Error(result.error || 'add item failed');
@@ -1612,7 +1844,7 @@ def popup_get(dialogId: str = ""):
                 const response = await fetch('/api/checklist/remove-document', {{
                     method: 'POST',
                     headers: {{ 'Content-Type': 'application/json' }},
-                    body: JSON.stringify({{ dialogId, itemId }})
+                    body: JSON.stringify({{ dialogId, checklistKey: currentChecklistKey, itemId }})
                 }});
                 const result = await response.json();
                 if (!response.ok || !result.ok) throw new Error(result.error || 'remove document failed');
@@ -1625,6 +1857,7 @@ def popup_get(dialogId: str = ""):
                 formData.append('dialogId', dialogId);
                 formData.append('itemId', itemId);
                 formData.append('file', file);
+                formData.append('checklistKey', currentChecklistKey);
                 const response = await fetch('/api/checklist/upload-document', {{ method: 'POST', body: formData }});
                 const result = await response.json();
                 if (!response.ok || !result.ok) throw new Error(result.error || 'upload document failed');
@@ -1639,39 +1872,110 @@ def popup_get(dialogId: str = ""):
             }}
             function renderProjectChecklistList() {{
                 projectChecklistListEl.innerHTML = projectChecklists.map(item => {{
-                    const active = item.key === 'id' ? 'side-link active' : 'side-link';
+                    const active = item.key === currentChecklistKey ? 'side-link active' : 'side-link';
                     return `<button type="button" class="${{active}}" data-checklist-key="${{esc(item.key)}}">${{esc(item.title)}}</button>`;
                 }}).join('');
                 projectChecklistListEl.querySelectorAll('[data-checklist-key]').forEach(btn => {{
                     btn.addEventListener('click', function () {{
-                        if (this.dataset.checklistKey !== 'id') alert('Этот чек-лист подключим следующим этапом.');
+                        const key = this.dataset.checklistKey;
+                        if (key === 'opr') {{
+                            alert('???? ???-???? ????????? ????????? ??????.');
+                            return;
+                        }}
+                        if (key === currentChecklistKey) {{
+                            return;
+                        }}
+                        window.location.href = '/popup?dialogId=' + encodeURIComponent(dialogId) + '&checklistKey=' + encodeURIComponent(key);
                     }});
                 }});
             }}
-            function buildDocumentCell(item) {{
-                const hasDocument = !!(item.documentUrl && item.documentUrl.trim());
-                if (hasDocument) {{
+            function conceptIndicatorClass(item) {{
+                const status = String(item.status || '').trim();
+                const kind = String(item.statusKind || '').trim();
+
+                if (status === '?? ?????????') {{
+                    return 'status-indicator gray';
+                }}
+
+                if (kind === 'bool') {{
+                    if (status === '??') return 'status-indicator green';
+                    if (status === '???') return 'status-indicator gray';
+                    return 'status-indicator';
+                }}
+
+                return status ? 'status-indicator green' : 'status-indicator';
+            }}
+            function buildConceptStatusCell(item) {{
+                if (item.statusKind === 'bool') {{
                     return `
-                        <button
-                            class="doc-btn"
-                            type="button"
-                            data-role="view-document"
-                            data-document-url="${{esc(item.documentUrl)}}"
-                        >
-                            Посмотреть
-                        </button>
+                        <select class="status-select" data-role="concept-status" data-item-id="${{esc(item.id)}}">
+                            <option value="" ${{item.status === '' ? 'selected' : ''}}></option>
+                            <option value="??" ${{item.status === '??' ? 'selected' : ''}}>??</option>
+                            <option value="???" ${{item.status === '???' ? 'selected' : ''}}>???</option>
+                            <option value="?? ?????????" ${{item.status === '?? ?????????' ? 'selected' : ''}}>?? ?????????</option>
+                        </select>
                     `;
                 }}
-                return `
-                    <button class="upload-btn" type="button" data-role="upload" data-item-id="${{esc(item.id)}}">Загрузить</button>
-                    <input type="file" data-role="file-input" data-item-id="${{esc(item.id)}}" style="display:none;">
+                if (item.statusKind === 'select') {{
+                    const options = [''].concat(item.statusOptions || [], ['?? ?????????']);
+                    return `
+                        <select class="status-select" data-role="concept-status" data-item-id="${{esc(item.id)}}">
+                            ${{options.map(option => `<option value="${{esc(option)}}" ${{item.status === option ? 'selected' : ''}}>${{esc(option)}}</option>`).join('')}}
+                        </select>
+                    `;
+                }}
+                return `<input class="status-select" type="text" data-role="concept-status" data-item-id="${{esc(item.id)}}" placeholder="${{esc(item.statusPlaceholder || '')}}" value="${{esc(item.status || '')}}">`;
+            }}
+            function buildConceptExtraCell(item) {{
+                return `<input class="status-select" type="text" data-role="concept-extra" data-item-id="${{esc(item.id)}}" placeholder="${{esc(item.extraInfoPlaceholder || '')}}" value="${{esc(item.extraInfo || '')}}">`;
+            }}
+            function renderConceptTable() {{
+                if (!leftTableEl || !tablesGridEl) return;
+                tablesGridEl.style.gridTemplateColumns = '1fr';
+                if (tablePanels[1]) {{
+                    tablePanels[1].style.display = 'none';
+                }}
+                const visibleGroups = groups.filter(group => {{
+                    if (group.id !== 10) return true;
+                    return items.some(x => x.group === 10);
+                }});
+                leftTableEl.innerHTML = `
+                    <div class="thead">
+                        <div class="thead-top" style="grid-template-columns: 1.2fr 0.8fr 110px 160px 1fr;">
+                            <div class="th">?????</div>
+                            <div class="th">?????????</div>
+                            <div class="th">????????</div>
+                            <div class="th">??????</div>
+                            <div class="th">??? ??????????</div>
+                        </div>
+                    </div>
+                    <div id="conceptTableBody">${{visibleGroups.map(group => {{
+                        const groupItems = getItemsByGroup(group.id);
+                        const rows = groupItems.map(item => `
+                            <div class="row" style="grid-template-columns: 1.2fr 0.8fr 110px 160px 1fr;" data-item-id="${{esc(item.id)}}">
+                                <div class="td">
+                                    <div class="cell-name">
+                                        <div class="${{conceptIndicatorClass(item)}}"></div>
+                                        <div class="item-name" style="${{item.status === '?? ?????????' ? 'text-decoration:line-through;color:#98a2b3;' : ''}}">
+                                            ${{esc(item.name)}}
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="td">${{esc(item.source || '')}}</div>
+                                <div class="td">${{buildDocumentCell(item)}}</div>
+                                <div class="td">${{buildConceptStatusCell(item)}}</div>
+                                <div class="td">${{buildConceptExtraCell(item)}}</div>
+                            </div>
+                        `).join('');
+                        return `<div class="group-block"><div class="group-title">${{esc(group.title)}}</div>${{rows}}</div>`;
+                    }}) .join('')}}</div>
                 `;
             }}
             function renderGroup(group) {{
                 const groupItems = getItemsByGroup(group.id);
                 const allowAdd = group.id !== 4;
                 const rows = groupItems.map(item => {{
-                    const rowClass = normalizeStatus(item.status) === 'Не требуется' ? 'row not-required' : 'row';
+                    const rowClass = normalizeStatus(item.status) === '?? ?????????' ? 'row not-required' : 'row';
                     return `
                         <div class="${{rowClass}}" data-item-id="${{esc(item.id)}}">
                             <div class="td"><div class="cell-name"><div class="${{indicatorClass(item.status)}}"></div><div class="item-name">${{esc(item.name)}}</div></div></div>
@@ -1679,9 +1983,9 @@ def popup_get(dialogId: str = ""):
                             <div class="td">
                                 <select class="status-select" data-role="status" data-item-id="${{esc(item.id)}}">
                                     <option value="" ${{normalizeStatus(item.status) === '' ? 'selected' : ''}}></option>
-                                    <option value="Есть" ${{normalizeStatus(item.status) === 'Есть' ? 'selected' : ''}}>Есть</option>
-                                    <option value="Нет" ${{normalizeStatus(item.status) === 'Нет' ? 'selected' : ''}}>Нет</option>
-                                    <option value="Не требуется" ${{normalizeStatus(item.status) === 'Не требуется' ? 'selected' : ''}}>Не требуется</option>
+                                    <option value="????" ${{normalizeStatus(item.status) === '????' ? 'selected' : ''}}>????</option>
+                                    <option value="???" ${{normalizeStatus(item.status) === '???' ? 'selected' : ''}}>???</option>
+                                    <option value="?? ?????????" ${{normalizeStatus(item.status) === '?? ?????????' ? 'selected' : ''}}>?? ?????????</option>
                                 </select>
                             </div>
                             <div class="td"><input class="date-input" type="date" data-role="plan" data-item-id="${{esc(item.id)}}" value="${{esc(toInputDate(item.plan))}}"></div>
@@ -1691,12 +1995,26 @@ def popup_get(dialogId: str = ""):
                 }}).join('');
                 const addBlock = allowAdd ? `
                     <div class="add-item-row">
-                        <input class="add-item-input" id="addItemInput_${{group.id}}" type="text" placeholder="Новый пункт">
-                        <button class="add-item-btn" type="button" data-role="add-item" data-group-id="${{group.id}}">Добавить пункт</button>
+                        <input class="add-item-input" id="addItemInput_${{group.id}}" type="text" placeholder="????? ?????">
+                        <button class="add-item-btn" type="button" data-role="add-item" data-group-id="${{group.id}}">???????? ?????</button>
                     </div>` : '';
                 return `<div class="group-block"><div class="group-title">${{esc(group.title)}}</div>${{rows}}${{addBlock}}</div>`;
             }}
             function renderTables() {{
+                if (currentChecklistKey === 'concept') {{
+                    renderConceptTable();
+                    return;
+                }}
+                if (tablesGridEl) {{
+                    tablesGridEl.style.gridTemplateColumns = '1fr 1fr';
+                }}
+                if (tablePanels[1]) {{
+                    tablePanels[1].style.display = '';
+                }}
+                if (leftTableEl) leftTableEl.innerHTML = idLeftTableHtml;
+                if (rightTableEl) rightTableEl.innerHTML = idRightTableHtml;
+                const leftBody = document.getElementById('leftTableBody');
+                const rightBody = document.getElementById('rightTableBody');
                 const leftGroups = groups.filter(g => g.id === 1 || g.id === 3);
                 const rightGroups = groups.filter(g => g.id === 2);
 
@@ -1707,8 +2025,8 @@ def popup_get(dialogId: str = ""):
                     }}
                 }}
 
-                leftTableBodyEl.innerHTML = leftGroups.map(renderGroup).join('');
-                rightTableBodyEl.innerHTML = rightGroups.map(renderGroup).join('');
+                if (leftBody) leftBody.innerHTML = leftGroups.map(renderGroup).join('');
+                if (rightBody) rightBody.innerHTML = rightGroups.map(renderGroup).join('');
             }}
             function renderAll() {{
                 renderTables();
@@ -1723,6 +2041,57 @@ def popup_get(dialogId: str = ""):
                 if (idx >= 0) items[idx] = updatedItem; else items.push(updatedItem);
             }}
             function bindEvents() {{
+                document.querySelectorAll('[data-role="concept-status"]').forEach(el => {{
+                    const handler = async function () {{
+                        const item = items.find(x => x.id === this.dataset.itemId);
+                        if (!item) return;
+
+                        const oldItem = JSON.parse(JSON.stringify(item));
+                        const newValue = this.value;
+
+                        item.status = newValue;
+                        sessionDirty = true;
+
+                        try {{
+                            const result = await updateItem(this.dataset.itemId, 'status', newValue, currentChecklistKey);
+                            replaceItem(result.item);
+                            renderAll();
+                        }} catch (e) {{
+                            replaceItem(oldItem);
+                            renderAll();
+                            setSaveState('error', '?????? ??????????');
+                        }}
+                    }};
+
+                    el.addEventListener('change', handler);
+                    el.addEventListener('blur', handler);
+                }});
+
+                document.querySelectorAll('[data-role="concept-extra"]').forEach(el => {{
+                    const handler = async function () {{
+                        const item = items.find(x => x.id === this.dataset.itemId);
+                        if (!item) return;
+
+                        const oldItem = JSON.parse(JSON.stringify(item));
+                        const newValue = this.value;
+
+                        item.extraInfo = newValue;
+                        sessionDirty = true;
+
+                        try {{
+                            const result = await updateItem(this.dataset.itemId, 'extraInfo', newValue, currentChecklistKey);
+                            replaceItem(result.item);
+                            renderAll();
+                        }} catch (e) {{
+                            replaceItem(oldItem);
+                            renderAll();
+                            setSaveState('error', '?????? ??????????');
+                        }}
+                    }};
+
+                    el.addEventListener('change', handler);
+                    el.addEventListener('blur', handler);
+                }});
                 document.querySelectorAll('[data-role="status"]').forEach(el => {{
                     el.addEventListener('change', async function() {{
                         const item = items.find(x => x.id === this.dataset.itemId);
@@ -2041,9 +2410,9 @@ def view_get(dialogId: str = ""):
 
 
 @app.get("/api/checklist")
-def api_checklist(dialogId: str = ""):
+def api_checklist(dialogId: str = "", checklistKey: str = "id"):
     dialogId = normalize_dialog_id(dialogId)
-    return JSONResponse(get_checklist(dialogId))
+    return JSONResponse(get_checklist(dialogId, checklistKey))
 
 
 @app.post("/api/checklist/update-item")
@@ -2051,6 +2420,7 @@ async def api_checklist_update_item(request: Request):
     payload = await request.json()
 
     dialog_id = normalize_dialog_id(payload.get("dialogId"))
+    checklist_key = str(payload.get("checklistKey") or "id").strip() or "id"
     item_id = str(payload.get("itemId") or "").strip()
     field = str(payload.get("field") or "").strip()
     value = payload.get("value")
@@ -2061,11 +2431,11 @@ async def api_checklist_update_item(request: Request):
     if not item_id:
         return JSONResponse({"ok": False, "error": "itemId is required"}, status_code=400)
 
-    allowed_fields = {"priority", "status", "plan", "fact"}
+    allowed_fields = {"priority", "status", "plan", "fact", "extraInfo"}
     if field not in allowed_fields:
         return JSONResponse({"ok": False, "error": "invalid field"}, status_code=400)
 
-    data = get_checklist(dialog_id)
+    data = get_checklist(dialog_id, checklist_key)
     items = data.get("items", [])
 
     target_item = None
@@ -2080,22 +2450,48 @@ async def api_checklist_update_item(request: Request):
     if field == "priority":
         target_item["priority"] = normalize_priority(value)
     elif field == "status":
-        new_status = normalize_status(value)
-        target_item["status"] = new_status
-        target_item["priority"] = derive_indicator_from_status(new_status)
+        new_value = clean_cell_value(value)
 
-        if new_status == "Нет":
-            remove_item_document_file(target_item)
-            target_item["documentUrl"] = ""
-            target_item["documentName"] = ""
+        if checklist_key == "concept":
+            target_item["status"] = new_value
+
+            status_kind = str(target_item.get("statusKind") or "").strip()
+
+            if new_value == "?? ?????????":
+                target_item["group"] = 10
+                target_item["priority"] = "gray"
+            else:
+                if target_item.get("group") == 10:
+                    target_item["group"] = resolve_concept_group_id_by_item_id_or_name(target_item)
+
+                if status_kind == "bool":
+                    if new_value == "??":
+                        target_item["priority"] = "green"
+                    elif new_value == "???":
+                        target_item["priority"] = "gray"
+                    else:
+                        target_item["priority"] = "white"
+                else:
+                    target_item["priority"] = "green" if new_value else "white"
+        else:
+            new_status = normalize_status(value)
+            target_item["status"] = new_status
+            target_item["priority"] = derive_indicator_from_status(new_status)
+
+            if new_status == "???":
+                remove_item_document_file(target_item)
+                target_item["documentUrl"] = ""
+                target_item["documentName"] = ""
     elif field == "plan":
         target_item["plan"] = normalize_date_string(value)
     elif field == "fact":
         target_item["fact"] = normalize_date_string(value)
+    elif field == "extraInfo":
+        target_item["extraInfo"] = clean_cell_value(value)
 
     data["items"] = items
-    data = normalize_checklist_data(data)
-    save_checklist(dialog_id, data)
+    data = normalize_checklist_data(data, checklist_key)
+    save_checklist(dialog_id, data, checklist_key)
     updated_item = None
     for item in data.get("items", []):
         if str(item.get("id")) == item_id:
@@ -2106,6 +2502,7 @@ async def api_checklist_update_item(request: Request):
         "ok": True,
         "item": updated_item,
         "dialogId": dialog_id,
+        "checklistKey": checklist_key,
         "progressPercent": data.get("progressPercent", 0),
     })
 
@@ -2115,6 +2512,7 @@ async def api_checklist_update_meta(request: Request):
     payload = await request.json()
 
     dialog_id = normalize_dialog_id(payload.get("dialogId"))
+    checklist_key = str(payload.get("checklistKey") or "id").strip() or "id"
     field = str(payload.get("field") or "").strip()
     value = payload.get("value")
 
@@ -2124,11 +2522,11 @@ async def api_checklist_update_meta(request: Request):
     if field != "collabTitle":
         return JSONResponse({"ok": False, "error": "only collabTitle is supported now"}, status_code=400)
 
-    data = get_checklist(dialog_id)
+    data = get_checklist(dialog_id, checklist_key)
     data["collabTitle"] = clean_cell_value(value)
 
-    data = normalize_checklist_data(data)
-    save_checklist(dialog_id, data)
+    data = normalize_checklist_data(data, checklist_key)
+    save_checklist(dialog_id, data, checklist_key)
 
     return JSONResponse({
         "ok": True,
@@ -2144,11 +2542,15 @@ async def api_checklist_add_item(request: Request):
     payload = await request.json()
 
     dialog_id = normalize_dialog_id(payload.get("dialogId"))
+    checklist_key = str(payload.get("checklistKey") or "id").strip() or "id"
     group_id = int(payload.get("groupId") or 0)
     name = clean_cell_value(payload.get("name"))
 
     if not dialog_id:
         return JSONResponse({"ok": False, "error": "dialogId is required"}, status_code=400)
+
+    if checklist_key != "id":
+        return JSONResponse({"ok": False, "error": "add-item is only supported for id"}, status_code=400)
 
     if group_id not in [1, 2, 3]:
         return JSONResponse({"ok": False, "error": "invalid groupId"}, status_code=400)
@@ -2156,7 +2558,7 @@ async def api_checklist_add_item(request: Request):
     if not name:
         return JSONResponse({"ok": False, "error": "name is required"}, status_code=400)
 
-    data = get_checklist(dialog_id)
+    data = get_checklist(dialog_id, checklist_key)
     items = data.get("items", [])
 
     group_items = [x for x in items if x.get("group") == group_id]
@@ -2178,8 +2580,8 @@ async def api_checklist_add_item(request: Request):
 
     items.append(new_item)
     data["items"] = items
-    data = normalize_checklist_data(data)
-    save_checklist(dialog_id, data)
+    data = normalize_checklist_data(data, checklist_key)
+    save_checklist(dialog_id, data, checklist_key)
     created_item = None
     for item in data.get("items", []):
         if str(item.get("id")) == new_item["id"]:
@@ -2198,9 +2600,11 @@ async def api_checklist_add_item(request: Request):
 async def api_checklist_upload_document(
     dialogId: str = Form(...),
     itemId: str = Form(...),
-    file: UploadFile = File(...)
+    file: UploadFile = File(...),
+    checklistKey: str = Form("id")
 ):
     dialog_id = normalize_dialog_id(dialogId)
+    checklist_key = str(checklistKey or "id").strip() or "id"
     item_id = str(itemId or "").strip()
 
     if not dialog_id:
@@ -2209,7 +2613,7 @@ async def api_checklist_upload_document(
     if not item_id:
         return JSONResponse({"ok": False, "error": "itemId is required"}, status_code=400)
 
-    data = get_checklist(dialog_id)
+    data = get_checklist(dialog_id, checklist_key)
     items = data.get("items", [])
 
     target_item = None
@@ -2234,13 +2638,13 @@ async def api_checklist_upload_document(
     target_item["documentUrl"] = "/uploads/" + rel_path.replace("\\", "/")
     target_item["documentName"] = Path(file.filename or "file.bin").name
 
-    if normalize_status(target_item.get("status")) != "Не требуется":
-        target_item["status"] = "Есть"
-        target_item["priority"] = derive_indicator_from_status("Есть")
+    if checklist_key == "id" and int(target_item.get("group") or 0) != 4:
+        target_item["status"] = "????"
+        target_item["priority"] = derive_indicator_from_status("????")
 
     data["items"] = items
-    data = normalize_checklist_data(data)
-    save_checklist(dialog_id, data)
+    data = normalize_checklist_data(data, checklist_key)
+    save_checklist(dialog_id, data, checklist_key)
 
     updated_item = None
     for item in data.get("items", []):
@@ -2261,6 +2665,7 @@ async def api_checklist_remove_document(request: Request):
     payload = await request.json()
 
     dialog_id = normalize_dialog_id(payload.get("dialogId"))
+    checklist_key = str(payload.get("checklistKey") or "id").strip() or "id"
     item_id = str(payload.get("itemId") or "").strip()
 
     if not dialog_id:
@@ -2269,7 +2674,7 @@ async def api_checklist_remove_document(request: Request):
     if not item_id:
         return JSONResponse({"ok": False, "error": "itemId is required"}, status_code=400)
 
-    data = get_checklist(dialog_id)
+    data = get_checklist(dialog_id, checklist_key)
     items = data.get("items", [])
 
     target_item = None
@@ -2286,8 +2691,8 @@ async def api_checklist_remove_document(request: Request):
     target_item["documentName"] = ""
 
     data["items"] = items
-    data = normalize_checklist_data(data)
-    save_checklist(dialog_id, data)
+    data = normalize_checklist_data(data, checklist_key)
+    save_checklist(dialog_id, data, checklist_key)
 
     updated_item = None
     for item in data.get("items", []):
