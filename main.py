@@ -643,9 +643,9 @@ def write_debug_log(event: str, payload: dict):
 
 
 def status_emoji(status: str) -> str:
-    status = normalize_status(status)
+    status = display_status_text(status)
 
-    if status == "Есть":
+    if status == "Есть" or status == "Да":
         return "🟢"
     if status == "Нет":
         return "🔴"
@@ -655,8 +655,9 @@ def status_emoji(status: str) -> str:
 
 
 def display_status_text(status: str) -> str:
-    status = normalize_status(status)
-    return status if status else ""
+    status = clean_cell_value(status)
+    normalized = normalize_status(status)
+    return normalized or status
 
 
 def format_plan_suffix(plan: str) -> str:
@@ -694,8 +695,8 @@ def format_change_arrow(old_value: str, new_value: str) -> str:
 
 def format_status_change_line(change: dict) -> str:
     item_name = str(change.get("itemName") or "").strip() or "Без названия"
-    new_value = normalize_status(change.get("newValue"))
-    old_value = normalize_status(change.get("oldValue"))
+    new_value = display_status_text(change.get("newValue"))
+    old_value = display_status_text(change.get("oldValue"))
 
     emoji = status_emoji(new_value)
     arrow = format_change_arrow(old_value, new_value)
@@ -771,11 +772,12 @@ def build_checklist_line(item: dict, changes: list) -> str:
     return line
 
 
-def build_recent_changes_text(changes: list) -> str:
+def build_recent_changes_text(changes: list, checklist_title: str = "Чек-лист ИД") -> str:
     status_changes, date_changes = split_changes(changes)
+    checklist_title = clean_cell_value(checklist_title) or "Чек-лист ИД"
 
     lines = [
-        "[B]✏️ИЗМЕНЕНИЯ В ЧЕК-ЛИСТ ИД[/B]",
+        f"[B]✏️ИЗМЕНЕНИЯ В {checklist_title.upper()}[/B]",
         "",
     ]
 
@@ -856,8 +858,9 @@ def build_checklist_full_text(data: dict, changes: list) -> str:
 
 
 def build_checklist_chat_message(data: dict, changes: list, editor: dict) -> str:
+    checklist_title = (data.get("title") or "Чек-лист ИД").strip()
     parts = [
-        build_recent_changes_text(changes),
+        build_recent_changes_text(changes, checklist_title),
         "",
         build_editor_text(editor),
         "",
@@ -1414,7 +1417,7 @@ async def textarea_post(request: Request):
 @app.get("/popup", response_class=HTMLResponse)
 def popup_get(dialogId: str = "", checklistKey: str = "id"):
     dialog_id = normalize_dialog_id(dialogId)
-    checklist_key = str(checklistKey or "id").strip() or "id"
+    checklist_key = normalize_checklist_key(checklistKey)
     data = get_checklist(dialog_id, checklist_key)
 
     title_raw = data.get("title", "Чек-лист ИД")
@@ -1430,7 +1433,6 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
     dialog_id_json = json.dumps(dialog_id, ensure_ascii=False)
     collab_title_json = json.dumps(collab_title_raw, ensure_ascii=False)
     checklist_key_json = json.dumps(checklist_key, ensure_ascii=False)
-    checklist_title_json = json.dumps(title_raw, ensure_ascii=False)
     checklist_title_json = json.dumps(title_raw, ensure_ascii=False)
 
     return f"""
@@ -1586,17 +1588,18 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
         </div>
         <script>
             const dialogId = {dialog_id_json};
-            const rawGroups = {groups_json};
-            const rawProjectChecklists = {project_checklists_json};
+            let rawGroups = {groups_json};
+            let rawProjectChecklists = {project_checklists_json};
             let rawItems = {items_json};
             let collabTitle = {collab_title_json};
 
-            const groups = Array.isArray(rawGroups) ? rawGroups : [];
-            const projectChecklists = Array.isArray(rawProjectChecklists) ? rawProjectChecklists : [];
+            let groups = Array.isArray(rawGroups) ? rawGroups : [];
+            let projectChecklists = Array.isArray(rawProjectChecklists) ? rawProjectChecklists : [];
             let items = Array.isArray(rawItems) ? rawItems : [];
 
             let currentChecklistKey = {checklist_key_json};
             let checklistTitle = {checklist_title_json};
+            let checklistCache = {{}};
             let sessionChanges = [];
             let currentEditor = {{
                 id: "",
@@ -1704,6 +1707,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                 const body = JSON.stringify({{
                     event,
                     dialogId,
+                    checklistKey: currentChecklistKey,
                     payload,
                     href: window.location.href,
                     ts: new Date().toISOString()
@@ -1771,6 +1775,139 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                     stack
                 }});
             }}
+            function deepClone(value) {{
+                return JSON.parse(JSON.stringify(value));
+            }}
+
+            function buildChecklistSnapshot() {{
+                return {{
+                    checklistKey: currentChecklistKey,
+                    title: checklistTitle,
+                    collabTitle,
+                    groups: deepClone(groups),
+                    projectChecklists: deepClone(projectChecklists),
+                    items: deepClone(items)
+                }};
+            }}
+
+            function syncChecklistCache() {{
+                checklistCache[currentChecklistKey] = buildChecklistSnapshot();
+            }}
+
+            function applyChecklistData(data) {{
+                const nextData = data || {{}};
+                const nextKey = String(nextData.checklistKey || currentChecklistKey || 'id').trim() || 'id';
+
+                currentChecklistKey = nextKey;
+                checklistTitle = String(nextData.title || (nextKey === 'concept' ? 'Чек-лист Концепция' : 'Чек-лист ИД'));
+                collabTitle = String(nextData.collabTitle || collabTitle || '');
+
+                rawGroups = Array.isArray(nextData.groups) ? nextData.groups : [];
+                rawProjectChecklists = Array.isArray(nextData.projectChecklists)
+                    ? nextData.projectChecklists
+                    : rawProjectChecklists;
+                rawItems = Array.isArray(nextData.items) ? nextData.items : [];
+
+                groups = Array.isArray(rawGroups) ? rawGroups : [];
+                projectChecklists = Array.isArray(rawProjectChecklists) ? rawProjectChecklists : [];
+                items = Array.isArray(rawItems) ? rawItems : [];
+
+                document.title = collabTitle
+                    ? checklistTitle + ' — ' + collabTitle
+                    : checklistTitle;
+            }}
+
+            async function flushCurrentChecklistSummary(reason = 'checklist_switch') {{
+                if (!sessionDirty || !sessionChanges.length) {{
+                    sessionChanges = [];
+                    sessionDirty = false;
+                    closeSummarySent = false;
+                    return;
+                }}
+
+                const payload = {{
+                    dialogId,
+                    checklistKey: currentChecklistKey,
+                    editor: currentEditor,
+                    changes: sessionChanges,
+                    closeEvent: reason,
+                    ts: new Date().toISOString()
+                }};
+
+                try {{
+                    await fetch('/api/checklist/close-session', {{
+                        method: 'POST',
+                        headers: {{
+                            'Content-Type': 'application/json'
+                        }},
+                        body: JSON.stringify(payload),
+                        keepalive: true
+                    }});
+                    debugLog('close_summary_switch_sent', {{
+                        checklistKey: currentChecklistKey,
+                        changesCount: sessionChanges.length
+                    }});
+                }} catch (e) {{
+                    console.log('flushCurrentChecklistSummary error:', e);
+                    debugLog('close_summary_switch_error', {{
+                        checklistKey: currentChecklistKey,
+                        message: e && e.message ? e.message : String(e)
+                    }});
+                }}
+
+                sessionChanges = [];
+                sessionDirty = false;
+                closeSummarySent = false;
+            }}
+
+            async function loadChecklistByKey(checklistKey) {{
+                const targetKey = String(checklistKey || '').trim() || 'id';
+
+                if (targetKey === 'opr') {{
+                    alert('Этот чек-лист подключим следующим этапом.');
+                    return;
+                }}
+
+                if (targetKey === currentChecklistKey) {{
+                    return;
+                }}
+
+                await flushCurrentChecklistSummary();
+                setSaveState('saving', 'Загружаем...');
+
+                try {{
+                    const cachedData = checklistCache[targetKey];
+                    if (cachedData) {{
+                        applyChecklistData(deepClone(cachedData));
+                        renderAll();
+                        debugLog('checklist_switched_cached', {{
+                            checklistKey: targetKey
+                        }});
+                        setSaveState('', 'Сохранено');
+                        return;
+                    }}
+
+                    const response = await fetch(
+                        '/api/checklist?dialogId=' + encodeURIComponent(dialogId) +
+                        '&checklistKey=' + encodeURIComponent(targetKey)
+                    );
+                    const result = await response.json();
+
+                    if (!response.ok) {{
+                        throw new Error(result.error || 'load checklist failed');
+                    }}
+
+                    applyChecklistData(result);
+                    renderAll();
+                    debugLog('checklist_switched', {{
+                        checklistKey: targetKey
+                    }});
+                    setSaveState('', 'Сохранено');
+                }} catch (e) {{
+                    console.log('loadChecklistByKey error:', e);
+                    setSaveState('error', 'Ошибка загрузки чек-листа');
+                }}
+            }}
 
             function sendCloseSummaryOnce(eventName) {{
                 if (closeSummarySent) {{
@@ -1781,6 +1918,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
 
                 const payload = {{
                     dialogId,
+                    checklistKey: currentChecklistKey,
                     editor: currentEditor,
                     changes: sessionChanges,
                     closeEvent: eventName,
@@ -1970,18 +2108,44 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                     return `<button type="button" class="${{active}}" data-checklist-key="${{esc(item.key)}}">${{esc(item.title)}}</button>`;
                 }}).join('');
                 projectChecklistListEl.querySelectorAll('[data-checklist-key]').forEach(btn => {{
-                    btn.addEventListener('click', function () {{
+                    btn.addEventListener('click', async function () {{
                         const key = this.dataset.checklistKey;
-                        if (key === 'opr') {{
-                            alert('Этот чек-лист подключим следующим этапом.');
-                            return;
-                        }}
-                        if (key === currentChecklistKey) {{
-                            return;
-                        }}
-                        window.location.href = '/popup?dialogId=' + encodeURIComponent(dialogId) + '&checklistKey=' + encodeURIComponent(key);
+                        await loadChecklistByKey(key);
                     }});
                 }});
+            }}
+            function buildDocumentCell(item) {{
+                const hasDocument = !!(item.documentUrl && String(item.documentUrl).trim());
+
+                if (hasDocument) {{
+                    return `
+                        <button
+                            class="doc-btn"
+                            type="button"
+                            data-role="view-document"
+                            data-document-url="${{esc(item.documentUrl)}}"
+                        >
+                            Посмотреть
+                        </button>
+                    `;
+                }}
+
+                return `
+                    <button
+                        class="upload-btn"
+                        type="button"
+                        data-role="upload"
+                        data-item-id="${{esc(item.id)}}"
+                    >
+                        Загрузить
+                    </button>
+                    <input
+                        type="file"
+                        data-role="file-input"
+                        data-item-id="${{esc(item.id)}}"
+                        style="display:none;"
+                    >
+                `;
             }}
             function conceptIndicatorClass(item) {{
                 const status = String(item.status || '').trim();
@@ -2099,9 +2263,6 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                     renderConceptTable();
                     return;
                 }}
-                if (!leftTableBodyEl || !rightTableBodyEl) {{
-                    throw new Error('leftTableBodyEl or rightTableBodyEl not found');
-                }}
                 if (tablesGridEl) {{
                     tablesGridEl.style.gridTemplateColumns = '1fr 1fr';
                 }}
@@ -2110,6 +2271,11 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                 }}
                 if (leftTableEl) leftTableEl.innerHTML = idLeftTableHtml;
                 if (rightTableEl) rightTableEl.innerHTML = idRightTableHtml;
+                const leftBody = document.getElementById('leftTableBody');
+                const rightBody = document.getElementById('rightTableBody');
+                if (!leftBody || !rightBody) {{
+                    throw new Error('leftTableBody or rightTableBody not found');
+                }}
                 const leftGroups = groups.filter(g => Number(g.id) === 1 || Number(g.id) === 3);
                 const rightGroups = groups.filter(g => Number(g.id) === 2);
 
@@ -2120,8 +2286,8 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                     }}
                 }}
 
-                leftTableBodyEl.innerHTML = leftGroups.map(renderGroup).join('');
-                rightTableBodyEl.innerHTML = rightGroups.map(renderGroup).join('');
+                leftBody.innerHTML = leftGroups.map(renderGroup).join('');
+                rightBody.innerHTML = rightGroups.map(renderGroup).join('');
             }}
             function renderAll() {{
                 renderTables();
@@ -2129,6 +2295,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                 calculateProgress();
                 renderTitle();
                 renderProjectChecklistList();
+                syncChecklistCache();
             }}
             function replaceItem(updatedItem) {{
                 if (!updatedItem) return;
@@ -2238,7 +2405,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                             sessionChanges.splice(changeCountBefore);
                             replaceItem(oldItem);
                             renderAll();
-                            setSaveState('error', 'Save error');
+                            setSaveState('error', 'Ошибка сохранения');
                         }}
                     }});
                 }});
@@ -2277,7 +2444,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                             sessionChanges.splice(changeCountBefore);
                             replaceItem(oldItem);
                             renderAll();
-                            setSaveState('error', 'Save error');
+                            setSaveState('error', 'Ошибка сохранения');
                         }}
                     }});
                 }});
@@ -2316,7 +2483,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                             sessionChanges.splice(changeCountBefore);
                             replaceItem(oldItem);
                             renderAll();
-                            setSaveState('error', 'Save error');
+                            setSaveState('error', 'Ошибка сохранения');
                         }}
                     }});
                 }});
@@ -2350,7 +2517,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                             input.value = '';
                             renderAll();
                         }} catch (e) {{
-                            setSaveState('error', 'Add item error');
+                            setSaveState('error', 'Ошибка добавления пункта');
                         }}
                     }});
                 }});
@@ -2371,19 +2538,21 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                             window.open(absoluteUrl, '_blank', 'noopener,noreferrer');
                         }} catch (e) {{
                             console.log('open document error:', e);
+                            setSaveState('error', 'Ошибка открытия документа');
                         }}
                     }});
                 }});
 
                 document.querySelectorAll('[data-role="file-input"]').forEach(input => {{
                     input.addEventListener('change', async function() {{
+                        const itemId = this.dataset.itemId;
                         const file = this.files && this.files[0];
                         if (!file) return;
-                        const item = items.find(x => x.id === this.dataset.itemId);
+                        const item = items.find(x => x.id === itemId);
                         const oldStatus = item ? normalizeStatus(item.status) : '';
 
                         try {{
-                            const result = await uploadDocument(this.dataset.itemId, file);
+                            const result = await uploadDocument(itemId, file);
                             replaceItem(result.item);
                             if (result.item) {{
                                 sessionChanges.push({{
@@ -2419,7 +2588,8 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                             }}
                             renderAll();
                         }} catch (e) {{
-                            setSaveState('error', 'Upload error');
+                            console.log(e);
+                            setSaveState('error', 'Ошибка загрузки файла');
                         }}
                     }});
                 }});
@@ -2529,6 +2699,7 @@ def view_get(dialogId: str = ""):
 @app.get("/api/checklist")
 def api_checklist(dialogId: str = "", checklistKey: str = "id"):
     dialogId = normalize_dialog_id(dialogId)
+    checklistKey = normalize_checklist_key(checklistKey)
     return JSONResponse(get_checklist(dialogId, checklistKey))
 
 
@@ -2537,7 +2708,7 @@ async def api_checklist_update_item(request: Request):
     payload = await request.json()
 
     dialog_id = normalize_dialog_id(payload.get("dialogId"))
-    checklist_key = str(payload.get("checklistKey") or "id").strip() or "id"
+    checklist_key = normalize_checklist_key(payload.get("checklistKey"))
     item_id = str(payload.get("itemId") or "").strip()
     field = str(payload.get("field") or "").strip()
     value = payload.get("value")
@@ -2629,7 +2800,7 @@ async def api_checklist_update_meta(request: Request):
     payload = await request.json()
 
     dialog_id = normalize_dialog_id(payload.get("dialogId"))
-    checklist_key = str(payload.get("checklistKey") or "id").strip() or "id"
+    checklist_key = normalize_checklist_key(payload.get("checklistKey"))
     field = str(payload.get("field") or "").strip()
     value = payload.get("value")
 
@@ -2659,7 +2830,7 @@ async def api_checklist_add_item(request: Request):
     payload = await request.json()
 
     dialog_id = normalize_dialog_id(payload.get("dialogId"))
-    checklist_key = str(payload.get("checklistKey") or "id").strip() or "id"
+    checklist_key = normalize_checklist_key(payload.get("checklistKey"))
     group_id = int(payload.get("groupId") or 0)
     name = clean_cell_value(payload.get("name"))
 
@@ -2721,7 +2892,7 @@ async def api_checklist_upload_document(
     checklistKey: str = Form("id")
 ):
     dialog_id = normalize_dialog_id(dialogId)
-    checklist_key = str(checklistKey or "id").strip() or "id"
+    checklist_key = normalize_checklist_key(checklistKey)
     item_id = str(itemId or "").strip()
 
     if not dialog_id:
@@ -2782,7 +2953,7 @@ async def api_checklist_remove_document(request: Request):
     payload = await request.json()
 
     dialog_id = normalize_dialog_id(payload.get("dialogId"))
-    checklist_key = str(payload.get("checklistKey") or "id").strip() or "id"
+    checklist_key = normalize_checklist_key(payload.get("checklistKey"))
     item_id = str(payload.get("itemId") or "").strip()
 
     if not dialog_id:
@@ -2856,6 +3027,7 @@ async def api_checklist_close_session(request: Request):
     write_debug_log("close_session_received", payload)
 
     dialog_id = normalize_dialog_id(payload.get("dialogId"))
+    checklist_key = normalize_checklist_key(payload.get("checklistKey"))
     changes = payload.get("changes") or []
     editor = payload.get("editor") or {}
 
@@ -2869,11 +3041,12 @@ async def api_checklist_close_session(request: Request):
     if not changes:
         write_debug_log("close_session_skipped", {
             "dialogId": dialog_id,
+            "checklistKey": checklist_key,
             "reason": "no changes"
         })
         return JSONResponse({"ok": True, "skipped": True, "reason": "no changes"})
 
-    data = get_checklist(dialog_id)
+    data = get_checklist(dialog_id, checklist_key)
     message = build_checklist_chat_message(data, changes, editor)
 
     result = bitrix_webhook_call("im.message.add", {
@@ -2883,6 +3056,7 @@ async def api_checklist_close_session(request: Request):
 
     write_debug_log("close_session_im_message_add_result", {
         "dialogId": dialog_id,
+        "checklistKey": checklist_key,
         "changesCount": len(changes),
         "editor": editor,
         "result": result
@@ -2891,6 +3065,7 @@ async def api_checklist_close_session(request: Request):
     return JSONResponse({
         "ok": "error" not in result,
         "dialogId": dialog_id,
+        "checklistKey": checklist_key,
         "result": result,
     })
 
