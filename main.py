@@ -363,7 +363,7 @@ def build_default_checklist_template(dialog_id: str = "", checklist_key: str = "
                 })
 
         return normalize_checklist_data({
-            "title": "???-???? ?????????",
+            "title": "Чек-лист Концепция",
             "checklistKey": "concept",
             "collabTitle": "",
             "contractDeadline": "",
@@ -393,7 +393,7 @@ def build_default_checklist_template(dialog_id: str = "", checklist_key: str = "
             })
 
     return normalize_checklist_data({
-        "title": "???-???? ??",
+        "title": "Чек-лист ИД",
         "checklistKey": "id",
         "collabTitle": "",
         "contractDeadline": "",
@@ -466,7 +466,7 @@ def normalize_checklist_data(data: dict, checklist_key: str = "id") -> dict:
                     item["id"] = f"concept_g{group['id']}_{order}"
 
         return {
-            "title": data.get("title") or "???-???? ?????????",
+            "title": data.get("title") or "Чек-лист Концепция",
             "checklistKey": "concept",
             "collabTitle": clean_cell_value(data.get("collabTitle")),
             "contractDeadline": "",
@@ -528,16 +528,16 @@ def normalize_checklist_data(data: dict, checklist_key: str = "id") -> dict:
     progress = calculate_progress(normalized_items)
 
     return {
-        "title": data.get("title") or "???-???? ??",
+        "title": data.get("title") or "Чек-лист ИД",
         "checklistKey": "id",
         "collabTitle": clean_cell_value(data.get("collabTitle")),
         "contractDeadline": "",
         "startDate": "",
         "groups": [
-            {"id": 1, "title": "??"},
-            {"id": 2, "title": "??"},
-            {"id": 3, "title": "??????"},
-            {"id": 4, "title": "?? ?????????"},
+            {"id": 1, "title": "ИД"},
+            {"id": 2, "title": "ТУ"},
+            {"id": 3, "title": "Прочее"},
+            {"id": 4, "title": "Не требуется"},
         ],
         "projectChecklists": build_project_checklists(),
         "items": normalized_items,
@@ -1373,11 +1373,11 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
     checklist_key = str(checklistKey or "id").strip() or "id"
     data = get_checklist(dialog_id, checklist_key)
 
-    title_raw = data.get("title", "???-???? ??")
+    title_raw = data.get("title", "Чек-лист ИД")
     title = html.escape(title_raw)
     collab_title_raw = (data.get("collabTitle", "") or "").strip()
     collab_title = html.escape(collab_title_raw)
-    full_title = f"{title} ? {collab_title}" if collab_title_raw else title
+    full_title = f"{title} — {collab_title}" if collab_title_raw else title
     progress_percent = int(data.get("progressPercent", 0) or 0)
 
     items_json = json.dumps(data.get("items", []), ensure_ascii=False)
@@ -1608,7 +1608,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
             }}
             function renderTitle() {{
                 if (collabTitle) {{
-                    popupTitleEl.innerHTML = esc(checklistTitle) + ' <small>? ' + esc(collabTitle) + '</small>';
+                    popupTitleEl.innerHTML = esc(checklistTitle) + ' <small>— ' + esc(collabTitle) + '</small>';
                 }} else {{
                     popupTitleEl.textContent = checklistTitle;
                 }}
@@ -1807,8 +1807,8 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                     progressBarEl.style.width = '0%';
                     return;
                 }}
-                const activeItems = items.filter(x => normalizeStatus(x.status) !== '?? ?????????');
-                const completedItems = activeItems.filter(x => normalizeStatus(x.status) === '????');
+                const activeItems = items.filter(x => normalizeStatus(x.status) !== 'Не требуется');
+                const completedItems = activeItems.filter(x => normalizeStatus(x.status) === 'Есть');
                 const activeCount = activeItems.length;
                 const completedCount = completedItems.length;
                 const percent = activeCount ? Math.round((completedCount / activeCount) * 100) : 0;
@@ -1879,7 +1879,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                     btn.addEventListener('click', function () {{
                         const key = this.dataset.checklistKey;
                         if (key === 'opr') {{
-                            alert('???? ???-???? ????????? ????????? ??????.');
+                            alert('Этот чек-лист подключим следующим этапом.');
                             return;
                         }}
                         if (key === currentChecklistKey) {{
@@ -1893,13 +1893,13 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                 const status = String(item.status || '').trim();
                 const kind = String(item.statusKind || '').trim();
 
-                if (status === '?? ?????????') {{
+                if (status === 'Не требуется') {{
                     return 'status-indicator gray';
                 }}
 
                 if (kind === 'bool') {{
-                    if (status === '??') return 'status-indicator green';
-                    if (status === '???') return 'status-indicator gray';
+                    if (status === 'Да') return 'status-indicator green';
+                    if (status === 'Нет') return 'status-indicator gray';
                     return 'status-indicator';
                 }}
 
@@ -1910,14 +1910,14 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                     return `
                         <select class="status-select" data-role="concept-status" data-item-id="${{esc(item.id)}}">
                             <option value="" ${{item.status === '' ? 'selected' : ''}}></option>
-                            <option value="??" ${{item.status === '??' ? 'selected' : ''}}>??</option>
-                            <option value="???" ${{item.status === '???' ? 'selected' : ''}}>???</option>
-                            <option value="?? ?????????" ${{item.status === '?? ?????????' ? 'selected' : ''}}>?? ?????????</option>
+                            <option value="Да" ${{item.status === 'Да' ? 'selected' : ''}}>Да</option>
+                            <option value="Нет" ${{item.status === 'Нет' ? 'selected' : ''}}>Нет</option>
+                            <option value="Не требуется" ${{item.status === 'Не требуется' ? 'selected' : ''}}>Не требуется</option>
                         </select>
                     `;
                 }}
                 if (item.statusKind === 'select') {{
-                    const options = [''].concat(item.statusOptions || [], ['?? ?????????']);
+                    const options = [''].concat(item.statusOptions || [], ['Не требуется']);
                     return `
                         <select class="status-select" data-role="concept-status" data-item-id="${{esc(item.id)}}">
                             ${{options.map(option => `<option value="${{esc(option)}}" ${{item.status === option ? 'selected' : ''}}>${{esc(option)}}</option>`).join('')}}
@@ -1942,11 +1942,11 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                 leftTableEl.innerHTML = `
                     <div class="thead">
                         <div class="thead-top" style="grid-template-columns: 1.2fr 0.8fr 110px 160px 1fr;">
-                            <div class="th">?????</div>
-                            <div class="th">?????????</div>
-                            <div class="th">????????</div>
-                            <div class="th">??????</div>
-                            <div class="th">??? ??????????</div>
+                            <div class="th">Пункт</div>
+                            <div class="th">Нормативы</div>
+                            <div class="th">Документ</div>
+                            <div class="th">Статус</div>
+                            <div class="th">Доп информация</div>
                         </div>
                     </div>
                     <div id="conceptTableBody">${{visibleGroups.map(group => {{
@@ -1956,7 +1956,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                                 <div class="td">
                                     <div class="cell-name">
                                         <div class="${{conceptIndicatorClass(item)}}"></div>
-                                        <div class="item-name" style="${{item.status === '?? ?????????' ? 'text-decoration:line-through;color:#98a2b3;' : ''}}">
+                                        <div class="item-name" style="${{item.status === 'Не требуется' ? 'text-decoration:line-through;color:#98a2b3;' : ''}}">
                                             ${{esc(item.name)}}
                                         </div>
                                     </div>
@@ -1975,7 +1975,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                 const groupItems = getItemsByGroup(group.id);
                 const allowAdd = group.id !== 4;
                 const rows = groupItems.map(item => {{
-                    const rowClass = normalizeStatus(item.status) === '?? ?????????' ? 'row not-required' : 'row';
+                    const rowClass = normalizeStatus(item.status) === 'Не требуется' ? 'row not-required' : 'row';
                     return `
                         <div class="${{rowClass}}" data-item-id="${{esc(item.id)}}">
                             <div class="td"><div class="cell-name"><div class="${{indicatorClass(item.status)}}"></div><div class="item-name">${{esc(item.name)}}</div></div></div>
@@ -1983,9 +1983,9 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                             <div class="td">
                                 <select class="status-select" data-role="status" data-item-id="${{esc(item.id)}}">
                                     <option value="" ${{normalizeStatus(item.status) === '' ? 'selected' : ''}}></option>
-                                    <option value="????" ${{normalizeStatus(item.status) === '????' ? 'selected' : ''}}>????</option>
-                                    <option value="???" ${{normalizeStatus(item.status) === '???' ? 'selected' : ''}}>???</option>
-                                    <option value="?? ?????????" ${{normalizeStatus(item.status) === '?? ?????????' ? 'selected' : ''}}>?? ?????????</option>
+                                    <option value="Есть" ${{normalizeStatus(item.status) === 'Есть' ? 'selected' : ''}}>Есть</option>
+                                    <option value="Нет" ${{normalizeStatus(item.status) === 'Нет' ? 'selected' : ''}}>Нет</option>
+                                    <option value="Не требуется" ${{normalizeStatus(item.status) === 'Не требуется' ? 'selected' : ''}}>Не требуется</option>
                                 </select>
                             </div>
                             <div class="td"><input class="date-input" type="date" data-role="plan" data-item-id="${{esc(item.id)}}" value="${{esc(toInputDate(item.plan))}}"></div>
@@ -1995,8 +1995,8 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                 }}).join('');
                 const addBlock = allowAdd ? `
                     <div class="add-item-row">
-                        <input class="add-item-input" id="addItemInput_${{group.id}}" type="text" placeholder="????? ?????">
-                        <button class="add-item-btn" type="button" data-role="add-item" data-group-id="${{group.id}}">???????? ?????</button>
+                        <input class="add-item-input" id="addItemInput_${{group.id}}" type="text" placeholder="Новый пункт">
+                        <button class="add-item-btn" type="button" data-role="add-item" data-group-id="${{group.id}}">Добавить пункт</button>
                     </div>` : '';
                 return `<div class="group-block"><div class="group-title">${{esc(group.title)}}</div>${{rows}}${{addBlock}}</div>`;
             }}
@@ -2059,7 +2059,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                         }} catch (e) {{
                             replaceItem(oldItem);
                             renderAll();
-                            setSaveState('error', '?????? ??????????');
+                            setSaveState('error', 'Ошибка сохранения');
                         }}
                     }};
 
@@ -2085,7 +2085,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                         }} catch (e) {{
                             replaceItem(oldItem);
                             renderAll();
-                            setSaveState('error', '?????? ??????????');
+                            setSaveState('error', 'Ошибка сохранения');
                         }}
                     }};
 
@@ -2457,7 +2457,7 @@ async def api_checklist_update_item(request: Request):
 
             status_kind = str(target_item.get("statusKind") or "").strip()
 
-            if new_value == "?? ?????????":
+            if new_value == "Не требуется":
                 target_item["group"] = 10
                 target_item["priority"] = "gray"
             else:
@@ -2465,9 +2465,9 @@ async def api_checklist_update_item(request: Request):
                     target_item["group"] = resolve_concept_group_id_by_item_id_or_name(target_item)
 
                 if status_kind == "bool":
-                    if new_value == "??":
+                    if new_value == "Да":
                         target_item["priority"] = "green"
-                    elif new_value == "???":
+                    elif new_value == "Нет":
                         target_item["priority"] = "gray"
                     else:
                         target_item["priority"] = "white"
@@ -2478,7 +2478,7 @@ async def api_checklist_update_item(request: Request):
             target_item["status"] = new_status
             target_item["priority"] = derive_indicator_from_status(new_status)
 
-            if new_status == "???":
+            if new_status == "Нет":
                 remove_item_document_file(target_item)
                 target_item["documentUrl"] = ""
                 target_item["documentName"] = ""
@@ -2639,8 +2639,8 @@ async def api_checklist_upload_document(
     target_item["documentName"] = Path(file.filename or "file.bin").name
 
     if checklist_key == "id" and int(target_item.get("group") or 0) != 4:
-        target_item["status"] = "????"
-        target_item["priority"] = derive_indicator_from_status("????")
+        target_item["status"] = "Есть"
+        target_item["priority"] = derive_indicator_from_status("Есть")
 
     data["items"] = items
     data = normalize_checklist_data(data, checklist_key)
