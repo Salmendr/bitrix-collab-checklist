@@ -1,4 +1,5 @@
 import os
+import threading
 import uuid
 from collections import defaultdict
 from pathlib import Path
@@ -37,13 +38,17 @@ DEBUG_DIR = BASE_DIR / "debug"
 DEBUG_DIR.mkdir(parents=True, exist_ok=True)
 
 DEBUG_LOG_PATH = DEBUG_DIR / "close_popup.log"
+EDIT_LOCK_TTL_SECONDS = 45
+EDIT_LOCK_HEARTBEAT_SECONDS = 15
+ACTIVE_CHECKLIST_LOCKS = {}
+ACTIVE_CHECKLIST_LOCKS_GUARD = threading.Lock()
 
 app.mount("/uploads", StaticFiles(directory=str(UPLOAD_ROOT)), name="uploads")
 
 PROJECT_CHECKLISTS = [
     {"key": "id", "title": "Чек-лист ИД"},
-    {"key": "opr", "title": "Чек-лист ОПР"},
     {"key": "concept", "title": "Чек-лист Концепция"},
+    {"key": "opr", "title": "Чек-лист ОПР"},
 ]
 
 CHECKLIST_GROUPS = {
@@ -921,6 +926,139 @@ def write_debug_log(event: str, payload: dict):
         f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
 
+def make_checklist_lock_key(dialog_id: str, checklist_key: str) -> str:
+    return f"{normalize_dialog_id(dialog_id)}::{normalize_checklist_key(checklist_key)}"
+
+
+def _cleanup_expired_checklist_locks(now_ts: float | None = None):
+    now_ts = now_ts or datetime.now().timestamp()
+    expired_keys = []
+
+    for lock_key, lock_data in ACTIVE_CHECKLIST_LOCKS.items():
+        updated_at = float(lock_data.get("updatedAtTs") or 0)
+        if now_ts - updated_at > EDIT_LOCK_TTL_SECONDS:
+            expired_keys.append(lock_key)
+
+    for lock_key in expired_keys:
+        ACTIVE_CHECKLIST_LOCKS.pop(lock_key, None)
+
+
+def acquire_checklist_lock(
+    dialog_id: str,
+    checklist_key: str,
+    user_id: str,
+    user_name: str,
+    lock_id: str,
+) -> dict:
+    dialog_id = normalize_dialog_id(dialog_id)
+    checklist_key = normalize_checklist_key(checklist_key)
+    user_id = str(user_id or "").strip()
+    user_name = str(user_name or "").strip()
+    lock_id = str(lock_id or "").strip()
+    now = datetime.now()
+    now_ts = now.timestamp()
+    lock_key = make_checklist_lock_key(dialog_id, checklist_key)
+
+    with ACTIVE_CHECKLIST_LOCKS_GUARD:
+        _cleanup_expired_checklist_locks(now_ts)
+        existing = ACTIVE_CHECKLIST_LOCKS.get(lock_key)
+
+        if existing and existing.get("lockId") != lock_id:
+            return {
+                "ok": True,
+                "owned": False,
+                "lockedByOther": True,
+                "lockId": str(existing.get("lockId") or ""),
+                "dialogId": dialog_id,
+                "checklistKey": checklist_key,
+                "userId": str(existing.get("userId") or ""),
+                "userName": str(existing.get("userName") or "Другой сотрудник"),
+                "updatedAt": str(existing.get("updatedAt") or ""),
+            }
+
+        if not lock_id:
+            lock_id = uuid.uuid4().hex
+
+        ACTIVE_CHECKLIST_LOCKS[lock_key] = {
+            "lockId": lock_id,
+            "dialogId": dialog_id,
+            "checklistKey": checklist_key,
+            "userId": user_id,
+            "userName": user_name or "Неизвестный пользователь",
+            "updatedAt": now.isoformat(),
+            "updatedAtTs": now_ts,
+        }
+
+        return {
+            "ok": True,
+            "owned": True,
+            "lockedByOther": False,
+            "lockId": lock_id,
+            "dialogId": dialog_id,
+            "checklistKey": checklist_key,
+            "userId": user_id,
+            "userName": user_name or "Неизвестный пользователь",
+            "updatedAt": now.isoformat(),
+        }
+
+
+def heartbeat_checklist_lock(
+    dialog_id: str,
+    checklist_key: str,
+    user_id: str,
+    user_name: str,
+    lock_id: str,
+) -> dict:
+    return acquire_checklist_lock(dialog_id, checklist_key, user_id, user_name, lock_id)
+
+
+def release_checklist_lock(dialog_id: str, checklist_key: str, lock_id: str = "", user_id: str = "") -> dict:
+    dialog_id = normalize_dialog_id(dialog_id)
+    checklist_key = normalize_checklist_key(checklist_key)
+    lock_id = str(lock_id or "").strip()
+    user_id = str(user_id or "").strip()
+    lock_key = make_checklist_lock_key(dialog_id, checklist_key)
+
+    with ACTIVE_CHECKLIST_LOCKS_GUARD:
+        _cleanup_expired_checklist_locks()
+        existing = ACTIVE_CHECKLIST_LOCKS.get(lock_key)
+        if not existing:
+            return {
+                "ok": True,
+                "released": False,
+                "dialogId": dialog_id,
+                "checklistKey": checklist_key,
+            }
+
+        if lock_id and existing.get("lockId") != lock_id:
+            return {
+                "ok": True,
+                "released": False,
+                "dialogId": dialog_id,
+                "checklistKey": checklist_key,
+                "lockedByOther": True,
+                "userName": str(existing.get("userName") or ""),
+            }
+
+        if not lock_id and user_id and str(existing.get("userId") or "") != user_id:
+            return {
+                "ok": True,
+                "released": False,
+                "dialogId": dialog_id,
+                "checklistKey": checklist_key,
+                "lockedByOther": True,
+                "userName": str(existing.get("userName") or ""),
+            }
+
+        ACTIVE_CHECKLIST_LOCKS.pop(lock_key, None)
+        return {
+            "ok": True,
+            "released": True,
+            "dialogId": dialog_id,
+            "checklistKey": checklist_key,
+        }
+
+
 def status_emoji(status: str) -> str:
     status = display_status_text(status)
 
@@ -1319,6 +1457,112 @@ def build_checklist_chat_message(data: dict, changes: list, editor: dict) -> str
     return "\n".join(parts).strip()
 
 
+def status_emoji(status: str) -> str:
+    status = clean_cell_value(status)
+    if not status:
+        return "⚪️"
+
+    normalized = normalize_status(status)
+    lowered = status.strip().lower()
+
+    if normalized == "Есть" or lowered == "да":
+        return "🟢"
+    if normalized == "Нет" or lowered == "нет":
+        return "🔴"
+    if normalized == "Не требуется" or lowered == "не требуется":
+        return "🚫"
+    return "🟢"
+
+
+def build_progress_text(data: dict) -> str:
+    progress_percent = int(data.get("progressPercent") or 0)
+    return f"📊Прогресс: {progress_percent}%"
+
+
+def build_recent_changes_text(
+    changes: list,
+    checklist_title: str = "Чек-лист ИД",
+    checklist_key: str = "id"
+) -> str:
+    status_changes, date_changes, document_changes, add_item_changes, extra_info_changes = split_changes(changes)
+    checklist_title = clean_cell_value(checklist_title) or "Чек-лист ИД"
+    checklist_key = normalize_checklist_key(checklist_key)
+
+    lines = [
+        f"[B]✏️ИЗМЕНЕНИЯ В {checklist_title.upper()}[/B]",
+        "",
+    ]
+
+    if status_changes:
+        lines.append("[B]Статусы:[/B]")
+        lines.append("")
+        for change in status_changes:
+            lines.append(format_status_change_line(change))
+        lines.append("")
+
+    if date_changes:
+        lines.append("[B]Даты:[/B]")
+        lines.append("")
+        for change in date_changes:
+            lines.append(format_plan_change_line(change))
+        lines.append("")
+
+    if checklist_key != "opr" and document_changes:
+        lines.append("[B]Документы:[/B]")
+        lines.append("")
+        for change in document_changes:
+            lines.append(format_document_change_line(change))
+        lines.append("")
+
+    if checklist_key != "opr" and add_item_changes:
+        lines.append("[B]Пункты:[/B]")
+        lines.append("")
+        for change in add_item_changes:
+            lines.append(format_add_item_change_line(change))
+        lines.append("")
+
+    if checklist_key != "opr" and extra_info_changes:
+        lines.append("[B]Доп информация:[/B]")
+        lines.append("")
+        for change in extra_info_changes:
+            lines.append(format_extra_info_change_line(change))
+        lines.append("")
+
+    has_visible_changes = bool(status_changes or date_changes)
+    if checklist_key != "opr":
+        has_visible_changes = has_visible_changes or bool(document_changes or add_item_changes or extra_info_changes)
+
+    if not has_visible_changes:
+        lines.append("Изменений нет")
+        lines.append("")
+
+    return "\n".join(lines).strip()
+
+
+def build_checklist_chat_message(data: dict, changes: list, editor: dict) -> str:
+    checklist_title = (data.get("title") or "Чек-лист ИД").strip()
+    checklist_key = normalize_checklist_key(data.get("checklistKey") or "id")
+    parts = [
+        build_recent_changes_text(changes, checklist_title, checklist_key),
+        "",
+        build_editor_text(editor),
+        build_progress_text(data),
+    ]
+    dialog_id = normalize_dialog_id(data.get("resolvedDialogId") or data.get("dialogId") or "")
+    link_url = build_checklist_message_link(dialog_id, checklist_key)
+    if link_url:
+        parts.extend([
+            "",
+            f"[URL={link_url}]Чтобы посмотреть весь чек-лист нажмите на этот текст[/URL]",
+        ])
+    else:
+        parts.extend([
+            "",
+            "Чтобы посмотреть весь чек-лист нажмите на этот текст",
+        ])
+    return "\n".join(parts).strip()
+
+
 def install_finish_block():
     return """
     <script src="https://api.bitrix24.com/api/v1/"></script>
@@ -1546,6 +1790,18 @@ def app_home_html():
         <script>
             (function () {
                 try {
+                    const query = new URLSearchParams(window.location.search || '');
+                    const queryDialogId = (query.get('dialogId') || '').trim();
+                    const queryChecklistKey = (query.get('checklistKey') || 'id').trim() || 'id';
+
+                    if (queryDialogId) {
+                        window.location.replace(
+                            '/popup?dialogId=' + encodeURIComponent(queryDialogId) +
+                            '&checklistKey=' + encodeURIComponent(queryChecklistKey)
+                        );
+                        return;
+                    }
+
                     const raw = localStorage.getItem('checklist_pending_dialog');
                     if (!raw) return;
 
@@ -1556,7 +1812,11 @@ def app_home_html():
                     localStorage.removeItem('checklist_pending_dialog');
 
                     if (age < 60000) {
-                        window.location.replace('/popup?dialogId=' + encodeURIComponent(payload.dialogId));
+                        const checklistKey = (payload.checklistKey || 'id').trim() || 'id';
+                        window.location.replace(
+                            '/popup?dialogId=' + encodeURIComponent(payload.dialogId) +
+                            '&checklistKey=' + encodeURIComponent(checklistKey)
+                        );
                         return;
                     }
                 } catch (e) {
@@ -1576,6 +1836,7 @@ def app_home_html():
 def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
     initial_dialog_id_json = json.dumps(initial_dialog_id or "", ensure_ascii=False)
     initial_context_text_json = json.dumps(initial_context_text or "", ensure_ascii=False)
+
 
     return f"""
     <!doctype html>
@@ -1667,7 +1928,7 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
                 document.getElementById('error').textContent = text || '';
             }}
 
-            function openChecklist(dialogId) {{
+            function openChecklist(dialogId, checklistKey = 'id') {{
                 if (!dialogId) {{
                     setError('dialogId не найден');
                     return;
@@ -1676,6 +1937,7 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
                 try {{
                     localStorage.setItem('checklist_pending_dialog', JSON.stringify({{
                         dialogId: dialogId,
+                        checklistKey: checklistKey,
                         ts: Date.now()
                     }}));
                 }} catch (e) {{
@@ -1693,7 +1955,11 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
                     setError('BX24.openApplication error: ' + String(e));
                 }}
 
-                window.open('/popup?dialogId=' + encodeURIComponent(dialogId), '_blank');
+                window.open(
+                    '/popup?dialogId=' + encodeURIComponent(dialogId) +
+                    '&checklistKey=' + encodeURIComponent(checklistKey),
+                    '_blank'
+                );
             }}
 
             document.getElementById('openBtn').addEventListener('click', function () {{
@@ -1884,6 +2150,884 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
     collab_title_json = json.dumps(collab_title_raw, ensure_ascii=False)
     checklist_key_json = json.dumps(checklist_key, ensure_ascii=False)
     checklist_title_json = json.dumps(title_raw, ensure_ascii=False)
+
+    popup_session_enhancements_js = """
+            const clientSessionId = 'popup_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+            let checklistSessionState = {};
+            let currentChecklistLock = {
+                owned: false,
+                lockedByOther: false,
+                lockId: '',
+                userId: '',
+                userName: '',
+                checklistKey: ''
+            };
+            let lockHeartbeatTimer = null;
+            let suppressAutoCloseSave = false;
+
+            const headerRightEl = document.querySelector('.header-right');
+            if (headerRightEl && !document.getElementById('lockNotice')) {
+                const lockNode = document.createElement('div');
+                lockNode.id = 'lockNotice';
+                lockNode.style.fontSize = '12px';
+                lockNode.style.fontWeight = '700';
+                lockNode.style.padding = '7px 10px';
+                lockNode.style.borderRadius = '999px';
+                lockNode.style.background = '#fff4e5';
+                lockNode.style.color = '#b26a00';
+                lockNode.style.whiteSpace = 'nowrap';
+                lockNode.style.display = 'none';
+                headerRightEl.insertBefore(lockNode, saveStateEl);
+            }
+            const lockNoticeEl = document.getElementById('lockNotice');
+
+            const contentEl = document.querySelector('.content');
+            if (contentEl && !document.getElementById('footerActions')) {
+                const footerNode = document.createElement('div');
+                footerNode.id = 'footerActions';
+                footerNode.style.position = 'sticky';
+                footerNode.style.bottom = '0';
+                footerNode.style.zIndex = '30';
+                footerNode.style.marginTop = '14px';
+                footerNode.style.padding = '10px 12px';
+                footerNode.style.display = 'flex';
+                footerNode.style.gap = '10px';
+                footerNode.style.justifyContent = 'flex-end';
+                footerNode.style.alignItems = 'center';
+                footerNode.style.border = '1px solid #e5e7eb';
+                footerNode.style.borderRadius = '12px';
+                footerNode.style.background = '#fafbfc';
+                footerNode.style.boxShadow = '0 -4px 18px rgba(15,23,42,.06)';
+                footerNode.innerHTML = `
+                    <button id="saveCloseBtn" type="button" style="min-width:150px;height:34px;border:none;border-radius:8px;background:#16a34a;color:#fff;font-size:12px;font-weight:700;cursor:pointer;">
+                        Сохранить и закрыть
+                    </button>
+                    <button id="cancelBtn" type="button" style="min-width:100px;height:34px;border:none;border-radius:8px;background:#dc2626;color:#fff;font-size:12px;font-weight:700;cursor:pointer;">
+                        Отмена
+                    </button>
+                `;
+                contentEl.appendChild(footerNode);
+            }
+            const saveCloseBtn = document.getElementById('saveCloseBtn');
+            const cancelBtn = document.getElementById('cancelBtn');
+
+            function getChecklistDefaultTitle(key) {
+                if (key === 'concept') return 'Чек-лист Концепция';
+                if (key === 'opr') return 'Чек-лист ОПР';
+                return 'Чек-лист ИД';
+            }
+
+            function getChecklistState(key) {
+                const stateKey = String(key || '').trim() || 'id';
+                if (!checklistSessionState[stateKey]) {
+                    checklistSessionState[stateKey] = { changes: [], dirty: false };
+                }
+                return checklistSessionState[stateKey];
+            }
+
+            function getCurrentEditorIdentity() {
+                return {
+                    userId: String(currentEditor.id || clientSessionId),
+                    userName: String(currentEditor.name || 'Пользователь')
+                };
+            }
+
+            function isChecklistLockedByOther() {
+                return !!(currentChecklistLock.lockedByOther && currentChecklistLock.checklistKey === currentChecklistKey);
+            }
+
+            function isEditingAllowed() {
+                return !isChecklistLockedByOther();
+            }
+
+            function disabledAttr() {
+                return isEditingAllowed() ? '' : 'disabled';
+            }
+
+            function setActionButtonState() {
+                if (saveCloseBtn) {
+                    saveCloseBtn.disabled = !isEditingAllowed();
+                    saveCloseBtn.style.opacity = saveCloseBtn.disabled ? '0.55' : '1';
+                    saveCloseBtn.style.cursor = saveCloseBtn.disabled ? 'not-allowed' : 'pointer';
+                }
+                if (cancelBtn) {
+                    cancelBtn.disabled = false;
+                }
+            }
+
+            function updateSaveStateBySession() {
+                if (isChecklistLockedByOther()) {
+                    setSaveState('error', 'Только просмотр');
+                    return;
+                }
+                if (sessionDirty) {
+                    setSaveState('saving', 'Есть несохраненные изменения');
+                    return;
+                }
+                setSaveState('', 'Сохранено');
+            }
+
+            function updateLockNotice() {
+                if (!lockNoticeEl) return;
+                if (isChecklistLockedByOther()) {
+                    const ownerName = currentChecklistLock.userName || 'другой сотрудник';
+                    lockNoticeEl.textContent = 'Сейчас с этим чек-листом работает ' + ownerName + ', дождитесь завершения сессии';
+                    lockNoticeEl.style.display = '';
+                } else {
+                    lockNoticeEl.textContent = '';
+                    lockNoticeEl.style.display = 'none';
+                }
+                setActionButtonState();
+                updateSaveStateBySession();
+            }
+
+            const previousSyncChecklistCache = syncChecklistCache;
+            syncChecklistCache = function () {
+                checklistCache[currentChecklistKey] = buildChecklistSnapshot();
+                checklistSessionState[currentChecklistKey] = {
+                    changes: deepClone(sessionChanges),
+                    dirty: !!sessionDirty
+                };
+                if (typeof previousSyncChecklistCache === 'function') {
+                    return;
+                }
+            };
+
+            const previousApplyChecklistData = applyChecklistData;
+            applyChecklistData = function (data) {
+                previousApplyChecklistData(data);
+                checklistTitle = String((data && data.title) || checklistTitle || getChecklistDefaultTitle(currentChecklistKey));
+                const cachedState = getChecklistState(currentChecklistKey);
+                sessionChanges = deepClone(cachedState.changes || []);
+                sessionDirty = !!cachedState.dirty;
+                closeSummarySent = false;
+                currentChecklistLock.checklistKey = currentChecklistKey;
+                updateLockNotice();
+            };
+
+            function clearChecklistSessionState(checklistKey) {
+                const targetKey = String(checklistKey || '').trim() || 'id';
+                checklistSessionState[targetKey] = { changes: [], dirty: false };
+                if (targetKey === currentChecklistKey) {
+                    sessionChanges = [];
+                    sessionDirty = false;
+                    closeSummarySent = false;
+                    updateLockNotice();
+                }
+            }
+
+            function getDirtyChecklistKeys() {
+                syncChecklistCache();
+                return Object.keys(checklistSessionState).filter(key => {
+                    const state = checklistSessionState[key];
+                    return !!(state && state.dirty && Array.isArray(state.changes) && state.changes.length && checklistCache[key]);
+                });
+            }
+
+            function buildClosePayloadForKey(checklistKey, closeEvent) {
+                const key = String(checklistKey || '').trim() || 'id';
+                const snapshot = key === currentChecklistKey
+                    ? buildChecklistSnapshot()
+                    : deepClone(checklistCache[key] || {});
+                const state = key === currentChecklistKey
+                    ? { changes: deepClone(sessionChanges), dirty: !!sessionDirty }
+                    : deepClone(checklistSessionState[key] || { changes: [], dirty: false });
+
+                return {
+                    dialogId,
+                    checklistKey: key,
+                    editor: currentEditor,
+                    data: snapshot,
+                    changes: state.changes || [],
+                    closeEvent,
+                    ts: new Date().toISOString()
+                };
+            }
+
+            async function persistDirtyChecklists(closeEvent, useBeacon = false) {
+                const dirtyKeys = getDirtyChecklistKeys();
+                if (!dirtyKeys.length) {
+                    return 0;
+                }
+
+                if (useBeacon && navigator.sendBeacon) {
+                    dirtyKeys.forEach(key => {
+                        const payload = buildClosePayloadForKey(key, closeEvent);
+                        const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' });
+                        navigator.sendBeacon(APP_BASE_URL + '/api/checklist/close-session', blob);
+                    });
+                    dirtyKeys.forEach(clearChecklistSessionState);
+                    return dirtyKeys.length;
+                }
+
+                let savedCount = 0;
+                for (const key of dirtyKeys) {
+                    const payload = buildClosePayloadForKey(key, closeEvent);
+                    const response = await fetch('/api/checklist/close-session', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify(payload),
+                        keepalive: true
+                    });
+                    if (!response.ok) {
+                        const result = await response.json().catch(() => ({}));
+                        throw new Error(result.error || 'close-session failed');
+                    }
+                    clearChecklistSessionState(key);
+                    savedCount += 1;
+                }
+
+                return savedCount;
+            }
+
+            function stopLockHeartbeat() {
+                if (lockHeartbeatTimer) {
+                    clearInterval(lockHeartbeatTimer);
+                    lockHeartbeatTimer = null;
+                }
+            }
+
+            async function acquireChecklistLock(checklistKey = currentChecklistKey, silent = false) {
+                const targetKey = String(checklistKey || '').trim() || 'id';
+                const editorIdentity = getCurrentEditorIdentity();
+                const payload = {
+                    dialogId,
+                    checklistKey: targetKey,
+                    userId: editorIdentity.userId,
+                    userName: editorIdentity.userName,
+                    lockId: currentChecklistLock.checklistKey === targetKey ? currentChecklistLock.lockId : ''
+                };
+
+                try {
+                    const response = await fetch('/api/checklist/lock/acquire', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify(payload),
+                        keepalive: true
+                    });
+                    const result = await response.json();
+                    if (!response.ok) {
+                        throw new Error(result.error || 'lock acquire failed');
+                    }
+
+                    if (targetKey !== currentChecklistKey) {
+                        return result;
+                    }
+
+                    const prevOwned = currentChecklistLock.owned;
+                    const prevBlocked = currentChecklistLock.lockedByOther;
+                    const prevLockId = currentChecklistLock.lockId;
+                    currentChecklistLock = {
+                        owned: !!result.owned,
+                        lockedByOther: !!result.lockedByOther,
+                        lockId: String(result.lockId || ''),
+                        userId: String(result.userId || ''),
+                        userName: String(result.userName || ''),
+                        checklistKey: targetKey
+                    };
+                    updateLockNotice();
+
+                    if (prevOwned !== currentChecklistLock.owned || prevBlocked !== currentChecklistLock.lockedByOther || prevLockId !== currentChecklistLock.lockId) {
+                        renderAll();
+                    }
+                    return result;
+                } catch (e) {
+                    if (!silent) {
+                        console.log('acquireChecklistLock error:', e);
+                    }
+                    return null;
+                }
+            }
+
+            async function heartbeatChecklistLock(silent = true) {
+                if (!currentChecklistLock.lockId || currentChecklistLock.checklistKey !== currentChecklistKey) {
+                    return null;
+                }
+
+                const editorIdentity = getCurrentEditorIdentity();
+                try {
+                    const response = await fetch('/api/checklist/lock/heartbeat', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            dialogId,
+                            checklistKey: currentChecklistKey,
+                            userId: editorIdentity.userId,
+                            userName: editorIdentity.userName,
+                            lockId: currentChecklistLock.lockId
+                        }),
+                        keepalive: true
+                    });
+                    const result = await response.json();
+                    if (!response.ok) {
+                        throw new Error(result.error || 'lock heartbeat failed');
+                    }
+                    currentChecklistLock = {
+                        owned: !!result.owned,
+                        lockedByOther: !!result.lockedByOther,
+                        lockId: String(result.lockId || ''),
+                        userId: String(result.userId || ''),
+                        userName: String(result.userName || ''),
+                        checklistKey: currentChecklistKey
+                    };
+                    updateLockNotice();
+                    return result;
+                } catch (e) {
+                    if (!silent) {
+                        console.log('heartbeatChecklistLock error:', e);
+                    }
+                    return null;
+                }
+            }
+
+            function startLockHeartbeat() {
+                stopLockHeartbeat();
+                lockHeartbeatTimer = setInterval(async function () {
+                    if (currentChecklistLock.owned) {
+                        await heartbeatChecklistLock(true);
+                    } else {
+                        await acquireChecklistLock(currentChecklistKey, true);
+                    }
+                }, 15000);
+            }
+
+            async function releaseChecklistLock(checklistKey = currentChecklistKey, useBeacon = false) {
+                const targetKey = String(checklistKey || '').trim() || 'id';
+                const lockId = currentChecklistLock.checklistKey === targetKey ? currentChecklistLock.lockId : '';
+                const editorIdentity = getCurrentEditorIdentity();
+                stopLockHeartbeat();
+
+                if (!lockId && currentChecklistLock.checklistKey === targetKey) {
+                    currentChecklistLock = {
+                        owned: false,
+                        lockedByOther: false,
+                        lockId: '',
+                        userId: '',
+                        userName: '',
+                        checklistKey: targetKey
+                    };
+                    updateLockNotice();
+                    return;
+                }
+
+                const payload = {
+                    dialogId,
+                    checklistKey: targetKey,
+                    lockId,
+                    userId: editorIdentity.userId
+                };
+
+                if (useBeacon && navigator.sendBeacon) {
+                    const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' });
+                    navigator.sendBeacon(APP_BASE_URL + '/api/checklist/lock/release', blob);
+                } else {
+                    try {
+                        await fetch('/api/checklist/lock/release', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify(payload),
+                            keepalive: true
+                        });
+                    } catch (e) {
+                        console.log('releaseChecklistLock error:', e);
+                    }
+                }
+
+                if (currentChecklistLock.checklistKey === targetKey) {
+                    currentChecklistLock = {
+                        owned: false,
+                        lockedByOther: false,
+                        lockId: '',
+                        userId: '',
+                        userName: '',
+                        checklistKey: targetKey
+                    };
+                    updateLockNotice();
+                }
+            }
+
+            function closePopupWindow() {
+                try {
+                    if (window.BX24 && typeof window.BX24.closeApplication === 'function') {
+                        window.BX24.closeApplication();
+                        return;
+                    }
+                } catch (e) {
+                    console.log('BX24.closeApplication error:', e);
+                }
+
+                try {
+                    window.close();
+                } catch (e) {
+                    console.log('window.close error:', e);
+                }
+            }
+
+            async function finalizePopupSession(saveChanges) {
+                suppressAutoCloseSave = true;
+                closeSummarySent = true;
+                syncChecklistCache();
+
+                try {
+                    if (saveChanges) {
+                        await persistDirtyChecklists('save_and_close', false);
+                    }
+                } catch (e) {
+                    console.log('finalizePopupSession error:', e);
+                    setSaveState('error', saveChanges ? 'Ошибка сохранения' : 'Ошибка отмены');
+                    return;
+                }
+
+                await releaseChecklistLock(currentChecklistKey, false);
+                closePopupWindow();
+            }
+
+            if (saveCloseBtn) {
+                saveCloseBtn.addEventListener('click', async function () {
+                    await finalizePopupSession(true);
+                });
+            }
+
+            if (cancelBtn) {
+                cancelBtn.addEventListener('click', async function () {
+                    await finalizePopupSession(false);
+                });
+            }
+
+            sendCloseSummaryOnce = function (eventName) {
+                if (eventName === 'popup_hidden' || suppressAutoCloseSave || closeSummarySent) {
+                    return;
+                }
+
+                closeSummarySent = true;
+                persistDirtyChecklists(eventName, true);
+                releaseChecklistLock(currentChecklistKey, true);
+            };
+
+            loadChecklistByKey = async function (checklistKey) {
+                const targetKey = String(checklistKey || '').trim() || 'id';
+                if (targetKey === currentChecklistKey) {
+                    return;
+                }
+
+                syncChecklistCache();
+                await releaseChecklistLock(currentChecklistKey, false);
+                setSaveState('saving', 'Загружаем...');
+
+                try {
+                    const cachedData = checklistCache[targetKey];
+                    if (cachedData) {
+                        applyChecklistData(deepClone(cachedData));
+                        renderAll();
+                        await acquireChecklistLock(targetKey, true);
+                        startLockHeartbeat();
+                        return;
+                    }
+
+                    const response = await fetch(
+                        '/api/checklist?dialogId=' + encodeURIComponent(dialogId) +
+                        '&checklistKey=' + encodeURIComponent(targetKey)
+                    );
+                    const result = await response.json();
+                    if (!response.ok) {
+                        throw new Error(result.error || 'load checklist failed');
+                    }
+
+                    applyChecklistData(result);
+                    renderAll();
+                    await acquireChecklistLock(targetKey, true);
+                    startLockHeartbeat();
+                } catch (e) {
+                    console.log('loadChecklistByKey enhanced error:', e);
+                    setSaveState('error', 'Ошибка загрузки чек-листа');
+                }
+            };
+
+            buildDocumentCell = function (item) {
+                const hasDocument = !!(item.documentUrl && String(item.documentUrl).trim());
+
+                if (hasDocument) {
+                    return `
+                        <button class="doc-btn" type="button" data-role="view-document" data-document-url="${esc(item.documentUrl)}">
+                            Посмотреть
+                        </button>
+                    `;
+                }
+
+                return `
+                    <button class="upload-btn" type="button" data-role="upload" data-item-id="${esc(item.id)}" ${disabledAttr()}>
+                        Загрузить
+                    </button>
+                    <input type="file" data-role="file-input" data-item-id="${esc(item.id)}" style="display:none;" ${disabledAttr()}>
+                `;
+            };
+
+            renderGroup = function (group) {
+                const groupItems = getItemsByGroup(group.id);
+                const allowAdd = Number(group.id) !== 4;
+                const rows = groupItems.map(item => {
+                    const rowClass = normalizeStatus(item.status) === 'Не требуется' ? 'row not-required' : 'row';
+                    return `
+                        <div class="${rowClass}" data-item-id="${esc(item.id)}">
+                            <div class="td"><div class="cell-name"><div class="${indicatorClass(item.status)}"></div><div class="item-name">${esc(item.name)}</div></div></div>
+                            <div class="td">${buildDocumentCell(item)}</div>
+                            <div class="td">
+                                <select class="status-select" data-role="status" data-item-id="${esc(item.id)}" ${disabledAttr()}>
+                                    <option value="" ${normalizeStatus(item.status) === '' ? 'selected' : ''}></option>
+                                    <option value="Есть" ${normalizeStatus(item.status) === 'Есть' ? 'selected' : ''}>Есть</option>
+                                    <option value="Нет" ${normalizeStatus(item.status) === 'Нет' ? 'selected' : ''}>Нет</option>
+                                    <option value="Не требуется" ${normalizeStatus(item.status) === 'Не требуется' ? 'selected' : ''}>Не требуется</option>
+                                </select>
+                            </div>
+                            <div class="td"><input class="date-input" type="date" data-role="plan" data-item-id="${esc(item.id)}" value="${esc(toInputDate(item.plan))}" ${disabledAttr()}></div>
+                            <div class="td"><input class="date-input" type="date" data-role="fact" data-item-id="${esc(item.id)}" value="${esc(toInputDate(item.fact))}" ${disabledAttr()}></div>
+                        </div>
+                    `;
+                }).join('');
+                const addBlock = allowAdd ? `
+                    <div class="add-item-row">
+                        <input class="add-item-input" id="addItemInput_${group.id}" type="text" placeholder="Новый пункт" ${disabledAttr()}>
+                        <button class="add-item-btn" type="button" data-role="add-item" data-group-id="${group.id}" ${disabledAttr()}>Добавить пункт</button>
+                    </div>` : '';
+                return `<div class="group-block"><div class="group-title">${esc(group.title)}</div>${rows}${addBlock}</div>`;
+            };
+
+            function buildConceptNameCell(item) {
+                return `<textarea class="concept-extra-textarea" data-role="concept-name" data-item-id="${esc(item.id)}" placeholder="Название пункта" ${disabledAttr()} style="${item.status === 'Не требуется' ? 'text-decoration:line-through;color:#98a2b3;' : ''}">${esc(item.name || '')}</textarea>`;
+            }
+
+            function buildConceptSourceCell(item) {
+                return `<textarea class="concept-extra-textarea" data-role="concept-source" data-item-id="${esc(item.id)}" placeholder="Нормативы" ${disabledAttr()}>${esc(item.source || '')}</textarea>`;
+            }
+
+            buildConceptStatusCell = function (item) {
+                if (item.statusKind === 'bool') {
+                    return `
+                        <select class="status-select" data-role="concept-status" data-item-id="${esc(item.id)}" ${disabledAttr()}>
+                            <option value="" ${item.status === '' ? 'selected' : ''}></option>
+                            <option value="Да" ${item.status === 'Да' ? 'selected' : ''}>Да</option>
+                            <option value="Нет" ${item.status === 'Нет' ? 'selected' : ''}>Нет</option>
+                            <option value="Не требуется" ${item.status === 'Не требуется' ? 'selected' : ''}>Не требуется</option>
+                        </select>
+                    `;
+                }
+                if (item.statusKind === 'select') {
+                    const options = [''].concat(item.statusOptions || [], ['Не требуется']);
+                    return `
+                        <select class="status-select" data-role="concept-status" data-item-id="${esc(item.id)}" ${disabledAttr()}>
+                            ${options.map(option => `<option value="${esc(option)}" ${item.status === option ? 'selected' : ''}>${esc(option)}</option>`).join('')}
+                        </select>
+                    `;
+                }
+                return `<input class="status-select" type="text" data-role="concept-status" data-item-id="${esc(item.id)}" placeholder="${esc(item.statusPlaceholder || '')}" value="${esc(item.status || '')}" ${disabledAttr()}>`;
+            };
+
+            buildConceptExtraCell = function (item) {
+                return `<textarea class="concept-extra-textarea" data-role="concept-extra" data-item-id="${esc(item.id)}" placeholder="${esc(item.extraInfoPlaceholder || '')}" ${disabledAttr()}>${esc(item.extraInfo || '')}</textarea>`;
+            };
+
+            renderConceptGroup = function (group) {
+                const groupItems = getItemsByGroup(group.id);
+                const allowAdd = Number(group.id) !== 10;
+                const rows = groupItems.map(item => `
+                    <div class="row" style="grid-template-columns: 1.05fr 0.9fr 110px 150px 1.15fr;" data-item-id="${esc(item.id)}">
+                        <div class="td"><div class="cell-name"><div class="${conceptIndicatorClass(item)}"></div>${buildConceptNameCell(item)}</div></div>
+                        <div class="td">${buildConceptSourceCell(item)}</div>
+                        <div class="td">${buildDocumentCell(item)}</div>
+                        <div class="td">${buildConceptStatusCell(item)}</div>
+                        <div class="td">${buildConceptExtraCell(item)}</div>
+                    </div>
+                `).join('');
+
+                const addBlock = allowAdd ? `
+                    <div class="add-item-row">
+                        <input class="add-item-input" id="conceptAddItemInput_${group.id}" type="text" placeholder="Новый пункт" ${disabledAttr()}>
+                        <button class="add-item-btn" type="button" data-role="concept-add-item" data-group-id="${group.id}" ${disabledAttr()}>Добавить пункт</button>
+                    </div>
+                ` : '';
+
+                return `<div class="group-block"><div class="group-title">${esc(group.title)}</div>${rows}${addBlock}</div>`;
+            };
+
+            function buildConceptTableHtmlEnhanced(conceptGroups) {
+                return `
+                    <div class="thead">
+                        <div class="thead-top" style="grid-template-columns: 1.05fr 0.9fr 110px 150px 1.15fr;">
+                            <div class="th">Пункт</div>
+                            <div class="th">Нормативы</div>
+                            <div class="th">Документ</div>
+                            <div class="th">Статус</div>
+                            <div class="th">Доп информация</div>
+                        </div>
+                    </div>
+                    <div>${conceptGroups.map(renderConceptGroup).join('')}</div>
+                `;
+            }
+
+            renderConceptTable = function () {
+                if (!leftTableEl || !rightTableEl || !tablesGridEl) {
+                    throw new Error('concept table containers not found');
+                }
+
+                tablesGridEl.style.gridTemplateColumns = '1fr 1fr';
+                if (tablePanels[1]) {
+                    tablePanels[1].style.display = '';
+                }
+
+                const visibleGroups = groups.filter(group => {
+                    if (Number(group.id) !== 10) return true;
+                    return items.some(x => Number(x.group) === 10);
+                });
+
+                const leftGroups = visibleGroups.filter(group => [1, 3, 5, 7, 9].includes(Number(group.id)));
+                const rightGroups = visibleGroups.filter(group => [2, 4, 6, 8, 10].includes(Number(group.id)));
+
+                leftTableEl.innerHTML = buildConceptTableHtmlEnhanced(leftGroups);
+                rightTableEl.innerHTML = buildConceptTableHtmlEnhanced(rightGroups);
+            };
+
+            renderProjectChecklistList = function () {
+                if (!projectChecklistListEl) {
+                    return;
+                }
+
+                const normalizedList = (Array.isArray(projectChecklists) ? projectChecklists : []).map(item => {
+                    const key = String(item && item.key || '').trim();
+                    return {
+                        key,
+                        title: getChecklistDefaultTitle(key)
+                    };
+                });
+
+                projectChecklistListEl.innerHTML = normalizedList.map(item => {
+                    const active = item.key === currentChecklistKey ? 'side-link active' : 'side-link';
+                    return `<button type="button" class="${active}" data-checklist-key="${esc(item.key)}">${esc(item.title)}</button>`;
+                }).join('');
+
+                projectChecklistListEl.querySelectorAll('[data-checklist-key]').forEach(btn => {
+                    btn.addEventListener('click', async function () {
+                        const key = this.dataset.checklistKey;
+                        await loadChecklistByKey(key);
+                    });
+                });
+            };
+
+            oprIndicatorClass = function (item) {
+                const status = normalizeStatus(item && item.status);
+                if (status === 'Есть') return 'status-indicator green';
+                if (status === 'Нет' || status === 'Не требуется') return 'status-indicator gray';
+                return 'status-indicator';
+            };
+
+            function buildOprStatusCellUi(item) {
+                return `
+                    <select class="status-select" data-role="opr-status" data-item-id="${esc(item.id)}" ${disabledAttr()}>
+                        <option value="" ${normalizeStatus(item.status) === '' ? 'selected' : ''}></option>
+                        <option value="Есть" ${normalizeStatus(item.status) === 'Есть' ? 'selected' : ''}>Есть</option>
+                        <option value="Нет" ${normalizeStatus(item.status) === 'Нет' ? 'selected' : ''}>Нет</option>
+                        <option value="Не требуется" ${normalizeStatus(item.status) === 'Не требуется' ? 'selected' : ''}>Не требуется</option>
+                    </select>
+                `;
+            }
+
+            function buildOprExtraCellUi(item) {
+                return `<textarea class="concept-extra-textarea" data-role="opr-extra" data-item-id="${esc(item.id)}" placeholder="Доп информация" ${disabledAttr()}>${esc(item.extraInfo || '')}</textarea>`;
+            }
+
+            function renderOprGroupUi(group) {
+                const groupItems = getItemsByGroup(group.id);
+                const allowAdd = Number(group.id) !== 10;
+                const rows = groupItems.map(item => `
+                    <div class="row" style="grid-template-columns: 1.05fr 110px 130px 136px 1.25fr;" data-item-id="${esc(item.id)}">
+                        <div class="td">
+                            <div class="cell-name">
+                                <div class="${oprIndicatorClass(item)}"></div>
+                                <div class="item-name" style="${normalizeStatus(item.status) === 'Не требуется' ? 'text-decoration:line-through;color:#98a2b3;' : ''}">
+                                    ${esc(item.name)}
+                                </div>
+                            </div>
+                        </div>
+                        <div class="td">${buildDocumentCell(item)}</div>
+                        <div class="td">${buildOprStatusCellUi(item)}</div>
+                        <div class="td"><input class="date-input" type="date" data-role="opr-planned-date" data-item-id="${esc(item.id)}" value="${esc(toInputDate(item.plannedDate || ''))}" ${disabledAttr()}></div>
+                        <div class="td">${buildOprExtraCellUi(item)}</div>
+                    </div>
+                `).join('');
+
+                const addBlock = allowAdd ? `
+                    <div class="add-item-row">
+                        <input class="add-item-input" id="oprAddItemInput_${group.id}" type="text" placeholder="Новый пункт" ${disabledAttr()}>
+                        <button class="add-item-btn" type="button" data-role="opr-add-item" data-group-id="${group.id}" ${disabledAttr()}>Добавить пункт</button>
+                    </div>
+                ` : '';
+
+                return `<div class="group-block"><div class="group-title">${esc(group.title)}</div>${rows}${addBlock}</div>`;
+            }
+
+            renderOprTables = function () {
+                if (!leftTableEl || !rightTableEl || !tablesGridEl) {
+                    throw new Error('opr table containers not found');
+                }
+
+                tablesGridEl.style.gridTemplateColumns = '1fr 1fr';
+                if (tablePanels[1]) {
+                    tablePanels[1].style.display = '';
+                }
+
+                const visibleGroups = groups.filter(group => {
+                    if (Number(group.id) !== 10) return true;
+                    return items.some(x => Number(x.group) === 10);
+                });
+                const leftGroups = visibleGroups.filter(group => [1, 3, 5, 7, 9].includes(Number(group.id)));
+                const rightGroups = visibleGroups.filter(group => [2, 4, 6, 8, 10].includes(Number(group.id)));
+
+                leftTableEl.innerHTML = `
+                    <div class="thead">
+                        <div class="thead-top" style="grid-template-columns: 1.05fr 110px 130px 136px 1.25fr;">
+                            <div class="th">Пункт</div>
+                            <div class="th">Документ</div>
+                            <div class="th">Статус</div>
+                            <div class="th">Планируемая дата</div>
+                            <div class="th">Доп информация</div>
+                        </div>
+                    </div>
+                    <div>${leftGroups.map(renderOprGroupUi).join('')}</div>
+                `;
+
+                rightTableEl.innerHTML = `
+                    <div class="thead">
+                        <div class="thead-top" style="grid-template-columns: 1.05fr 110px 130px 136px 1.25fr;">
+                            <div class="th">Пункт</div>
+                            <div class="th">Документ</div>
+                            <div class="th">Статус</div>
+                            <div class="th">Планируемая дата</div>
+                            <div class="th">Доп информация</div>
+                        </div>
+                    </div>
+                    <div>${rightGroups.map(renderOprGroupUi).join('')}</div>
+                `;
+            };
+
+            const previousRenderAll = renderAll;
+            renderAll = function () {
+                previousRenderAll();
+                updateLockNotice();
+            };
+
+            const previousBindEventsEnhanced = bindEvents;
+            bindEvents = function () {
+                previousBindEventsEnhanced();
+
+                document.querySelectorAll('[data-role="concept-name"], [data-role="concept-source"], [data-role="concept-extra"], [data-role="opr-extra"]').forEach(el => {
+                    el.dataset.initialValue = String(el.value || '');
+                    el.dataset.baseHeight = '32';
+                    el.style.height = '32px';
+                    el.addEventListener('input', function () {
+                        autoGrowTextarea(this);
+                    });
+                });
+
+                document.querySelectorAll('[data-role="concept-name"]').forEach(el => {
+                    const handler = function () {
+                        const item = items.find(x => x.id === this.dataset.itemId);
+                        if (!item) return;
+                        const oldValue = item.name || '';
+                        const newValue = String(this.value || '').trim();
+                        item.name = newValue;
+                        pushSessionChange(item.id, newValue || oldValue || item.id, 'name', oldValue, newValue);
+                        renderAll();
+                    };
+                    el.addEventListener('change', handler);
+                    el.addEventListener('blur', handler);
+                });
+
+                document.querySelectorAll('[data-role="concept-source"]').forEach(el => {
+                    const handler = function () {
+                        const item = items.find(x => x.id === this.dataset.itemId);
+                        if (!item) return;
+                        const oldValue = item.source || '';
+                        const newValue = String(this.value || '').trim();
+                        item.source = newValue;
+                        pushSessionChange(item.id, item.name, 'source', oldValue, newValue);
+                        renderAll();
+                    };
+                    el.addEventListener('change', handler);
+                    el.addEventListener('blur', handler);
+                });
+
+                document.querySelectorAll('[data-role="opr-status"]').forEach(el => {
+                    el.addEventListener('change', function() {
+                        const item = items.find(x => x.id === this.dataset.itemId);
+                        if (!item) return;
+                        const oldValue = item.status || '';
+                        const newValue = this.value;
+                        item.status = newValue;
+                        if (newValue === 'Не требуется') {
+                            item.group = 10;
+                        } else if (Number(item.group) === 10) {
+                            item.group = resolveOprGroupId(item);
+                        }
+                        pushSessionChange(item.id, item.name, 'status', oldValue, newValue);
+                        renderAll();
+                    });
+                });
+
+                document.querySelectorAll('[data-role="opr-planned-date"]').forEach(el => {
+                    el.addEventListener('change', function() {
+                        const item = items.find(x => x.id === this.dataset.itemId);
+                        if (!item) return;
+                        const oldValue = item.plannedDate || '';
+                        const newValue = fromInputDate(this.value);
+                        item.plannedDate = newValue;
+                        pushSessionChange(item.id, item.name, 'plannedDate', oldValue, newValue);
+                        renderAll();
+                    });
+                });
+
+                document.querySelectorAll('[data-role="opr-extra"]').forEach(el => {
+                    const handler = function () {
+                        const item = items.find(x => x.id === this.dataset.itemId);
+                        if (!item) return;
+                        const oldValue = item.extraInfo || '';
+                        const newValue = this.value;
+                        item.extraInfo = newValue;
+                        pushSessionChange(item.id, item.name, 'extraInfo', oldValue, newValue);
+                        renderAll();
+                    };
+                    el.addEventListener('change', handler);
+                    el.addEventListener('blur', handler);
+                });
+
+                document.querySelectorAll('[data-role="opr-add-item"]').forEach(btn => {
+                    btn.addEventListener('click', function() {
+                        const groupId = Number(this.dataset.groupId);
+                        const input = document.getElementById('oprAddItemInput_' + groupId);
+                        if (!input) return;
+                        const name = (input.value || '').trim();
+                        if (!name) return;
+                        const newItem = createLocalItem(groupId, name, 'opr');
+                        items.push(newItem);
+                        pushSessionChange(newItem.id, newItem.name, 'add-item', '', newItem.name);
+                        input.value = '';
+                        renderAll();
+                    });
+                });
+            };
+
+            setTimeout(function () {
+                acquireChecklistLock(currentChecklistKey, true);
+                startLockHeartbeat();
+                updateLockNotice();
+            }, 0);
+    """
 
     return f"""
     <html>
@@ -3473,6 +4617,8 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                     setSaveState('error', 'РћС€РёР±РєР° Р·Р°РіСЂСѓР·РєРё С‡РµРє-Р»РёСЃС‚Р°');
                 }}
             }};
+            {popup_session_enhancements_js}
+
             function safeInitBx24ForPopup() {{
                 try {{
                     if (window.BX24 && typeof window.BX24.init === 'function') {{
@@ -3913,6 +5059,63 @@ async def api_debug_event(request: Request):
     write_debug_log(event, payload)
 
     return JSONResponse({"ok": True})
+
+
+@app.post("/api/checklist/lock/acquire")
+async def api_checklist_lock_acquire(request: Request):
+    payload = await request.json()
+    dialog_id = normalize_dialog_id(payload.get("dialogId"))
+    checklist_key = normalize_checklist_key(payload.get("checklistKey"))
+    user_id = str(payload.get("userId") or "").strip()
+    user_name = str(payload.get("userName") or "").strip()
+    lock_id = str(payload.get("lockId") or "").strip()
+
+    if not dialog_id:
+        return JSONResponse({"ok": False, "error": "dialogId is required"}, status_code=400)
+
+    result = acquire_checklist_lock(dialog_id, checklist_key, user_id, user_name, lock_id)
+    write_debug_log("lock_acquire", result)
+    return JSONResponse(result)
+
+
+@app.post("/api/checklist/lock/heartbeat")
+async def api_checklist_lock_heartbeat(request: Request):
+    payload = await request.json()
+    dialog_id = normalize_dialog_id(payload.get("dialogId"))
+    checklist_key = normalize_checklist_key(payload.get("checklistKey"))
+    user_id = str(payload.get("userId") or "").strip()
+    user_name = str(payload.get("userName") or "").strip()
+    lock_id = str(payload.get("lockId") or "").strip()
+
+    if not dialog_id:
+        return JSONResponse({"ok": False, "error": "dialogId is required"}, status_code=400)
+
+    result = heartbeat_checklist_lock(dialog_id, checklist_key, user_id, user_name, lock_id)
+    return JSONResponse(result)
+
+
+@app.post("/api/checklist/lock/release")
+async def api_checklist_lock_release(request: Request):
+    try:
+        payload = await request.json()
+    except Exception:
+        raw = await request.body()
+        try:
+            payload = json.loads(raw.decode("utf-8") or "{}")
+        except Exception:
+            payload = {"raw": raw.decode("utf-8", errors="ignore")}
+
+    dialog_id = normalize_dialog_id(payload.get("dialogId"))
+    checklist_key = normalize_checklist_key(payload.get("checklistKey"))
+    lock_id = str(payload.get("lockId") or "").strip()
+    user_id = str(payload.get("userId") or "").strip()
+
+    if not dialog_id:
+        return JSONResponse({"ok": False, "error": "dialogId is required"}, status_code=400)
+
+    result = release_checklist_lock(dialog_id, checklist_key, lock_id, user_id)
+    write_debug_log("lock_release", result)
+    return JSONResponse(result)
 
 
 @app.post("/api/checklist/close-session")
