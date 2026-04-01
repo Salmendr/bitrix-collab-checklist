@@ -906,9 +906,9 @@ def build_checklist_message_link(dialog_id: str, checklist_key: str) -> str:
         return ""
 
     base_url = f"{parsed.scheme}://{parsed.netloc}"
-    app_path = APP_PORTAL_PATH.rstrip("/")
+    app_path = APP_PORTAL_PATH if APP_PORTAL_PATH.endswith("/") else APP_PORTAL_PATH + "/"
     return (
-        f"{base_url}{app_path}/popup"
+        f"{base_url}{app_path}"
         f"?dialogId={quote(dialog_id)}&checklistKey={quote(checklist_key)}"
     )
 
@@ -2597,7 +2597,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
             }}
             function bindEvents() {{
                 document.querySelectorAll('[data-role="concept-status"]').forEach(el => {{
-                    const handler = function () {{
+                    const commitConceptStatus = function () {{
                         const item = items.find(x => x.id === this.dataset.itemId);
                         if (!item) return;
 
@@ -2620,8 +2620,20 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                         renderAll();
                     }};
 
-                    el.addEventListener('change', handler);
-                    el.addEventListener('blur', handler);
+                    const item = items.find(x => x.id === el.dataset.itemId);
+                    if (!item) return;
+
+                    if (String(item.statusKind || '') === 'text') {{
+                        el.addEventListener('blur', commitConceptStatus);
+                        el.addEventListener('keydown', function (e) {{
+                            if (e.key === 'Enter') {{
+                                e.preventDefault();
+                                commitConceptStatus.call(this);
+                            }}
+                        }});
+                    }} else {{
+                        el.addEventListener('change', commitConceptStatus);
+                    }}
                 }});
 
                 document.querySelectorAll('[data-role="concept-extra"]').forEach(el => {{
