@@ -11,6 +11,7 @@ import html
 import sqlite3
 from io import BytesIO
 from datetime import datetime
+from urllib.parse import quote, urlparse
 import openpyxl
 
 app = FastAPI()
@@ -229,6 +230,16 @@ def resolve_concept_group_id_by_item_id_or_name(item: dict) -> int:
     item_id = str(item.get("id") or "")
     name = str(item.get("name") or "").strip()
 
+    if item_id.startswith("concept_g"):
+        try:
+            group_part = item_id.split("_", 2)[1]
+            if group_part.startswith("g"):
+                group_id = int(group_part[1:])
+                if group_id != 10:
+                    return group_id
+        except Exception:
+            pass
+
     for group in CONCEPT_GROUPS:
         if group["id"] == 10:
             continue
@@ -433,6 +444,38 @@ def calculate_progress(items: list) -> dict:
     }
 
 
+def calculate_concept_progress(items: list) -> dict:
+    items = items or []
+
+    def is_active(item: dict) -> bool:
+        return clean_cell_value(item.get("status")) != "Не требуется"
+
+    def is_completed(item: dict) -> bool:
+        status = clean_cell_value(item.get("status"))
+        status_kind = clean_cell_value(item.get("statusKind")) or "bool"
+
+        if status == "Не требуется":
+            return False
+
+        if status_kind == "bool":
+            return status == "Да"
+
+        return bool(status)
+
+    active_items = [item for item in items if is_active(item)]
+    completed_items = [item for item in active_items if is_completed(item)]
+
+    active_count = len(active_items)
+    completed_count = len(completed_items)
+    progress_percent = round((completed_count / active_count) * 100) if active_count else 0
+
+    return {
+        "activeCount": active_count,
+        "completedCount": completed_count,
+        "progressPercent": progress_percent,
+    }
+
+
 def normalize_checklist_data(data: dict, checklist_key: str = "id") -> dict:
     data = dict(data or {})
     checklist_key = str(checklist_key or data.get("checklistKey") or "id").strip() or "id"
@@ -474,6 +517,8 @@ def normalize_checklist_data(data: dict, checklist_key: str = "id") -> dict:
                 if not item.get("id"):
                     item["id"] = f"concept_g{group['id']}_{order}"
 
+        progress = calculate_concept_progress(normalized_items)
+
         return {
             "title": data.get("title") or "Чек-лист Концепция",
             "checklistKey": "concept",
@@ -484,9 +529,9 @@ def normalize_checklist_data(data: dict, checklist_key: str = "id") -> dict:
             "projectChecklists": build_project_checklists(),
             "items": normalized_items,
             "notice": data.get("notice", ""),
-            "activeCount": 0,
-            "completedCount": 0,
-            "progressPercent": 0,
+            "activeCount": progress["activeCount"],
+            "completedCount": progress["completedCount"],
+            "progressPercent": progress["progressPercent"],
         }
 
     raw_items = data.get("items", []) or []
@@ -667,9 +712,12 @@ def format_plan_suffix(plan: str) -> str:
     return f" | До {plan}"
 
 
-def split_changes(changes: list) -> tuple[list, list]:
+def split_changes(changes: list) -> tuple[list, list, list, list, list]:
     status_changes = []
     date_changes = []
+    document_changes = []
+    add_item_changes = []
+    extra_info_changes = []
 
     for change in changes or []:
         field = str(change.get("field") or "").strip()
@@ -678,10 +726,14 @@ def split_changes(changes: list) -> tuple[list, list]:
             status_changes.append(change)
         elif field == "plan":
             date_changes.append(change)
-        # fact полностью игнорируем
-        # document/add-item в верхнем блоке не показываем
+        elif field == "document":
+            document_changes.append(change)
+        elif field == "add-item":
+            add_item_changes.append(change)
+        elif field == "extraInfo":
+            extra_info_changes.append(change)
 
-    return status_changes, date_changes
+    return status_changes, date_changes, document_changes, add_item_changes, extra_info_changes
 
 
 def format_change_arrow(old_value: str, new_value: str) -> str:
@@ -711,6 +763,25 @@ def format_plan_change_line(change: dict) -> str:
 
     arrow = format_change_arrow(old_value, new_value)
     return f"📆{item_name} / План: {arrow}"
+
+
+def format_document_change_line(change: dict) -> str:
+    item_name = str(change.get("itemName") or "").strip() or "Без названия"
+    old_value = str(change.get("oldValue") or "").strip() or "—"
+    new_value = str(change.get("newValue") or "").strip() or "—"
+    return f"📎{item_name} / Документ: {old_value} → [B]{new_value}[/B]"
+
+
+def format_add_item_change_line(change: dict) -> str:
+    item_name = str(change.get("itemName") or "").strip() or "Без названия"
+    return f"➕{item_name} / Пункт: → [B]добавлен[/B]"
+
+
+def format_extra_info_change_line(change: dict) -> str:
+    item_name = str(change.get("itemName") or "").strip() or "Без названия"
+    old_value = str(change.get("oldValue") or "").strip() or "—"
+    new_value = str(change.get("newValue") or "").strip() or "—"
+    return f"📝{item_name} / Доп информация: {old_value} → [B]{new_value}[/B]"
 
 
 def collect_item_change_meta(item_id: str, changes: list) -> dict:
@@ -773,7 +844,7 @@ def build_checklist_line(item: dict, changes: list) -> str:
 
 
 def build_recent_changes_text(changes: list, checklist_title: str = "Чек-лист ИД") -> str:
-    status_changes, date_changes = split_changes(changes)
+    status_changes, date_changes, document_changes, add_item_changes, extra_info_changes = split_changes(changes)
     checklist_title = clean_cell_value(checklist_title) or "Чек-лист ИД"
 
     lines = [
@@ -795,11 +866,50 @@ def build_recent_changes_text(changes: list, checklist_title: str = "Чек-ли
             lines.append(format_plan_change_line(change))
         lines.append("")
 
-    if not status_changes and not date_changes:
+    if document_changes:
+        lines.append("[B]Документы:[/B]")
+        lines.append("")
+        for change in document_changes:
+            lines.append(format_document_change_line(change))
+        lines.append("")
+
+    if add_item_changes:
+        lines.append("[B]Пункты:[/B]")
+        lines.append("")
+        for change in add_item_changes:
+            lines.append(format_add_item_change_line(change))
+        lines.append("")
+
+    if extra_info_changes:
+        lines.append("[B]Доп информация:[/B]")
+        lines.append("")
+        for change in extra_info_changes:
+            lines.append(format_extra_info_change_line(change))
+        lines.append("")
+
+    if not status_changes and not date_changes and not document_changes and not add_item_changes and not extra_info_changes:
         lines.append("Изменений нет")
         lines.append("")
 
     return "\n".join(lines).strip()
+
+
+def build_checklist_message_link(dialog_id: str, checklist_key: str) -> str:
+    dialog_id = normalize_dialog_id(dialog_id)
+    checklist_key = normalize_checklist_key(checklist_key)
+
+    if not BITRIX_TECH_WEBHOOK_URL:
+        return ""
+
+    parsed = urlparse(BITRIX_TECH_WEBHOOK_URL)
+    if not parsed.scheme or not parsed.netloc:
+        return ""
+
+    base_url = f"{parsed.scheme}://{parsed.netloc}"
+    return (
+        f"{base_url}{APP_PORTAL_PATH}"
+        f"?dialogId={quote(dialog_id)}&checklistKey={quote(checklist_key)}"
+    )
 
 
 def build_editor_text(editor: dict) -> str:
@@ -863,9 +973,20 @@ def build_checklist_chat_message(data: dict, changes: list, editor: dict) -> str
         build_recent_changes_text(changes, checklist_title),
         "",
         build_editor_text(editor),
-        "",
-        build_checklist_full_text(data, changes),
     ]
+    dialog_id = normalize_dialog_id(data.get("resolvedDialogId") or data.get("dialogId") or "")
+    checklist_key = normalize_checklist_key(data.get("checklistKey") or "id")
+    link_url = build_checklist_message_link(dialog_id, checklist_key)
+    if link_url:
+        parts.extend([
+            "",
+            f"[URL={link_url}]Чтобы посмотреть весь чек-лист нажмите на этот текст[/URL]",
+        ])
+    else:
+        parts.extend([
+            "",
+            "Чтобы посмотреть весь чек-лист нажмите на этот текст",
+        ])
     return "\n".join(parts).strip()
 
 
@@ -1489,6 +1610,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
             .status-indicator.gray {{ background:#9ca3af; border-color:#9ca3af; }}
             .item-name {{ font-size:13px; font-weight:700; color:#1f2328; line-height:1.15; min-width:0; word-break:break-word; max-width:165px; }}
             .status-select,.date-input {{ width:100%; border:1px solid #d0d7de; border-radius:8px; padding:6px 8px; font-size:12px; background:#fff; }}
+            .concept-extra-textarea {{ width:100%; min-height:96px; border:1px solid #d0d7de; border-radius:8px; padding:8px; font-size:12px; background:#fff; resize:vertical; overflow:hidden; line-height:1.4; }}
             .doc-btn,.upload-btn,.add-item-btn {{ display:inline-block; width:100%; text-align:center; padding:6px 8px; border:1px solid #d0d7de; border-radius:8px; background:#f8fafc; color:#1f2328; font-size:12px; text-decoration:none; cursor:pointer; }}
             .doc-btn:hover,.upload-btn:hover,.side-link:hover,.add-item-btn:hover {{ background:#f1f5f9; }}
             .add-item-row {{ padding:9px 12px 10px; min-height:52px; border-top:1px solid #edf0f2; background:#fcfcfd; display:flex; gap:8px; align-items:center; justify-content:flex-start; }}
@@ -1829,6 +1951,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                     dialogId,
                     checklistKey: currentChecklistKey,
                     editor: currentEditor,
+                    data: buildChecklistSnapshot(),
                     changes: sessionChanges,
                     closeEvent: reason,
                     ts: new Date().toISOString()
@@ -1920,6 +2043,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                     dialogId,
                     checklistKey: currentChecklistKey,
                     editor: currentEditor,
+                    data: buildChecklistSnapshot(),
                     changes: sessionChanges,
                     closeEvent: eventName,
                     ts: new Date().toISOString()
@@ -2023,9 +2147,23 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                 if (!progressValueEl || !progressBarEl) {{
                     return;
                 }}
-                if (currentChecklistKey !== 'id') {{
-                    progressValueEl.textContent = '';
-                    progressBarEl.style.width = '0%';
+                if (currentChecklistKey === 'concept') {{
+                    const activeItems = items.filter(item => String(item.status || '').trim() !== 'Не требуется');
+                    const completedItems = activeItems.filter(item => {{
+                        const status = String(item.status || '').trim();
+                        const kind = String(item.statusKind || '').trim() || 'bool';
+
+                        if (kind === 'bool') {{
+                            return status === 'Да';
+                        }}
+
+                        return !!status;
+                    }});
+                    const activeCount = activeItems.length;
+                    const completedCount = completedItems.length;
+                    const percent = activeCount ? Math.round((completedCount / activeCount) * 100) : 0;
+                    progressValueEl.textContent = percent + '%';
+                    progressBarEl.style.width = percent + '%';
                     return;
                 }}
                 const activeItems = items.filter(x => normalizeStatus(x.status) !== 'Не требуется');
@@ -2060,12 +2198,12 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                 setSaveState('', 'Сохранено');
                 return result;
             }}
-            async function removeDocument(itemId) {{
+            async function removeDocument(itemId, documentUrl = '') {{
                 setSaveState('saving', 'Сохраняем...');
                 const response = await fetch('/api/checklist/remove-document', {{
                     method: 'POST',
                     headers: {{ 'Content-Type': 'application/json' }},
-                    body: JSON.stringify({{ dialogId, checklistKey: currentChecklistKey, itemId }})
+                    body: JSON.stringify({{ dialogId, checklistKey: currentChecklistKey, itemId, documentUrl }})
                 }});
                 const result = await response.json();
                 if (!response.ok || !result.ok) throw new Error(result.error || 'remove document failed');
@@ -2074,11 +2212,13 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
             }}
             async function uploadDocument(itemId, file) {{
                 setSaveState('saving', 'Сохраняем...');
+                const item = items.find(x => x.id === itemId);
                 const formData = new FormData();
                 formData.append('dialogId', dialogId);
                 formData.append('itemId', itemId);
                 formData.append('file', file);
                 formData.append('checklistKey', currentChecklistKey);
+                formData.append('itemGroup', String(item && item.group ? item.group : ''));
                 const response = await fetch('/api/checklist/upload-document', {{ method: 'POST', body: formData }});
                 const result = await response.json();
                 if (!response.ok || !result.ok) throw new Error(result.error || 'upload document failed');
@@ -2147,6 +2287,131 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                     >
                 `;
             }}
+            function pushSessionChange(itemId, itemName, field, oldValue, newValue) {{
+                if (String(oldValue || '') === String(newValue || '')) {{
+                    return;
+                }}
+
+                sessionChanges.push({{
+                    field,
+                    itemId: itemId || '',
+                    itemName: itemName || '',
+                    oldValue: oldValue || '',
+                    newValue: newValue || ''
+                }});
+                sessionDirty = true;
+                closeSummarySent = false;
+                setSaveState('saving', 'Есть несохраненные изменения');
+            }}
+            function autoGrowTextarea(el) {{
+                if (!el) return;
+
+                const baseHeight = Number(el.dataset.baseHeight || 0) || Math.max(el.offsetHeight || 0, 96);
+                el.dataset.baseHeight = String(baseHeight);
+                el.style.height = baseHeight + 'px';
+
+                let nextHeight = baseHeight;
+                while (el.scrollHeight > el.clientHeight && nextHeight < 1600) {{
+                    nextHeight += baseHeight;
+                    el.style.height = nextHeight + 'px';
+                }}
+            }}
+            function extractConceptUnit(placeholder) {{
+                const raw = String(placeholder || '').trim();
+                const match = raw.match(/^_+\\s*(.+)$/);
+                return match ? match[1].trim() : '';
+            }}
+            function formatConceptTextStatus(value, placeholder) {{
+                const rawValue = String(value || '').trim();
+                if (!rawValue) {{
+                    return '';
+                }}
+
+                if (rawValue === 'Не требуется') {{
+                    return rawValue;
+                }}
+
+                const unit = extractConceptUnit(placeholder);
+                if (!unit) {{
+                    return rawValue;
+                }}
+
+                if (rawValue.toLowerCase().endsWith(unit.toLowerCase())) {{
+                    return rawValue;
+                }}
+
+                if (!/^[0-9]+([.,][0-9]+)?$/.test(rawValue)) {{
+                    return rawValue;
+                }}
+
+                return unit.startswith('%') ? rawValue + unit : rawValue + ' ' + unit;
+            }}
+            function buildClientItemId(prefix) {{
+                return prefix + '_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+            }}
+            function createLocalItem(groupId, name, checklistKey) {{
+                const groupItems = getItemsByGroup(groupId);
+                const nextOrder = groupItems.length + 1;
+
+                if (checklistKey === 'concept') {{
+                    return {{
+                        id: buildClientItemId('concept_g' + groupId + '_custom'),
+                        group: groupId,
+                        order: nextOrder,
+                        name,
+                        source: '',
+                        statusKind: 'text',
+                        statusOptions: [],
+                        statusPlaceholder: '',
+                        status: '',
+                        extraInfo: '',
+                        extraInfoPlaceholder: '',
+                        documentUrl: '',
+                        documentName: '',
+                        isCustom: true,
+                        priority: 'white'
+                    }};
+                }}
+
+                return {{
+                    id: buildClientItemId('item_g' + groupId + '_custom'),
+                    group: groupId,
+                    order: nextOrder,
+                    name,
+                    priority: 'white',
+                    status: '',
+                    plan: '',
+                    fact: '',
+                    documentUrl: '',
+                    documentName: '',
+                    isCustom: true
+                }};
+            }}
+            function resolveConceptGroupId(item) {{
+                const itemId = String(item && item.id || '');
+                const name = String(item && item.name || '').trim();
+
+                if (itemId.startsWith('concept_g')) {{
+                    const match = itemId.match(/^concept_g(\\d+)_/);
+                    if (match) {{
+                        const groupId = Number(match[1]);
+                        if (groupId && groupId !== 10) {{
+                            return groupId;
+                        }}
+                    }}
+                }}
+
+                const byName = groups.find(group => Number(group.id) !== 10 && Array.isArray(items) && items.some(existing =>
+                    existing !== item &&
+                    Number(existing.group) === Number(group.id) &&
+                    String(existing.name || '').trim() === name
+                ));
+                if (byName) {{
+                    return Number(byName.id);
+                }}
+
+                return 1;
+            }}
             function conceptIndicatorClass(item) {{
                 const status = String(item.status || '').trim();
                 const kind = String(item.statusKind || '').trim();
@@ -2185,21 +2450,41 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                 return `<input class="status-select" type="text" data-role="concept-status" data-item-id="${{esc(item.id)}}" placeholder="${{esc(item.statusPlaceholder || '')}}" value="${{esc(item.status || '')}}">`;
             }}
             function buildConceptExtraCell(item) {{
-                return `<input class="status-select" type="text" data-role="concept-extra" data-item-id="${{esc(item.id)}}" placeholder="${{esc(item.extraInfoPlaceholder || '')}}" value="${{esc(item.extraInfo || '')}}">`;
+                return `<textarea class="concept-extra-textarea" data-role="concept-extra" data-item-id="${{esc(item.id)}}" placeholder="${{esc(item.extraInfoPlaceholder || '')}}">${{esc(item.extraInfo || '')}}</textarea>`;
             }}
-            function renderConceptTable() {{
-                if (!leftTableEl || !tablesGridEl) return;
-                tablesGridEl.style.gridTemplateColumns = '1fr';
-                if (tablePanels[1]) {{
-                    tablePanels[1].style.display = 'none';
-                }}
-                const visibleGroups = groups.filter(group => {{
-                    if (group.id !== 10) return true;
-                    return items.some(x => x.group === 10);
-                }});
-                leftTableEl.innerHTML = `
+            function renderConceptGroup(group) {{
+                const groupItems = getItemsByGroup(group.id);
+                const allowAdd = Number(group.id) !== 10;
+                const rows = groupItems.map(item => `
+                    <div class="row" style="grid-template-columns: 1.05fr 0.8fr 110px 150px 1.15fr;" data-item-id="${{esc(item.id)}}">
+                        <div class="td">
+                            <div class="cell-name">
+                                <div class="${{conceptIndicatorClass(item)}}"></div>
+                                <div class="item-name" style="${{item.status === 'Не требуется' ? 'text-decoration:line-through;color:#98a2b3;' : ''}}">
+                                    ${{esc(item.name)}}
+                                </div>
+                            </div>
+                        </div>
+                        <div class="td">${{esc(item.source || '')}}</div>
+                        <div class="td">${{buildDocumentCell(item)}}</div>
+                        <div class="td">${{buildConceptStatusCell(item)}}</div>
+                        <div class="td">${{buildConceptExtraCell(item)}}</div>
+                    </div>
+                `).join('');
+
+                const addBlock = allowAdd ? `
+                    <div class="add-item-row">
+                        <input class="add-item-input" id="conceptAddItemInput_${{group.id}}" type="text" placeholder="Новый пункт">
+                        <button class="add-item-btn" type="button" data-role="concept-add-item" data-group-id="${{group.id}}">Добавить пункт</button>
+                    </div>
+                ` : '';
+
+                return `<div class="group-block"><div class="group-title">${{esc(group.title)}}</div>${{rows}}${{addBlock}}</div>`;
+            }}
+            function buildConceptTableHtml(conceptGroups) {{
+                return `
                     <div class="thead">
-                        <div class="thead-top" style="grid-template-columns: 1.2fr 0.8fr 110px 160px 1fr;">
+                        <div class="thead-top" style="grid-template-columns: 1.05fr 0.8fr 110px 150px 1.15fr;">
                             <div class="th">Пункт</div>
                             <div class="th">Нормативы</div>
                             <div class="th">Документ</div>
@@ -2207,27 +2492,29 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                             <div class="th">Доп информация</div>
                         </div>
                     </div>
-                    <div id="conceptTableBody">${{visibleGroups.map(group => {{
-                        const groupItems = getItemsByGroup(group.id);
-                        const rows = groupItems.map(item => `
-                            <div class="row" style="grid-template-columns: 1.2fr 0.8fr 110px 160px 1fr;" data-item-id="${{esc(item.id)}}">
-                                <div class="td">
-                                    <div class="cell-name">
-                                        <div class="${{conceptIndicatorClass(item)}}"></div>
-                                        <div class="item-name" style="${{item.status === 'Не требуется' ? 'text-decoration:line-through;color:#98a2b3;' : ''}}">
-                                            ${{esc(item.name)}}
-                                        </div>
-                                    </div>
-                                </div>
-                                <div class="td">${{esc(item.source || '')}}</div>
-                                <div class="td">${{buildDocumentCell(item)}}</div>
-                                <div class="td">${{buildConceptStatusCell(item)}}</div>
-                                <div class="td">${{buildConceptExtraCell(item)}}</div>
-                            </div>
-                        `).join('');
-                        return `<div class="group-block"><div class="group-title">${{esc(group.title)}}</div>${{rows}}</div>`;
-                    }}) .join('')}}</div>
+                    <div>${{conceptGroups.map(renderConceptGroup).join('')}}</div>
                 `;
+            }}
+            function renderConceptTable() {{
+                if (!leftTableEl || !rightTableEl || !tablesGridEl) {{
+                    throw new Error('concept table containers not found');
+                }}
+
+                tablesGridEl.style.gridTemplateColumns = '1fr 1fr';
+                if (tablePanels[1]) {{
+                    tablePanels[1].style.display = '';
+                }}
+
+                const visibleGroups = groups.filter(group => {{
+                    if (Number(group.id) !== 10) return true;
+                    return items.some(x => Number(x.group) === 10);
+                }});
+
+                const leftGroups = visibleGroups.filter(group => [1, 3, 5, 7, 9].includes(Number(group.id)));
+                const rightGroups = visibleGroups.filter(group => [2, 4, 6, 8, 10].includes(Number(group.id)));
+
+                leftTableEl.innerHTML = buildConceptTableHtml(leftGroups);
+                rightTableEl.innerHTML = buildConceptTableHtml(rightGroups);
             }}
             function renderGroup(group) {{
                 const groupItems = getItemsByGroup(group.id);
@@ -2300,29 +2587,31 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
             function replaceItem(updatedItem) {{
                 if (!updatedItem) return;
                 const idx = items.findIndex(x => x.id === updatedItem.id);
-                if (idx >= 0) items[idx] = updatedItem; else items.push(updatedItem);
+                if (idx >= 0) items[idx] = Object.assign({{}}, items[idx], updatedItem); else items.push(updatedItem);
             }}
             function bindEvents() {{
                 document.querySelectorAll('[data-role="concept-status"]').forEach(el => {{
-                    const handler = async function () {{
+                    const handler = function () {{
                         const item = items.find(x => x.id === this.dataset.itemId);
                         if (!item) return;
 
-                        const oldItem = JSON.parse(JSON.stringify(item));
-                        const newValue = this.value;
+                        const oldValue = item.status || '';
+                        let newValue = this.value;
+
+                        if (String(item.statusKind || '') === 'text') {{
+                            newValue = formatConceptTextStatus(newValue, item.statusPlaceholder || '');
+                            this.value = newValue;
+                        }}
+
+                        if (newValue === 'Не требуется') {{
+                            item.group = 10;
+                        }} else if (Number(item.group) === 10) {{
+                            item.group = resolveConceptGroupId(item);
+                        }}
 
                         item.status = newValue;
-                        sessionDirty = true;
-
-                        try {{
-                            const result = await updateItem(this.dataset.itemId, 'status', newValue, currentChecklistKey);
-                            replaceItem(result.item);
-                            renderAll();
-                        }} catch (e) {{
-                            replaceItem(oldItem);
-                            renderAll();
-                            setSaveState('error', 'Ошибка сохранения');
-                        }}
+                        pushSessionChange(item.id, item.name, 'status', oldValue, newValue);
+                        renderAll();
                     }};
 
                     el.addEventListener('change', handler);
@@ -2330,25 +2619,20 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                 }});
 
                 document.querySelectorAll('[data-role="concept-extra"]').forEach(el => {{
-                    const handler = async function () {{
+                    autoGrowTextarea(el);
+                    el.addEventListener('input', function () {{
+                        autoGrowTextarea(this);
+                    }});
+
+                    const handler = function () {{
                         const item = items.find(x => x.id === this.dataset.itemId);
                         if (!item) return;
 
-                        const oldItem = JSON.parse(JSON.stringify(item));
+                        const oldValue = item.extraInfo || '';
                         const newValue = this.value;
-
                         item.extraInfo = newValue;
-                        sessionDirty = true;
-
-                        try {{
-                            const result = await updateItem(this.dataset.itemId, 'extraInfo', newValue, currentChecklistKey);
-                            replaceItem(result.item);
-                            renderAll();
-                        }} catch (e) {{
-                            replaceItem(oldItem);
-                            renderAll();
-                            setSaveState('error', 'Ошибка сохранения');
-                        }}
+                        pushSessionChange(item.id, item.name, 'extraInfo', oldValue, newValue);
+                        renderAll();
                     }};
 
                     el.addEventListener('change', handler);
@@ -2359,18 +2643,10 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                         const item = items.find(x => x.id === this.dataset.itemId);
                         if (!item) return;
                         const oldItem = JSON.parse(JSON.stringify(item));
-                        const changeCountBefore = sessionChanges.length;
                         const newValue = this.value;
 
                         item.status = newValue;
-                        sessionChanges.push({{
-                            field: 'status',
-                            itemId: item.id,
-                            itemName: item.name,
-                            oldValue: oldItem.status || '',
-                            newValue: newValue || ''
-                        }});
-                        sessionDirty = true;
+                        pushSessionChange(item.id, item.name, 'status', oldItem.status || '', newValue || '');
                         debugLog('status_changed', {{
                             itemId: item.id,
                             itemName: item.name,
@@ -2378,55 +2654,36 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                             newValue: newValue || ''
                         }});
 
-                        if (this.selectedIndex === 2 && oldItem.documentUrl) {{
-                            sessionChanges.push({{
-                                field: 'document',
-                                itemId: item.id,
-                                itemName: item.name,
-                                oldValue: 'uploaded',
-                                newValue: 'removed'
-                            }});
-                            sessionDirty = true;
+                        if (newValue === 'Нет' && oldItem.documentUrl) {{
+                            pushSessionChange(item.id, item.name, 'document', 'uploaded', 'removed');
                             debugLog('document_removed_by_status', {{
                                 itemId: item.id,
                                 itemName: item.name,
                                 oldValue: 'uploaded',
                                 newValue: 'removed'
                             }});
+                            item.documentUrl = '';
+                            item.documentName = '';
+                            try {{
+                                await removeDocument(item.id, oldItem.documentUrl);
+                            }} catch (e) {{
+                                console.log('remove document by status error:', e);
+                            }}
                         }}
 
                         renderAll();
-
-                        try {{
-                            const result = await updateItem(this.dataset.itemId, 'status', newValue);
-                            replaceItem(result.item);
-                            renderAll();
-                        }} catch (e) {{
-                            sessionChanges.splice(changeCountBefore);
-                            replaceItem(oldItem);
-                            renderAll();
-                            setSaveState('error', 'Ошибка сохранения');
-                        }}
                     }});
                 }});
 
                 document.querySelectorAll('[data-role="plan"]').forEach(el => {{
-                    el.addEventListener('change', async function() {{
+                    el.addEventListener('change', function() {{
                         const item = items.find(x => x.id === this.dataset.itemId);
                         if (!item) return;
                         const oldItem = JSON.parse(JSON.stringify(item));
-                        const changeCountBefore = sessionChanges.length;
                         const newValue = fromInputDate(this.value);
 
                         item.plan = newValue;
-                        sessionChanges.push({{
-                            field: 'plan',
-                            itemId: item.id,
-                            itemName: item.name,
-                            oldValue: oldItem.plan || '',
-                            newValue: newValue || ''
-                        }});
-                        sessionDirty = true;
+                        pushSessionChange(item.id, item.name, 'plan', oldItem.plan || '', newValue || '');
                         debugLog('plan_changed', {{
                             itemId: item.id,
                             itemName: item.name,
@@ -2435,37 +2692,18 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                         }});
 
                         renderAll();
-
-                        try {{
-                            const result = await updateItem(this.dataset.itemId, 'plan', newValue);
-                            replaceItem(result.item);
-                            renderAll();
-                        }} catch (e) {{
-                            sessionChanges.splice(changeCountBefore);
-                            replaceItem(oldItem);
-                            renderAll();
-                            setSaveState('error', 'Ошибка сохранения');
-                        }}
                     }});
                 }});
 
                 document.querySelectorAll('[data-role="fact"]').forEach(el => {{
-                    el.addEventListener('change', async function() {{
+                    el.addEventListener('change', function() {{
                         const item = items.find(x => x.id === this.dataset.itemId);
                         if (!item) return;
                         const oldItem = JSON.parse(JSON.stringify(item));
-                        const changeCountBefore = sessionChanges.length;
                         const newValue = fromInputDate(this.value);
 
                         item.fact = newValue;
-                        sessionChanges.push({{
-                            field: 'fact',
-                            itemId: item.id,
-                            itemName: item.name,
-                            oldValue: oldItem.fact || '',
-                            newValue: newValue || ''
-                        }});
-                        sessionDirty = true;
+                        pushSessionChange(item.id, item.name, 'fact', oldItem.fact || '', newValue || '');
                         debugLog('fact_changed', {{
                             itemId: item.id,
                             itemName: item.name,
@@ -2474,51 +2712,48 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                         }});
 
                         renderAll();
-
-                        try {{
-                            const result = await updateItem(this.dataset.itemId, 'fact', newValue);
-                            replaceItem(result.item);
-                            renderAll();
-                        }} catch (e) {{
-                            sessionChanges.splice(changeCountBefore);
-                            replaceItem(oldItem);
-                            renderAll();
-                            setSaveState('error', 'Ошибка сохранения');
-                        }}
                     }});
                 }});
 
                 document.querySelectorAll('[data-role="add-item"]').forEach(btn => {{
-                    btn.addEventListener('click', async function() {{
+                    btn.addEventListener('click', function() {{
                         const groupId = Number(this.dataset.groupId);
                         const input = document.getElementById('addItemInput_' + groupId);
                         if (!input) return;
                         const name = (input.value || '').trim();
                         if (!name) return;
 
-                        try {{
-                            const result = await addItem(groupId, name);
-                            replaceItem(result.item);
-                            if (result.item) {{
-                                sessionChanges.push({{
-                                    field: 'add-item',
-                                    itemId: result.item.id,
-                                    itemName: result.item.name,
-                                    oldValue: '',
-                                    newValue: result.item.name
-                                }});
-                                sessionDirty = true;
-                                debugLog('item_added', {{
-                                    itemId: result.item.id,
-                                    itemName: result.item.name,
-                                    groupId: groupId
-                                }});
-                            }}
-                            input.value = '';
-                            renderAll();
-                        }} catch (e) {{
-                            setSaveState('error', 'Ошибка добавления пункта');
-                        }}
+                        const newItem = createLocalItem(groupId, name, 'id');
+                        items.push(newItem);
+                        pushSessionChange(newItem.id, newItem.name, 'add-item', '', newItem.name);
+                        debugLog('item_added', {{
+                            itemId: newItem.id,
+                            itemName: newItem.name,
+                            groupId: groupId
+                        }});
+                        input.value = '';
+                        renderAll();
+                    }});
+                }});
+
+                document.querySelectorAll('[data-role="concept-add-item"]').forEach(btn => {{
+                    btn.addEventListener('click', function() {{
+                        const groupId = Number(this.dataset.groupId);
+                        const input = document.getElementById('conceptAddItemInput_' + groupId);
+                        if (!input) return;
+                        const name = (input.value || '').trim();
+                        if (!name) return;
+
+                        const newItem = createLocalItem(groupId, name, 'concept');
+                        items.push(newItem);
+                        pushSessionChange(newItem.id, newItem.name, 'add-item', '', newItem.name);
+                        debugLog('item_added', {{
+                            itemId: newItem.id,
+                            itemName: newItem.name,
+                            groupId: groupId
+                        }});
+                        input.value = '';
+                        renderAll();
                     }});
                 }});
 
@@ -2837,10 +3072,10 @@ async def api_checklist_add_item(request: Request):
     if not dialog_id:
         return JSONResponse({"ok": False, "error": "dialogId is required"}, status_code=400)
 
-    if checklist_key != "id":
-        return JSONResponse({"ok": False, "error": "add-item is only supported for id"}, status_code=400)
+    if checklist_key == "id" and group_id not in [1, 2, 3]:
+        return JSONResponse({"ok": False, "error": "invalid groupId"}, status_code=400)
 
-    if group_id not in [1, 2, 3]:
+    if checklist_key == "concept" and group_id not in [group["id"] for group in CONCEPT_GROUPS if group["id"] != 10]:
         return JSONResponse({"ok": False, "error": "invalid groupId"}, status_code=400)
 
     if not name:
@@ -2852,19 +3087,38 @@ async def api_checklist_add_item(request: Request):
     group_items = [x for x in items if x.get("group") == group_id]
     next_order = len(group_items) + 1
 
-    new_item = {
-        "id": build_item_id(group_id, next_order) + "_custom",
-        "group": group_id,
-        "order": next_order,
-        "name": name,
-        "priority": "white",
-        "status": "",
-        "plan": "",
-        "fact": "",
-        "documentUrl": "",
-        "documentName": "",
-        "isCustom": True,
-    }
+    if checklist_key == "concept":
+        new_item = {
+            "id": f"concept_g{group_id}_custom_{uuid.uuid4().hex[:8]}",
+            "group": group_id,
+            "order": next_order,
+            "name": name,
+            "source": "",
+            "statusKind": "text",
+            "statusOptions": [],
+            "statusPlaceholder": "",
+            "status": "",
+            "extraInfo": "",
+            "extraInfoPlaceholder": "",
+            "documentUrl": "",
+            "documentName": "",
+            "isCustom": True,
+            "priority": "white",
+        }
+    else:
+        new_item = {
+            "id": build_item_id(group_id, next_order) + "_custom",
+            "group": group_id,
+            "order": next_order,
+            "name": name,
+            "priority": "white",
+            "status": "",
+            "plan": "",
+            "fact": "",
+            "documentUrl": "",
+            "documentName": "",
+            "isCustom": True,
+        }
 
     items.append(new_item)
     data["items"] = items
@@ -2889,31 +3143,19 @@ async def api_checklist_upload_document(
     dialogId: str = Form(...),
     itemId: str = Form(...),
     file: UploadFile = File(...),
-    checklistKey: str = Form("id")
+    checklistKey: str = Form("id"),
+    itemGroup: str = Form("")
 ):
     dialog_id = normalize_dialog_id(dialogId)
     checklist_key = normalize_checklist_key(checklistKey)
     item_id = str(itemId or "").strip()
+    item_group = int(str(itemGroup or "0").strip() or 0)
 
     if not dialog_id:
         return JSONResponse({"ok": False, "error": "dialogId is required"}, status_code=400)
 
     if not item_id:
         return JSONResponse({"ok": False, "error": "itemId is required"}, status_code=400)
-
-    data = get_checklist(dialog_id, checklist_key)
-    items = data.get("items", [])
-
-    target_item = None
-    for item in items:
-        if str(item.get("id")) == item_id:
-            target_item = item
-            break
-
-    if not target_item:
-        return JSONResponse({"ok": False, "error": "item not found"}, status_code=404)
-
-    remove_item_document_file(target_item)
 
     rel_path = build_upload_rel_path(dialog_id, item_id, file.filename or "file.bin")
     abs_path = UPLOAD_ROOT / rel_path
@@ -2923,28 +3165,22 @@ async def api_checklist_upload_document(
     with open(abs_path, "wb") as f:
         f.write(file_bytes)
 
-    target_item["documentUrl"] = "/uploads/" + rel_path.replace("\\", "/")
-    target_item["documentName"] = Path(file.filename or "file.bin").name
+    updated_item = {
+        "id": item_id,
+        "documentUrl": "/uploads/" + rel_path.replace("\\", "/"),
+        "documentName": Path(file.filename or "file.bin").name,
+    }
 
-    if checklist_key == "id" and int(target_item.get("group") or 0) != 4:
-        target_item["status"] = "Есть"
-        target_item["priority"] = derive_indicator_from_status("Есть")
-
-    data["items"] = items
-    data = normalize_checklist_data(data, checklist_key)
-    save_checklist(dialog_id, data, checklist_key)
-
-    updated_item = None
-    for item in data.get("items", []):
-        if str(item.get("id")) == item_id:
-            updated_item = item
-            break
+    if checklist_key == "id" and item_group != 4:
+        updated_item["status"] = "Есть"
+        updated_item["priority"] = derive_indicator_from_status("Есть")
 
     return JSONResponse({
         "ok": True,
         "dialogId": dialog_id,
+        "checklistKey": checklist_key,
         "item": updated_item,
-        "progressPercent": data.get("progressPercent", 0),
+        "progressPercent": 0,
     })
 
 
@@ -2955,6 +3191,7 @@ async def api_checklist_remove_document(request: Request):
     dialog_id = normalize_dialog_id(payload.get("dialogId"))
     checklist_key = normalize_checklist_key(payload.get("checklistKey"))
     item_id = str(payload.get("itemId") or "").strip()
+    document_url = clean_cell_value(payload.get("documentUrl"))
 
     if not dialog_id:
         return JSONResponse({"ok": False, "error": "dialogId is required"}, status_code=400)
@@ -2962,37 +3199,30 @@ async def api_checklist_remove_document(request: Request):
     if not item_id:
         return JSONResponse({"ok": False, "error": "itemId is required"}, status_code=400)
 
-    data = get_checklist(dialog_id, checklist_key)
-    items = data.get("items", [])
+    if document_url:
+        remove_item_document_file({"documentUrl": document_url})
+    else:
+        data = get_checklist(dialog_id, checklist_key)
+        target_item = None
+        for item in data.get("items", []):
+            if str(item.get("id")) == item_id:
+                target_item = item
+                break
+        if target_item:
+            remove_item_document_file(target_item)
 
-    target_item = None
-    for item in items:
-        if str(item.get("id")) == item_id:
-            target_item = item
-            break
-
-    if not target_item:
-        return JSONResponse({"ok": False, "error": "item not found"}, status_code=404)
-
-    remove_item_document_file(target_item)
-    target_item["documentUrl"] = ""
-    target_item["documentName"] = ""
-
-    data["items"] = items
-    data = normalize_checklist_data(data, checklist_key)
-    save_checklist(dialog_id, data, checklist_key)
-
-    updated_item = None
-    for item in data.get("items", []):
-        if str(item.get("id")) == item_id:
-            updated_item = item
-            break
+    updated_item = {
+        "id": item_id,
+        "documentUrl": "",
+        "documentName": "",
+    }
 
     return JSONResponse({
         "ok": True,
         "dialogId": dialog_id,
+        "checklistKey": checklist_key,
         "item": updated_item,
-        "progressPercent": data.get("progressPercent", 0),
+        "progressPercent": 0,
     })
 
 
@@ -3030,6 +3260,7 @@ async def api_checklist_close_session(request: Request):
     checklist_key = normalize_checklist_key(payload.get("checklistKey"))
     changes = payload.get("changes") or []
     editor = payload.get("editor") or {}
+    session_data = payload.get("data") or {}
 
     if not dialog_id:
         write_debug_log("close_session_invalid", {
@@ -3046,7 +3277,16 @@ async def api_checklist_close_session(request: Request):
         })
         return JSONResponse({"ok": True, "skipped": True, "reason": "no changes"})
 
-    data = get_checklist(dialog_id, checklist_key)
+    if session_data:
+        session_data = dict(session_data)
+        session_data["checklistKey"] = checklist_key
+        session_data["resolvedDialogId"] = dialog_id
+        data = normalize_checklist_data(session_data, checklist_key)
+        data["resolvedDialogId"] = dialog_id
+        save_checklist(dialog_id, data, checklist_key)
+    else:
+        data = get_checklist(dialog_id, checklist_key)
+
     message = build_checklist_chat_message(data, changes, editor)
 
     result = bitrix_webhook_call("im.message.add", {
