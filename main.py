@@ -194,6 +194,106 @@ CONCEPT_GROUPS = [
     },
 ]
 
+OPR_GROUPS = [
+    {
+        "id": 1,
+        "title": "Генеральный план",
+        "items": [
+            "схема генплана с указанием проектируемых и существующих зданий, сооружений, площадок, парковок, технико-экономическими показателями (расчетными и нормативными)",
+            "схема существующих СЗЗ, водоохранных зон, приаэродромных территорий, территорий и зон ОКН, зон ЗСО водозаборов, оползнеопасных зон, подтопления и затопления и т.д.",
+            "схема зонирования территории по функционалу",
+            "схема пешеходно-транспортных связей",
+            "схема пожарных проездов",
+            "принципиальная схема благоустройства",
+            "принципиальная схема вертикальной планировки",
+            "принципиальная схема сводного плана сетей",
+        ],
+    },
+    {
+        "id": 2,
+        "title": "Архитектурные решения",
+        "items": [
+            "схемы функционального зонирования",
+            "планировки",
+            "разрезы",
+            "схема вертикальных связей и потоков",
+            "технико-экономические показатели",
+        ],
+    },
+    {
+        "id": 3,
+        "title": "Конструктивные решения",
+        "items": [
+            "принципиальные схемы несущих конструкций",
+            "блок-схема разделения зданий на блоки (при необходимости)",
+        ],
+    },
+    {
+        "id": 4,
+        "title": "Технологические решения",
+        "items": [
+            "принципиальные технологические решения с указанием наименований помещений, потоков",
+            "количество сотрудников/посетителей",
+            "режим работы",
+        ],
+    },
+    {
+        "id": 5,
+        "title": "Электроснабжение",
+        "items": [
+            "принципиальный план наружных сетей электроснабжения",
+            "принципиальная схема электроснабжения",
+            "места расстановки основного щитового оборудования на планах (ВРУ, ГРЩ)",
+            "сбор укрупненных нагрузок, категории электроснабжения",
+        ],
+    },
+    {
+        "id": 6,
+        "title": "Водоснабжение и водоотведение",
+        "items": [
+            "принципиальный план наружных сетей водоснабжения и водоотведения",
+            "принципиальные схемы водоснабжения и водоотведения",
+            "места прохода основных стояков сетей",
+            "сбор укрупненных нагрузок",
+        ],
+    },
+    {
+        "id": 7,
+        "title": "Отопление, вентиляция и кондиционирование",
+        "items": [
+            "блок-схема теплоснабжения",
+            "планы принципиального размещения вентоборудования и кондиционирования",
+            "план-схема с размещением вертикальных шахт размещения вентиляции и трубопроводов",
+            "принципиальные схемы системы вентиляции",
+            "принципиальные схемы системы отопления",
+            "принципиальные схемы системы кондиционирования",
+            "принципиальные схемы тепловой сети",
+        ],
+    },
+    {
+        "id": 8,
+        "title": "Противопожарные системы",
+        "items": [
+            "схемы путей эвакуации",
+            "схема разделения на пожарные отсеки",
+            "схемы противопожарных преград",
+            "схема противопожарного водопровода",
+        ],
+    },
+    {
+        "id": 9,
+        "title": "Карточка согласования основных материалов и оборудования",
+        "items": [
+            "карточка согласования основных материалов и оборудования",
+        ],
+    },
+    {
+        "id": 10,
+        "title": "Не требуется",
+        "items": [],
+    },
+]
+
 STATUS_OPTIONS = [
     "",
     "Есть",
@@ -207,6 +307,8 @@ PRIORITY_OPTIONS = ["white", "green", "gray"]
 def build_default_groups(checklist_key: str = "id"):
     if checklist_key == "concept":
         return [{"id": group["id"], "title": group["title"]} for group in CONCEPT_GROUPS]
+    if checklist_key == "opr":
+        return [{"id": group["id"], "title": group["title"]} for group in OPR_GROUPS]
 
     return [
         {"id": group_id, "title": group_data["title"]}
@@ -247,6 +349,33 @@ def resolve_concept_group_id_by_item_id_or_name(item: dict) -> int:
         for order, spec in enumerate(group["items"], start=1):
             expected_id = f"concept_g{group['id']}_{order}"
             if item_id == expected_id or name == spec["name"]:
+                return group["id"]
+
+    current_group = int(item.get("group") or 1)
+    return 1 if current_group == 10 else current_group
+
+
+def resolve_opr_group_id_by_item_id_or_name(item: dict) -> int:
+    item_id = str(item.get("id") or "")
+    name = str(item.get("name") or "").strip()
+
+    if item_id.startswith("opr_g"):
+        match = item_id.split("_", 2)
+        if len(match) > 1 and match[1].startswith("g"):
+            try:
+                group_id = int(match[1][1:])
+                if group_id != 10:
+                    return group_id
+            except Exception:
+                pass
+
+    for group in OPR_GROUPS:
+        if group["id"] == 10:
+            continue
+
+        for order, item_name in enumerate(group["items"], start=1):
+            expected_id = f"opr_g{group['id']}_{order}"
+            if item_id == expected_id or name == item_name:
                 return group["id"]
 
     current_group = int(item.get("group") or 1)
@@ -393,6 +522,37 @@ def build_default_checklist_template(dialog_id: str = "", checklist_key: str = "
             "notice": "",
         }, "concept")
 
+    if checklist_key == "opr":
+        for group in OPR_GROUPS:
+            if group["id"] == 10:
+                continue
+
+            for order, name in enumerate(group["items"], start=1):
+                items.append({
+                    "id": f"opr_g{group['id']}_{order}",
+                    "group": group["id"],
+                    "order": order,
+                    "name": name,
+                    "priority": "white",
+                    "status": "",
+                    "plannedDate": "",
+                    "extraInfo": "",
+                    "documentUrl": "",
+                    "documentName": "",
+                    "isCustom": False,
+                })
+
+        return normalize_checklist_data({
+            "title": "Чек-лист ОПР",
+            "checklistKey": "opr",
+            "collabTitle": "",
+            "contractDeadline": "",
+            "startDate": "",
+            "groups": build_default_groups("opr"),
+            "items": items,
+            "notice": "",
+        }, "opr")
+
     for group_id, group_data in CHECKLIST_GROUPS.items():
         if group_id == 4:
             continue
@@ -476,6 +636,23 @@ def calculate_concept_progress(items: list) -> dict:
     }
 
 
+def calculate_opr_progress(items: list) -> dict:
+    items = items or []
+
+    active_items = [item for item in items if normalize_status(item.get("status")) != "Не требуется"]
+    completed_items = [item for item in active_items if normalize_status(item.get("status")) == "Есть"]
+
+    active_count = len(active_items)
+    completed_count = len(completed_items)
+    progress_percent = round((completed_count / active_count) * 100) if active_count else 0
+
+    return {
+        "activeCount": active_count,
+        "completedCount": completed_count,
+        "progressPercent": progress_percent,
+    }
+
+
 def normalize_checklist_data(data: dict, checklist_key: str = "id") -> dict:
     data = dict(data or {})
     checklist_key = str(checklist_key or data.get("checklistKey") or "id").strip() or "id"
@@ -526,6 +703,63 @@ def normalize_checklist_data(data: dict, checklist_key: str = "id") -> dict:
             "contractDeadline": "",
             "startDate": "",
             "groups": [{"id": group["id"], "title": group["title"]} for group in CONCEPT_GROUPS],
+            "projectChecklists": build_project_checklists(),
+            "items": normalized_items,
+            "notice": data.get("notice", ""),
+            "activeCount": progress["activeCount"],
+            "completedCount": progress["completedCount"],
+            "progressPercent": progress["progressPercent"],
+        }
+
+    if checklist_key == "opr":
+        raw_items = data.get("items", []) or []
+        normalized_items = []
+
+        for item in raw_items:
+            item = dict(item or {})
+            name = clean_cell_value(item.get("name"))
+            if not name:
+                continue
+
+            status = normalize_status(item.get("status"))
+            group_id = int(item.get("group") or 0)
+            if status == "Не требуется":
+                group_id = 10
+            elif group_id == 10 or not group_id:
+                group_id = resolve_opr_group_id_by_item_id_or_name(item)
+
+            normalized_items.append({
+                "id": str(item.get("id") or ""),
+                "group": group_id,
+                "order": int(item.get("order") or 0),
+                "name": name,
+                "priority": derive_indicator_from_status(status),
+                "status": status,
+                "plannedDate": normalize_date_string(item.get("plannedDate")),
+                "extraInfo": clean_cell_value(item.get("extraInfo")),
+                "documentUrl": clean_cell_value(item.get("documentUrl")),
+                "documentName": clean_cell_value(item.get("documentName")),
+                "isCustom": bool(item.get("isCustom", False)),
+            })
+
+        normalized_items.sort(key=lambda x: (x["group"], x["order"], x["name"]))
+
+        for group in OPR_GROUPS:
+            group_items = [x for x in normalized_items if x["group"] == group["id"]]
+            for order, item in enumerate(group_items, start=1):
+                item["order"] = order
+                if not item.get("id"):
+                    item["id"] = f"opr_g{group['id']}_{order}"
+
+        progress = calculate_opr_progress(normalized_items)
+
+        return {
+            "title": data.get("title") or "Чек-лист ОПР",
+            "checklistKey": "opr",
+            "collabTitle": clean_cell_value(data.get("collabTitle")),
+            "contractDeadline": "",
+            "startDate": "",
+            "groups": [{"id": group["id"], "title": group["title"]} for group in OPR_GROUPS],
             "projectChecklists": build_project_checklists(),
             "items": normalized_items,
             "notice": data.get("notice", ""),
@@ -724,7 +958,7 @@ def split_changes(changes: list) -> tuple[list, list, list, list, list]:
 
         if field == "status":
             status_changes.append(change)
-        elif field == "plan":
+        elif field in {"plan", "plannedDate"}:
             date_changes.append(change)
         elif field == "document":
             document_changes.append(change)
@@ -977,6 +1211,100 @@ def build_checklist_chat_message(data: dict, changes: list, editor: dict) -> str
     ]
     dialog_id = normalize_dialog_id(data.get("resolvedDialogId") or data.get("dialogId") or "")
     checklist_key = normalize_checklist_key(data.get("checklistKey") or "id")
+    link_url = build_checklist_message_link(dialog_id, checklist_key)
+    if link_url:
+        parts.extend([
+            "",
+            f"[URL={link_url}]Чтобы посмотреть весь чек-лист нажмите на этот текст[/URL]",
+        ])
+    else:
+        parts.extend([
+            "",
+            "Чтобы посмотреть весь чек-лист нажмите на этот текст",
+        ])
+    return "\n".join(parts).strip()
+
+
+def format_plan_change_line(change: dict) -> str:
+    item_name = str(change.get("itemName") or "").strip() or "Без названия"
+    old_value = str(change.get("oldValue") or "").strip()
+    new_value = str(change.get("newValue") or "").strip()
+
+    arrow = format_change_arrow(old_value, new_value)
+    field = str(change.get("field") or "").strip()
+    field_title = "Планируемая дата" if field == "plannedDate" else "План"
+    return f"📆{item_name} / {field_title}: {arrow}"
+
+
+def build_recent_changes_text(
+    changes: list,
+    checklist_title: str = "Чек-лист ИД",
+    checklist_key: str = "id"
+) -> str:
+    status_changes, date_changes, document_changes, add_item_changes, extra_info_changes = split_changes(changes)
+    checklist_title = clean_cell_value(checklist_title) or "Чек-лист ИД"
+    checklist_key = normalize_checklist_key(checklist_key)
+
+    lines = [
+        f"[B]✏️ИЗМЕНЕНИЯ В {checklist_title.upper()}[/B]",
+        "",
+    ]
+
+    if status_changes:
+        lines.append("[B]Статусы:[/B]")
+        lines.append("")
+        for change in status_changes:
+            lines.append(format_status_change_line(change))
+        lines.append("")
+
+    if date_changes:
+        lines.append("[B]Даты:[/B]")
+        lines.append("")
+        for change in date_changes:
+            lines.append(format_plan_change_line(change))
+        lines.append("")
+
+    if checklist_key != "opr" and document_changes:
+        lines.append("[B]Документы:[/B]")
+        lines.append("")
+        for change in document_changes:
+            lines.append(format_document_change_line(change))
+        lines.append("")
+
+    if checklist_key != "opr" and add_item_changes:
+        lines.append("[B]Пункты:[/B]")
+        lines.append("")
+        for change in add_item_changes:
+            lines.append(format_add_item_change_line(change))
+        lines.append("")
+
+    if checklist_key != "opr" and extra_info_changes:
+        lines.append("[B]Доп информация:[/B]")
+        lines.append("")
+        for change in extra_info_changes:
+            lines.append(format_extra_info_change_line(change))
+        lines.append("")
+
+    has_visible_changes = bool(status_changes or date_changes)
+    if checklist_key != "opr":
+        has_visible_changes = has_visible_changes or bool(document_changes or add_item_changes or extra_info_changes)
+
+    if not has_visible_changes:
+        lines.append("Изменений нет")
+        lines.append("")
+
+    return "\n".join(lines).strip()
+
+
+def build_checklist_chat_message(data: dict, changes: list, editor: dict) -> str:
+    checklist_title = (data.get("title") or "Чек-лист ИД").strip()
+    checklist_key = normalize_checklist_key(data.get("checklistKey") or "id")
+    parts = [
+        build_recent_changes_text(changes, checklist_title, checklist_key),
+        "",
+        build_editor_text(editor),
+    ]
+    dialog_id = normalize_dialog_id(data.get("resolvedDialogId") or data.get("dialogId") or "")
     link_url = build_checklist_message_link(dialog_id, checklist_key)
     if link_url:
         parts.extend([
@@ -2350,7 +2678,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                     return rawValue;
                 }}
 
-                return unit.startswith('%') ? rawValue + unit : rawValue + ' ' + unit;
+                return unit.startsWith('%') ? rawValue + unit : rawValue + ' ' + unit;
             }}
             function buildClientItemId(prefix) {{
                 return prefix + '_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
@@ -2849,6 +3177,302 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                     }});
                 }});
             }}
+            function resolveOprGroupId(item) {{
+                const itemId = String(item && item.id || '');
+                if (itemId.startsWith('opr_g')) {{
+                    const match = itemId.match(/^opr_g(\\d+)_/);
+                    if (match) {{
+                        const groupId = Number(match[1]);
+                        if (groupId && groupId !== 10) {{
+                            return groupId;
+                        }}
+                    }}
+                }}
+
+                const name = String(item && item.name || '').trim();
+                const byName = groups.find(group => Number(group.id) !== 10 && Array.isArray(items) && items.some(existing =>
+                    existing !== item &&
+                    Number(existing.group) === Number(group.id) &&
+                    String(existing.name || '').trim() === name
+                ));
+                if (byName) {{
+                    return Number(byName.id);
+                }}
+
+                return 1;
+            }}
+            function oprIndicatorClass(item) {{
+                const status = normalizeStatus(item && item.status);
+                if (status === 'Р•СЃС‚СЊ') return 'status-indicator green';
+                if (status === 'РќРµС‚' || status === 'РќРµ С‚СЂРµР±СѓРµС‚СЃСЏ') return 'status-indicator gray';
+                return 'status-indicator';
+            }}
+            function buildOprStatusCell(item) {{
+                return `
+                    <select class="status-select" data-role="opr-status" data-item-id="${{esc(item.id)}}">
+                        <option value="" ${{normalizeStatus(item.status) === '' ? 'selected' : ''}}></option>
+                        <option value="Р•СЃС‚СЊ" ${{normalizeStatus(item.status) === 'Р•СЃС‚СЊ' ? 'selected' : ''}}>Р•СЃС‚СЊ</option>
+                        <option value="РќРµС‚" ${{normalizeStatus(item.status) === 'РќРµС‚' ? 'selected' : ''}}>РќРµС‚</option>
+                        <option value="РќРµ С‚СЂРµР±СѓРµС‚СЃСЏ" ${{normalizeStatus(item.status) === 'РќРµ С‚СЂРµР±СѓРµС‚СЃСЏ' ? 'selected' : ''}}>РќРµ С‚СЂРµР±СѓРµС‚СЃСЏ</option>
+                    </select>
+                `;
+            }}
+            function buildOprExtraCell(item) {{
+                return `<textarea class="concept-extra-textarea" data-role="opr-extra" data-item-id="${{esc(item.id)}}" placeholder="Р”РѕРї РёРЅС„РѕСЂРјР°С†РёСЏ">${{esc(item.extraInfo || '')}}</textarea>`;
+            }}
+            function renderOprGroup(group) {{
+                const groupItems = getItemsByGroup(group.id);
+                const allowAdd = Number(group.id) !== 10;
+                const rows = groupItems.map(item => `
+                    <div class="row" style="grid-template-columns: 1.05fr 110px 130px 136px 1.25fr;" data-item-id="${{esc(item.id)}}">
+                        <div class="td">
+                            <div class="cell-name">
+                                <div class="${{oprIndicatorClass(item)}}"></div>
+                                <div class="item-name" style="${{normalizeStatus(item.status) === 'РќРµ С‚СЂРµР±СѓРµС‚СЃСЏ' ? 'text-decoration:line-through;color:#98a2b3;' : ''}}">
+                                    ${{esc(item.name)}}
+                                </div>
+                            </div>
+                        </div>
+                        <div class="td">${{buildDocumentCell(item)}}</div>
+                        <div class="td">${{buildOprStatusCell(item)}}</div>
+                        <div class="td"><input class="date-input" type="date" data-role="opr-planned-date" data-item-id="${{esc(item.id)}}" value="${{esc(toInputDate(item.plannedDate || ''))}}"></div>
+                        <div class="td">${{buildOprExtraCell(item)}}</div>
+                    </div>
+                `).join('');
+
+                const addBlock = allowAdd ? `
+                    <div class="add-item-row">
+                        <input class="add-item-input" id="oprAddItemInput_${{group.id}}" type="text" placeholder="РќРѕРІС‹Р№ РїСѓРЅРєС‚">
+                        <button class="add-item-btn" type="button" data-role="opr-add-item" data-group-id="${{group.id}}">Р”РѕР±Р°РІРёС‚СЊ РїСѓРЅРєС‚</button>
+                    </div>
+                ` : '';
+
+                return `<div class="group-block"><div class="group-title">${{esc(group.title)}}</div>${{rows}}${{addBlock}}</div>`;
+            }}
+            function buildOprTableHtml(oprGroups) {{
+                return `
+                    <div class="thead">
+                        <div class="thead-top" style="grid-template-columns: 1.05fr 110px 130px 136px 1.25fr;">
+                            <div class="th">РџСѓРЅРєС‚</div>
+                            <div class="th">Р”РѕРєСѓРјРµРЅС‚</div>
+                            <div class="th">РЎС‚Р°С‚СѓСЃ</div>
+                            <div class="th">РџР»Р°РЅРёСЂСѓРµРјР°СЏ РґР°С‚Р°</div>
+                            <div class="th">Р”РѕРї РёРЅС„РѕСЂРјР°С†РёСЏ</div>
+                        </div>
+                    </div>
+                    <div>${{oprGroups.map(renderOprGroup).join('')}}</div>
+                `;
+            }}
+            function renderOprTables() {{
+                if (!leftTableEl || !rightTableEl || !tablesGridEl) {{
+                    throw new Error('opr table containers not found');
+                }}
+
+                tablesGridEl.style.gridTemplateColumns = '1fr 1fr';
+                if (tablePanels[1]) {{
+                    tablePanels[1].style.display = '';
+                }}
+
+                const visibleGroups = groups.filter(group => {{
+                    if (Number(group.id) !== 10) return true;
+                    return items.some(x => Number(x.group) === 10);
+                }});
+
+                const leftGroups = visibleGroups.filter(group => [1, 3, 5, 7, 9].includes(Number(group.id)));
+                const rightGroups = visibleGroups.filter(group => [2, 4, 6, 8, 10].includes(Number(group.id)));
+
+                leftTableEl.innerHTML = buildOprTableHtml(leftGroups);
+                rightTableEl.innerHTML = buildOprTableHtml(rightGroups);
+            }}
+            const baseCreateLocalItem = createLocalItem;
+            createLocalItem = function (groupId, name, checklistKey) {{
+                if (checklistKey === 'opr') {{
+                    const groupItems = getItemsByGroup(groupId);
+                    const nextOrder = groupItems.length + 1;
+                    return {{
+                        id: buildClientItemId('opr_g' + groupId + '_custom'),
+                        group: groupId,
+                        order: nextOrder,
+                        name,
+                        priority: 'white',
+                        status: '',
+                        plannedDate: '',
+                        extraInfo: '',
+                        documentUrl: '',
+                        documentName: '',
+                        isCustom: true
+                    }};
+                }}
+                return baseCreateLocalItem(groupId, name, checklistKey);
+            }};
+            const baseCalculateProgress = calculateProgress;
+            calculateProgress = function () {{
+                if (currentChecklistKey === 'opr') {{
+                    if (!progressValueEl || !progressBarEl) {{
+                        return;
+                    }}
+                    const activeItems = items.filter(x => normalizeStatus(x.status) !== 'РќРµ С‚СЂРµР±СѓРµС‚СЃСЏ');
+                    const completedItems = activeItems.filter(x => normalizeStatus(x.status) === 'Р•СЃС‚СЊ');
+                    const activeCount = activeItems.length;
+                    const completedCount = completedItems.length;
+                    const percent = activeCount ? Math.round((completedCount / activeCount) * 100) : 0;
+                    progressValueEl.textContent = percent + '%';
+                    progressBarEl.style.width = percent + '%';
+                    return;
+                }}
+                return baseCalculateProgress();
+            }};
+            const baseRenderTables = renderTables;
+            renderTables = function () {{
+                if (currentChecklistKey === 'opr') {{
+                    renderOprTables();
+                    return;
+                }}
+                return baseRenderTables();
+            }};
+            const baseBindEvents = bindEvents;
+            bindEvents = function () {{
+                baseBindEvents();
+
+                document.querySelectorAll('[data-role="opr-status"]').forEach(el => {{
+                    el.addEventListener('change', function() {{
+                        const item = items.find(x => x.id === this.dataset.itemId);
+                        if (!item) return;
+
+                        const oldValue = item.status || '';
+                        const newValue = this.value;
+                        item.status = newValue;
+
+                        if (newValue === 'РќРµ С‚СЂРµР±СѓРµС‚СЃСЏ') {{
+                            item.group = 10;
+                        }} else if (Number(item.group) === 10) {{
+                            item.group = resolveOprGroupId(item);
+                        }}
+
+                        pushSessionChange(item.id, item.name, 'status', oldValue, newValue);
+                        debugLog('opr_status_changed', {{
+                            itemId: item.id,
+                            itemName: item.name,
+                            oldValue: oldValue || '',
+                            newValue: newValue || ''
+                        }});
+                        renderAll();
+                    }});
+                }});
+
+                document.querySelectorAll('[data-role="opr-planned-date"]').forEach(el => {{
+                    el.addEventListener('change', function() {{
+                        const item = items.find(x => x.id === this.dataset.itemId);
+                        if (!item) return;
+
+                        const oldValue = item.plannedDate || '';
+                        const newValue = fromInputDate(this.value);
+                        item.plannedDate = newValue;
+                        pushSessionChange(item.id, item.name, 'plannedDate', oldValue, newValue);
+                        debugLog('opr_planned_date_changed', {{
+                            itemId: item.id,
+                            itemName: item.name,
+                            oldValue: oldValue || '',
+                            newValue: newValue || ''
+                        }});
+                        renderAll();
+                    }});
+                }});
+
+                document.querySelectorAll('[data-role="opr-extra"]').forEach(el => {{
+                    el.dataset.initialValue = String(el.value || '');
+                    el.dataset.baseHeight = '32';
+                    el.style.height = '32px';
+                    el.addEventListener('input', function () {{
+                        autoGrowTextarea(this);
+                    }});
+
+                    const handler = function () {{
+                        const item = items.find(x => x.id === this.dataset.itemId);
+                        if (!item) return;
+
+                        const oldValue = item.extraInfo || '';
+                        const newValue = this.value;
+                        item.extraInfo = newValue;
+                        pushSessionChange(item.id, item.name, 'extraInfo', oldValue, newValue);
+                        debugLog('opr_extra_changed', {{
+                            itemId: item.id,
+                            itemName: item.name
+                        }});
+                        renderAll();
+                    }};
+
+                    el.addEventListener('change', handler);
+                    el.addEventListener('blur', handler);
+                }});
+
+                document.querySelectorAll('[data-role="opr-add-item"]').forEach(btn => {{
+                    btn.addEventListener('click', function() {{
+                        const groupId = Number(this.dataset.groupId);
+                        const input = document.getElementById('oprAddItemInput_' + groupId);
+                        if (!input) return;
+                        const name = (input.value || '').trim();
+                        if (!name) return;
+
+                        const newItem = createLocalItem(groupId, name, 'opr');
+                        items.push(newItem);
+                        pushSessionChange(newItem.id, newItem.name, 'add-item', '', newItem.name);
+                        debugLog('opr_item_added', {{
+                            itemId: newItem.id,
+                            itemName: newItem.name,
+                            groupId: groupId
+                        }});
+                        input.value = '';
+                        renderAll();
+                    }});
+                }});
+            }};
+            const baseLoadChecklistByKey = loadChecklistByKey;
+            loadChecklistByKey = async function (checklistKey) {{
+                const targetKey = String(checklistKey || '').trim() || 'id';
+                if (targetKey !== 'opr') {{
+                    return baseLoadChecklistByKey(targetKey);
+                }}
+                if (targetKey === currentChecklistKey) {{
+                    return;
+                }}
+
+                await flushCurrentChecklistSummary();
+                setSaveState('saving', 'Р—Р°РіСЂСѓР¶Р°РµРј...');
+
+                try {{
+                    const cachedData = checklistCache[targetKey];
+                    if (cachedData) {{
+                        applyChecklistData(deepClone(cachedData));
+                        renderAll();
+                        debugLog('checklist_switched_cached', {{
+                            checklistKey: targetKey
+                        }});
+                        setSaveState('', 'РЎРѕС…СЂР°РЅРµРЅРѕ');
+                        return;
+                    }}
+
+                    const response = await fetch(
+                        '/api/checklist?dialogId=' + encodeURIComponent(dialogId) +
+                        '&checklistKey=' + encodeURIComponent(targetKey)
+                    );
+                    const result = await response.json();
+
+                    if (!response.ok) {{
+                        throw new Error(result.error || 'load checklist failed');
+                    }}
+
+                    applyChecklistData(result);
+                    renderAll();
+                    debugLog('checklist_switched', {{
+                        checklistKey: targetKey
+                    }});
+                    setSaveState('', 'РЎРѕС…СЂР°РЅРµРЅРѕ');
+                }} catch (e) {{
+                    console.log('loadChecklistByKey error:', e);
+                    setSaveState('error', 'РћС€РёР±РєР° Р·Р°РіСЂСѓР·РєРё С‡РµРє-Р»РёСЃС‚Р°');
+                }}
+            }};
             function safeInitBx24ForPopup() {{
                 try {{
                     if (window.BX24 && typeof window.BX24.init === 'function') {{
@@ -2974,7 +3598,7 @@ async def api_checklist_update_item(request: Request):
     if not item_id:
         return JSONResponse({"ok": False, "error": "itemId is required"}, status_code=400)
 
-    allowed_fields = {"priority", "status", "plan", "fact", "extraInfo"}
+    allowed_fields = {"priority", "status", "plan", "fact", "extraInfo", "plannedDate"}
     if field not in allowed_fields:
         return JSONResponse({"ok": False, "error": "invalid field"}, status_code=400)
 
@@ -3016,6 +3640,15 @@ async def api_checklist_update_item(request: Request):
                         target_item["priority"] = "white"
                 else:
                     target_item["priority"] = "green" if new_value else "white"
+        elif checklist_key == "opr":
+            new_status = normalize_status(value)
+            target_item["status"] = new_status
+            target_item["priority"] = derive_indicator_from_status(new_status)
+
+            if new_status == "Не требуется":
+                target_item["group"] = 10
+            elif int(target_item.get("group") or 0) == 10:
+                target_item["group"] = resolve_opr_group_id_by_item_id_or_name(target_item)
         else:
             new_status = normalize_status(value)
             target_item["status"] = new_status
@@ -3029,6 +3662,8 @@ async def api_checklist_update_item(request: Request):
         target_item["plan"] = normalize_date_string(value)
     elif field == "fact":
         target_item["fact"] = normalize_date_string(value)
+    elif field == "plannedDate":
+        target_item["plannedDate"] = normalize_date_string(value)
     elif field == "extraInfo":
         target_item["extraInfo"] = clean_cell_value(value)
 
@@ -3098,6 +3733,9 @@ async def api_checklist_add_item(request: Request):
     if checklist_key == "concept" and group_id not in [group["id"] for group in CONCEPT_GROUPS if group["id"] != 10]:
         return JSONResponse({"ok": False, "error": "invalid groupId"}, status_code=400)
 
+    if checklist_key == "opr" and group_id not in [group["id"] for group in OPR_GROUPS if group["id"] != 10]:
+        return JSONResponse({"ok": False, "error": "invalid groupId"}, status_code=400)
+
     if not name:
         return JSONResponse({"ok": False, "error": "name is required"}, status_code=400)
 
@@ -3124,6 +3762,20 @@ async def api_checklist_add_item(request: Request):
             "documentName": "",
             "isCustom": True,
             "priority": "white",
+        }
+    elif checklist_key == "opr":
+        new_item = {
+            "id": f"opr_g{group_id}_custom_{uuid.uuid4().hex[:8]}",
+            "group": group_id,
+            "order": next_order,
+            "name": name,
+            "priority": "white",
+            "status": "",
+            "plannedDate": "",
+            "extraInfo": "",
+            "documentUrl": "",
+            "documentName": "",
+            "isCustom": True,
         }
     else:
         new_item = {
@@ -3306,6 +3958,25 @@ async def api_checklist_close_session(request: Request):
         save_checklist(dialog_id, data, checklist_key)
     else:
         data = get_checklist(dialog_id, checklist_key)
+
+    visible_fields = {"status", "plan", "document", "add-item", "extraInfo"}
+    if checklist_key == "opr":
+        visible_fields = {"status", "plannedDate"}
+
+    if not any(str(change.get("field") or "").strip() in visible_fields for change in changes):
+        write_debug_log("close_session_message_skipped", {
+            "dialogId": dialog_id,
+            "checklistKey": checklist_key,
+            "reason": "no visible message changes",
+            "changesCount": len(changes),
+        })
+        return JSONResponse({
+            "ok": True,
+            "dialogId": dialog_id,
+            "checklistKey": checklist_key,
+            "saved": True,
+            "messageSkipped": True,
+        })
 
     message = build_checklist_chat_message(data, changes, editor)
 
