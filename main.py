@@ -906,8 +906,9 @@ def build_checklist_message_link(dialog_id: str, checklist_key: str) -> str:
         return ""
 
     base_url = f"{parsed.scheme}://{parsed.netloc}"
+    app_path = APP_PORTAL_PATH.rstrip("/")
     return (
-        f"{base_url}{APP_PORTAL_PATH}"
+        f"{base_url}{app_path}/popup"
         f"?dialogId={quote(dialog_id)}&checklistKey={quote(checklist_key)}"
     )
 
@@ -1436,11 +1437,11 @@ def health():
 
 
 @app.get("/", response_class=HTMLResponse)
-def home_get(dialogId: str = "", mode: str = ""):
+def home_get(dialogId: str = "", checklistKey: str = "id", mode: str = ""):
     dialog_id = normalize_dialog_id(dialogId)
 
     if dialog_id:
-        return popup_get(dialog_id)
+        return popup_get(dialog_id, checklistKey)
 
     return app_home_html()
 
@@ -1610,7 +1611,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
             .status-indicator.gray {{ background:#9ca3af; border-color:#9ca3af; }}
             .item-name {{ font-size:13px; font-weight:700; color:#1f2328; line-height:1.15; min-width:0; word-break:break-word; max-width:165px; }}
             .status-select,.date-input {{ width:100%; border:1px solid #d0d7de; border-radius:8px; padding:6px 8px; font-size:12px; background:#fff; }}
-            .concept-extra-textarea {{ width:100%; min-height:96px; border:1px solid #d0d7de; border-radius:8px; padding:8px; font-size:12px; background:#fff; resize:vertical; overflow:hidden; line-height:1.4; }}
+            .concept-extra-textarea {{ width:100%; height:32px; min-height:32px; border:1px solid #d0d7de; border-radius:8px; padding:6px 8px; font-size:12px; background:#fff; resize:vertical; overflow:hidden; line-height:1.35; }}
             .doc-btn,.upload-btn,.add-item-btn {{ display:inline-block; width:100%; text-align:center; padding:6px 8px; border:1px solid #d0d7de; border-radius:8px; background:#f8fafc; color:#1f2328; font-size:12px; text-decoration:none; cursor:pointer; }}
             .doc-btn:hover,.upload-btn:hover,.side-link:hover,.add-item-btn:hover {{ background:#f1f5f9; }}
             .add-item-row {{ padding:9px 12px 10px; min-height:52px; border-top:1px solid #edf0f2; background:#fcfcfd; display:flex; gap:8px; align-items:center; justify-content:flex-start; }}
@@ -2306,19 +2307,24 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
             function autoGrowTextarea(el) {{
                 if (!el) return;
 
-                const baseHeight = Number(el.dataset.baseHeight || 0) || Math.max(el.offsetHeight || 0, 96);
+                const baseHeight = Number(el.dataset.baseHeight || 0) || 32;
+                const initialValue = String(el.dataset.initialValue || '');
                 el.dataset.baseHeight = String(baseHeight);
                 el.style.height = baseHeight + 'px';
 
+                if (String(el.value || '').length <= initialValue.length) {{
+                    return;
+                }}
+
                 let nextHeight = baseHeight;
                 while (el.scrollHeight > el.clientHeight && nextHeight < 1600) {{
-                    nextHeight += baseHeight;
+                    nextHeight *= 2;
                     el.style.height = nextHeight + 'px';
                 }}
             }}
             function extractConceptUnit(placeholder) {{
                 const raw = String(placeholder || '').trim();
-                const match = raw.match(/^_+\\s*(.+)$/);
+                const match = raw.match(new RegExp('^_+\\s*(.+)$'));
                 return match ? match[1].trim() : '';
             }}
             function formatConceptTextStatus(value, placeholder) {{
@@ -2392,7 +2398,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                 const name = String(item && item.name || '').trim();
 
                 if (itemId.startsWith('concept_g')) {{
-                    const match = itemId.match(/^concept_g(\\d+)_/);
+                    const match = itemId.match(new RegExp('^concept_g(\\d+)_'));
                     if (match) {{
                         const groupId = Number(match[1]);
                         if (groupId && groupId !== 10) {{
@@ -2619,7 +2625,9 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                 }});
 
                 document.querySelectorAll('[data-role="concept-extra"]').forEach(el => {{
-                    autoGrowTextarea(el);
+                    el.dataset.initialValue = String(el.value || '');
+                    el.dataset.baseHeight = '32';
+                    el.style.height = '32px';
                     el.addEventListener('input', function () {{
                         autoGrowTextarea(this);
                     }});
