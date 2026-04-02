@@ -1,4 +1,4 @@
-import os
+﻿import os
 import threading
 import uuid
 from collections import defaultdict
@@ -11,12 +11,20 @@ import json
 import html
 import sqlite3
 import re
-from io import BytesIO
 from datetime import datetime
 from urllib.parse import quote, urlparse
-import openpyxl
 
 app = FastAPI()
+
+
+def normalize_app_base_path(value: str) -> str:
+    raw = str(value or "").strip()
+    if not raw or raw == "/":
+        return ""
+    if not raw.startswith("/"):
+        raw = "/" + raw
+    return raw.rstrip("/")
+
 
 BASE_DIR = Path(__file__).resolve().parent
 APP_VERSION = "2026-04-02-launch-refactor-v1"
@@ -27,6 +35,8 @@ DB_DIR.mkdir(parents=True, exist_ok=True)
 DB_PATH = str(DB_DIR / "app.db")
 
 APP_PORTAL_PATH = "/marketplace/app/84/"
+APP_BASE_PATH = normalize_app_base_path(os.getenv("APP_BASE_PATH", "").strip())
+PUBLIC_APP_BASE_URL = os.getenv("PUBLIC_APP_BASE_URL", "").strip().rstrip("/")
 TECH_USER_ID = 138
 BITRIX_TECH_WEBHOOK_URL = os.getenv("BITRIX_TECH_WEBHOOK_URL", "").strip()
 
@@ -478,12 +488,42 @@ def build_upload_rel_path(dialog_id: str, item_id: str, filename: str) -> str:
     return f"checklists/{dialog_id}/{item_id}/{unique_name}"
 
 
+def extract_upload_rel_path_from_url(document_url: str) -> str:
+    doc_url = str(document_url or "").strip()
+    if not doc_url:
+        return ""
+
+    prefixes = []
+    uploads_path = build_app_path("/uploads/")
+    if uploads_path.endswith("/"):
+        prefixes.append(uploads_path)
+    else:
+        prefixes.append(uploads_path + "/")
+    prefixes.append("/uploads/")
+
+    for prefix in prefixes:
+        if doc_url.startswith(prefix):
+            return doc_url.replace(prefix, "", 1)
+
+    return ""
+
+
+def normalize_document_url(document_url: str) -> str:
+    raw = clean_cell_value(document_url)
+    if not raw:
+        return ""
+    if raw.startswith("http://") or raw.startswith("https://"):
+        return raw
+    if raw.startswith(build_app_path("/uploads/")) or raw.startswith("/uploads/"):
+        return build_app_path("/uploads/" + extract_upload_rel_path_from_url(raw))
+    return raw
+
+
 def remove_item_document_file(item: dict):
     doc_url = str(item.get("documentUrl") or "").strip()
-    if not doc_url.startswith("/uploads/"):
+    rel_path = extract_upload_rel_path_from_url(doc_url)
+    if not rel_path:
         return
-
-    rel_path = doc_url.replace("/uploads/", "", 1)
     file_path = UPLOAD_ROOT / rel_path
 
     try:
@@ -687,7 +727,7 @@ def normalize_checklist_data(data: dict, checklist_key: str = "id") -> dict:
                 "status": clean_cell_value(item.get("status")),
                 "extraInfo": clean_cell_value(item.get("extraInfo")),
                 "extraInfoPlaceholder": clean_cell_value(item.get("extraInfoPlaceholder")),
-                "documentUrl": clean_cell_value(item.get("documentUrl")),
+                "documentUrl": normalize_document_url(item.get("documentUrl")),
                 "documentName": clean_cell_value(item.get("documentName")),
                 "isCustom": bool(item.get("isCustom", False)),
                 "priority": clean_cell_value(item.get("priority")) or "white",
@@ -745,7 +785,7 @@ def normalize_checklist_data(data: dict, checklist_key: str = "id") -> dict:
                 "status": status,
                 "plannedDate": normalize_date_string(item.get("plannedDate")),
                 "extraInfo": clean_cell_value(item.get("extraInfo")),
-                "documentUrl": clean_cell_value(item.get("documentUrl")),
+                "documentUrl": normalize_document_url(item.get("documentUrl")),
                 "documentName": clean_cell_value(item.get("documentName")),
                 "isCustom": bool(item.get("isCustom", False)),
             })
@@ -807,7 +847,7 @@ def normalize_checklist_data(data: dict, checklist_key: str = "id") -> dict:
             "status": status,
             "plan": normalize_date_string(item.get("plan")),
             "fact": normalize_date_string(item.get("fact")),
-            "documentUrl": clean_cell_value(item.get("documentUrl")),
+            "documentUrl": normalize_document_url(item.get("documentUrl")),
             "documentName": clean_cell_value(item.get("documentName")),
             "isCustom": bool(item.get("isCustom", False)),
         })
@@ -875,7 +915,9 @@ def startup_event():
     init_db()
     startup_payload = build_version_payload()
     print(f"APP_VERSION={APP_VERSION}")
-    print(f"Launcher route enabled: {LAUNCHER_ROUTE}")
+    print(f"APP_BASE_PATH={APP_BASE_PATH or '/'}")
+    print(f"Launcher route enabled: {build_app_path(LAUNCHER_ROUTE)}")
+    print("Root route mode: redirect to launch when dialogId exists, fallback page otherwise")
     print(f"APP_PORTAL_PATH={APP_PORTAL_PATH}")
     print(f"DB_PATH={DB_PATH}")
     write_debug_log("startup", startup_payload)
@@ -935,11 +977,66 @@ def write_debug_log(event: str, payload: dict):
         f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
 
+def build_app_path(path: str = "/") -> str:
+    raw = str(path or "").strip() or "/"
+    if not raw.startswith("/"):
+        raw = "/" + raw
+    return f"{APP_BASE_PATH}{raw}" if APP_BASE_PATH else raw
+
+
+def get_request_app_base_path(request: Request | None = None) -> str:
+    if request is None:
+        return APP_BASE_PATH
+
+    forwarded_prefix = (
+        request.headers.get("x-forwarded-prefix")
+        or request.headers.get("x-script-name")
+        or request.scope.get("root_path")
+        or APP_BASE_PATH
+    )
+    return normalize_app_base_path(forwarded_prefix)
+
+
+def build_request_app_url(request: Request, path: str = "/") -> str:
+    base_url = str(request.base_url).rstrip("/")
+    app_base_path = get_request_app_base_path(request)
+    raw = str(path or "").strip() or "/"
+    if not raw.startswith("/"):
+        raw = "/" + raw
+    target_path = f"{app_base_path}{raw}" if app_base_path else raw
+    return f"{base_url}{target_path}"
+
+
+def build_public_app_url(path: str) -> str:
+    public_base = PUBLIC_APP_BASE_URL
+    if not public_base and BITRIX_TECH_WEBHOOK_URL:
+        parsed = urlparse(BITRIX_TECH_WEBHOOK_URL)
+        if parsed.scheme and parsed.netloc:
+            public_base = f"{parsed.scheme}://{parsed.netloc}"
+
+    if not public_base:
+        return ""
+
+    raw = str(path or "").strip() or "/"
+    if not raw.startswith("/"):
+        raw = "/" + raw
+
+    if APP_BASE_PATH and (raw == APP_BASE_PATH or raw.startswith(APP_BASE_PATH + "/")):
+        target_path = raw
+    else:
+        target_path = build_app_path(raw)
+
+    return f"{public_base}{target_path}"
+
+
 def build_version_payload() -> dict:
     return {
         "version": APP_VERSION,
+        "appBasePath": APP_BASE_PATH,
         "appPortalPath": APP_PORTAL_PATH,
-        "launcherRoute": LAUNCHER_ROUTE,
+        "publicAppBaseUrl": PUBLIC_APP_BASE_URL,
+        "launcherRoute": build_app_path(LAUNCHER_ROUTE),
+        "rootBehavior": "redirect-to-launch-when-params-exist",
         "time": datetime.now().isoformat(),
         "dbPath": DB_PATH,
         "uploadRoot": str(UPLOAD_ROOT),
@@ -1291,19 +1388,13 @@ def build_checklist_message_link(dialog_id: str, checklist_key: str) -> str:
     dialog_id = normalize_dialog_id(dialog_id)
     checklist_key = normalize_checklist_key(checklist_key)
 
-    if not BITRIX_TECH_WEBHOOK_URL:
+    if not dialog_id:
         return ""
 
-    parsed = urlparse(BITRIX_TECH_WEBHOOK_URL)
-    if not parsed.scheme or not parsed.netloc:
+    launch_url = build_public_app_url(build_relative_launch_path(dialog_id, checklist_key))
+    if not launch_url:
         return ""
-
-    base_url = f"{parsed.scheme}://{parsed.netloc}"
-    app_path = APP_PORTAL_PATH if APP_PORTAL_PATH.endswith("/") else APP_PORTAL_PATH + "/"
-    return (
-        f"{base_url}{app_path}"
-        f"?dialogId={quote(dialog_id)}&checklistKey={quote(checklist_key)}"
-    )
+    return launch_url
 
 
 def build_editor_text(editor: dict) -> str:
@@ -1601,24 +1692,27 @@ def build_relative_launch_path(dialog_id: str, checklist_key: str = "id") -> str
     dialog_id = normalize_dialog_id(dialog_id)
     checklist_key = normalize_checklist_key(checklist_key)
     query = f"dialogId={quote(dialog_id)}&checklistKey={quote(checklist_key)}"
-    return f"{LAUNCHER_ROUTE}?{query}"
+    return f"{build_app_path(LAUNCHER_ROUTE)}?{query}"
+
+
+def build_relative_popup_path(dialog_id: str, checklist_key: str = "id") -> str:
+    dialog_id = normalize_dialog_id(dialog_id)
+    checklist_key = normalize_checklist_key(checklist_key)
+    query = f"dialogId={quote(dialog_id)}&checklistKey={quote(checklist_key)}"
+    return f"{build_app_path('/popup')}?{query}"
 
 
 def build_checklist_message_link(dialog_id: str, checklist_key: str) -> str:
     dialog_id = normalize_dialog_id(dialog_id)
     checklist_key = normalize_checklist_key(checklist_key)
 
-    if not dialog_id or not BITRIX_TECH_WEBHOOK_URL:
+    if not dialog_id:
         return ""
 
-    parsed = urlparse(BITRIX_TECH_WEBHOOK_URL)
-    if not parsed.scheme or not parsed.netloc:
+    launch_url = build_public_app_url(build_relative_launch_path(dialog_id, checklist_key))
+    if not launch_url:
         return ""
-
-    base_url = f"{parsed.scheme}://{parsed.netloc}"
-    app_path = APP_PORTAL_PATH if APP_PORTAL_PATH.endswith("/") else APP_PORTAL_PATH + "/"
-    query = f"dialogId={quote(dialog_id)}&checklistKey={quote(checklist_key)}"
-    return f"{base_url}{app_path}launch?{query}"
+    return launch_url
 
 
 def build_editor_text(editor: dict) -> str:
@@ -1901,55 +1995,6 @@ def install_finish_block():
     """
 
 
-def format_cell(value):
-    if value is None:
-        return ""
-    if isinstance(value, datetime):
-        return value.strftime("%d.%m.%Y")
-    return str(value).strip()
-
-
-def parse_xlsx_to_checklist(file_bytes: bytes):
-    wb = openpyxl.load_workbook(BytesIO(file_bytes), data_only=True)
-    ws = wb[wb.sheetnames[0]]
-
-    items = []
-
-    for row in range(3, ws.max_row + 1):
-        name = clean_cell_value(ws[f"A{row}"].value)
-        status = normalize_status(ws[f"B{row}"].value)
-        plan = normalize_date_string(format_cell(ws[f"C{row}"].value))
-        fact = normalize_date_string(format_cell(ws[f"D{row}"].value))
-
-        if not name:
-            continue
-
-        group_id = resolve_group_id(name)
-
-        items.append({
-            "id": build_item_id(group_id, len([x for x in items if x["group"] == group_id]) + 1),
-            "group": group_id,
-            "order": len([x for x in items if x["group"] == group_id]) + 1,
-            "name": name,
-            "priority": derive_indicator_from_status(status),
-            "status": status,
-            "plan": plan,
-            "fact": fact,
-            "documentUrl": "",
-            "documentName": "",
-            "isCustom": False,
-        })
-
-    data = {
-        "title": "Чек-лист ИД",
-        "collabTitle": ws.title,
-        "contractDeadline": "",
-        "startDate": "",
-        "groups": build_default_groups(),
-        "items": items,
-    }
-
-    return normalize_checklist_data(data)
 
 
 def normalize_dialog_id(value: str) -> str:
@@ -2117,9 +2162,86 @@ def app_home_html():
     </html>
     """
 
+def app_home_html(initial_dialog_id: str = "", initial_checklist_key: str = "id"):
+    initial_dialog_id_json = json.dumps(normalize_dialog_id(initial_dialog_id), ensure_ascii=False)
+    initial_checklist_key_json = json.dumps(normalize_checklist_key(initial_checklist_key), ensure_ascii=False)
+    app_base_path_json = json.dumps(APP_BASE_PATH, ensure_ascii=False)
+    launcher_route_json = json.dumps(build_app_path(LAUNCHER_ROUTE), ensure_ascii=False)
+
+    return f"""
+    <html>
+    <head>
+        <meta charset="utf-8">
+        <title>Чек-листы проекта</title>
+        <script>
+            const SERVER_APP_BASE_PATH = {app_base_path_json};
+            const LAUNCHER_ROUTE_URL = {launcher_route_json};
+            const initialDialogId = {initial_dialog_id_json};
+            const initialChecklistKey = {initial_checklist_key_json};
+
+            function detectAppBasePath() {{
+                if (SERVER_APP_BASE_PATH) return SERVER_APP_BASE_PATH;
+                const path = String(window.location.pathname || '');
+                const knownSuffixes = ['/launch', '/popup', '/textarea', '/install', '/version', '/debug/version'];
+                for (const suffix of knownSuffixes) {{
+                    if (path === suffix || path.endsWith(suffix)) {{
+                        return path.slice(0, path.length - suffix.length) || '';
+                    }}
+                }}
+                return '';
+            }}
+
+            function resolveLaunchContext() {{
+                const params = new URLSearchParams(window.location.search || '');
+                let dialogId = initialDialogId || params.get('dialogId') || '';
+                let checklistKey = initialChecklistKey || params.get('checklistKey') || 'id';
+
+                if (!dialogId) {{
+                    try {{
+                        const raw = localStorage.getItem('checklist_pending_dialog');
+                        if (raw) {{
+                            const payload = JSON.parse(raw);
+                            const age = Date.now() - Number(payload && payload.ts ? payload.ts : 0);
+                            if (payload && payload.dialogId && age < 120000) {{
+                                dialogId = String(payload.dialogId || '').trim();
+                                checklistKey = String(payload.checklistKey || checklistKey || 'id').trim() || 'id';
+                            }}
+                        }}
+                    }} catch (e) {{
+                        console.log('pending dialog bridge skipped:', e);
+                    }}
+                }}
+
+                return {{ dialogId, checklistKey }};
+            }}
+
+            (function () {{
+                const resolved = resolveLaunchContext();
+                if (!resolved.dialogId) {{
+                    return;
+                }}
+
+                const launchUrl = LAUNCHER_ROUTE_URL +
+                    '?dialogId=' + encodeURIComponent(resolved.dialogId) +
+                    '&checklistKey=' + encodeURIComponent(resolved.checklistKey || 'id');
+                window.location.replace(launchUrl);
+            }})();
+        </script>
+    </head>
+    <body style="margin:0;font-family:Arial,sans-serif;background:#f8fafc;color:#344054;display:flex;align-items:center;justify-content:center;min-height:100vh;">
+        <div style="padding:24px 28px;border:1px solid #e5e7eb;border-radius:14px;background:#fff;box-shadow:0 12px 30px rgba(15,23,42,0.08);font-size:14px;max-width:460px;text-align:center;">
+            Не удалось автоматически определить dialogId. Откройте приложение из Bitrix24 или используйте route launch с dialogId и checklistKey.
+        </div>
+    </body>
+    </html>
+    """
+
+
 def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
     initial_dialog_id_json = json.dumps(initial_dialog_id or "", ensure_ascii=False)
     initial_context_text_json = json.dumps(initial_context_text or "", ensure_ascii=False)
+    app_base_path_json = json.dumps(APP_BASE_PATH, ensure_ascii=False)
+    launcher_route_json = json.dumps(build_app_path(LAUNCHER_ROUTE), ensure_ascii=False)
 
 
     return f"""
@@ -2202,7 +2324,53 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
         <script>
             var initialDialogId = {initial_dialog_id_json};
             var initialContextText = {initial_context_text_json};
+            var serverAppBasePath = {app_base_path_json};
+            var launcherRouteUrl = {launcher_route_json};
             var autoOpened = false;
+
+            function detectAppBasePath() {{
+                if (serverAppBasePath) return serverAppBasePath;
+                var path = String(window.location.pathname || '');
+                var knownSuffixes = ['/textarea', '/launch', '/popup', '/install', '/version', '/debug/version'];
+                for (var i = 0; i < knownSuffixes.length; i += 1) {{
+                    var suffix = knownSuffixes[i];
+                    if (path === suffix || path.slice(-suffix.length) === suffix) {{
+                        return path.slice(0, path.length - suffix.length) || '';
+                    }}
+                }}
+                return '';
+            }}
+
+            function buildAppUrl(path) {{
+                if (!path) {{
+                    return detectAppBasePath() || '/';
+                }}
+                if (/^https?:\\/\\//i.test(path)) {{
+                    return path;
+                }}
+                var normalized = path.charAt(0) === '/' ? path : '/' + path;
+                var basePath = detectAppBasePath();
+                return (basePath || '') + normalized;
+            }}
+
+            function sendDebugEvent(eventName, payload) {{
+                try {{
+                    fetch(buildAppUrl('/api/debug/event'), {{
+                        method: 'POST',
+                        headers: {{ 'Content-Type': 'application/json' }},
+                        body: JSON.stringify({{
+                            event: eventName,
+                            dialogId: window.__dialogId || initialDialogId || '',
+                            checklistKey: 'id',
+                            payload: payload || {{}},
+                            href: window.location.href,
+                            ts: new Date().toISOString()
+                        }})
+                    }}).catch(function () {{}});
+                }} catch (e) {{
+                    console.log('sendDebugEvent error:', e);
+                }}
+            }}
 
             function setMeta(text) {{
                 document.getElementById('meta').textContent = text;
@@ -2219,8 +2387,14 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
                 }}
 
                 const launchUrl =
-                    '/launch?dialogId=' + encodeURIComponent(dialogId) +
+                    launcherRouteUrl +
+                    '?dialogId=' + encodeURIComponent(dialogId) +
                     '&checklistKey=' + encodeURIComponent(checklistKey || 'id');
+                sendDebugEvent('textarea_open_checklist', {{
+                    dialogId: dialogId,
+                    checklistKey: checklistKey || 'id',
+                    launchUrl: launchUrl
+                }});
 
                 try {{
                     localStorage.setItem('checklist_pending_dialog', JSON.stringify({{
@@ -2323,6 +2497,7 @@ def home_get(dialogId: str = "", checklistKey: str = "id", mode: str = ""):
     checklist_key = normalize_checklist_key(checklistKey)
     write_debug_log("home_get", {
         "version": APP_VERSION,
+        "appBasePath": APP_BASE_PATH,
         "dialogId": dialog_id,
         "checklistKey": checklist_key,
         "mode": mode,
@@ -2330,26 +2505,35 @@ def home_get(dialogId: str = "", checklistKey: str = "id", mode: str = ""):
     })
     if dialog_id:
         return RedirectResponse(url=build_relative_launch_path(dialog_id, checklist_key), status_code=302)
-    return app_home_html()
+    return app_home_html("", checklist_key)
 
 
 @app.post("/", response_class=HTMLResponse)
 async def home_post(request: Request):
+    form = dict(await request.form())
+    dialog_id = normalize_dialog_id(form.get("dialogId") or form.get("DIALOG_ID") or "")
+    checklist_key = normalize_checklist_key(form.get("checklistKey") or form.get("CHECKLIST_KEY") or "id")
     write_debug_log("home_post", {
         "version": APP_VERSION,
-        "action": "fallback_home",
+        "appBasePath": APP_BASE_PATH,
+        "dialogId": dialog_id,
+        "checklistKey": checklist_key,
+        "action": "redirect_launch" if dialog_id else "fallback_home",
     })
-    return app_home_html()
+    if dialog_id:
+        return RedirectResponse(url=build_relative_launch_path(dialog_id, checklist_key), status_code=302)
+    return app_home_html("", checklist_key)
 
 
 @app.get(LAUNCHER_ROUTE, response_class=HTMLResponse)
 def launch_get(dialogId: str = "", checklistKey: str = "id"):
     dialog_id = normalize_dialog_id(dialogId)
     checklist_key = normalize_checklist_key(checklistKey)
-    popup_url = f"/popup?dialogId={quote(dialog_id)}&checklistKey={quote(checklist_key)}" if dialog_id else ""
+    popup_url = build_relative_popup_path(dialog_id, checklist_key) if dialog_id else ""
 
     write_debug_log("launch_get", {
         "version": APP_VERSION,
+        "appBasePath": APP_BASE_PATH,
         "dialogId": dialog_id,
         "checklistKey": checklist_key,
         "popupUrl": popup_url,
@@ -2357,7 +2541,7 @@ def launch_get(dialogId: str = "", checklistKey: str = "id"):
     })
 
     if not dialog_id:
-        return app_home_html()
+        return app_home_html("", checklist_key)
 
     return RedirectResponse(url=popup_url, status_code=302)
 
@@ -2391,7 +2575,7 @@ async def install_post(request: Request):
 
     access_token = form.get("AUTH_ID") or form.get("access_token") or ""
     domain = normalize_domain(form.get("DOMAIN") or form.get("domain") or "")
-    base_url = str(request.base_url).rstrip("/")
+    textarea_handler_url = build_request_app_url(request, "/textarea")
 
     bind_result = {
         "im_textarea": {"skipped": True}
@@ -2404,7 +2588,7 @@ async def install_post(request: Request):
             access_token,
             {
                 "PLACEMENT": "IM_TEXTAREA",
-                "HANDLER": f"{base_url}/textarea",
+                "HANDLER": textarea_handler_url,
                 "TITLE": "Чек-лист ИД",
                 "OPTIONS": {
                     "iconName": "fa-bars",
@@ -2438,6 +2622,12 @@ async def install_post(request: Request):
 @app.get("/textarea", response_class=HTMLResponse)
 def textarea_get(dialogId: str = ""):
     dialog_id = normalize_dialog_id(dialogId)
+    write_debug_log("textarea_get", {
+        "version": APP_VERSION,
+        "appBasePath": APP_BASE_PATH,
+        "dialogId": dialog_id,
+        "action": "render_textarea",
+    })
     return textarea_html(dialog_id, "GET /textarea")
 
 
@@ -2446,9 +2636,13 @@ async def textarea_post(request: Request):
     form = dict(await request.form())
     dialog_id = extract_dialog_id_from_form(form)
     raw_context = json.dumps(form, ensure_ascii=False, indent=2)
-
-    print("TEXTAREA POST FORM:", raw_context)
-    print("TEXTAREA EXTRACTED DIALOG ID:", dialog_id)
+    write_debug_log("textarea_post", {
+        "version": APP_VERSION,
+        "appBasePath": APP_BASE_PATH,
+        "dialogId": dialog_id,
+        "checklistKey": normalize_checklist_key(form.get("checklistKey") or form.get("CHECKLIST_KEY") or "id"),
+        "action": "render_textarea",
+    })
 
     return textarea_html(dialog_id, raw_context)
 
@@ -2473,6 +2667,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
     collab_title_json = json.dumps(collab_title_raw, ensure_ascii=False)
     checklist_key_json = json.dumps(checklist_key, ensure_ascii=False)
     checklist_title_json = json.dumps(title_raw, ensure_ascii=False)
+    app_base_path_json = json.dumps(APP_BASE_PATH, ensure_ascii=False)
 
     popup_session_enhancements_js = """
             const clientSessionId = 'popup_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
@@ -2695,7 +2890,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
 
                 if (useBeacon && navigator.sendBeacon) {
                     const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' });
-                    navigator.sendBeacon(APP_BASE_URL + '/api/checklist/close-session', blob);
+                    navigator.sendBeacon(buildAppUrl('/api/checklist/close-session'), blob);
                     dirtyKeys.forEach(clearChecklistSessionState);
                     return {
                         savedCount: dirtyKeys.length,
@@ -2705,7 +2900,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                     };
                 }
 
-                const response = await fetch('/api/checklist/close-session', {
+                const response = await fetch(buildAppUrl('/api/checklist/close-session'), {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
@@ -2762,7 +2957,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                 };
 
                 try {
-                    const response = await fetch('/api/checklist/lock/acquire', {
+                    const response = await fetch(buildAppUrl('/api/checklist/lock/acquire'), {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json'
@@ -2811,7 +3006,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
 
                 const editorIdentity = getCurrentEditorIdentity();
                 try {
-                    const response = await fetch('/api/checklist/lock/heartbeat', {
+                    const response = await fetch(buildAppUrl('/api/checklist/lock/heartbeat'), {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json'
@@ -2886,10 +3081,10 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
 
                 if (useBeacon && navigator.sendBeacon) {
                     const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' });
-                    navigator.sendBeacon(APP_BASE_URL + '/api/checklist/lock/release', blob);
+                    navigator.sendBeacon(buildAppUrl('/api/checklist/lock/release'), blob);
                 } else {
                     try {
-                        await fetch('/api/checklist/lock/release', {
+                        await fetch(buildAppUrl('/api/checklist/lock/release'), {
                             method: 'POST',
                             headers: {
                                 'Content-Type': 'application/json'
@@ -3009,7 +3204,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                     }
 
                     const response = await fetch(
-                        '/api/checklist?dialogId=' + encodeURIComponent(dialogId) +
+                        buildAppUrl('/api/checklist') + '?dialogId=' + encodeURIComponent(dialogId) +
                         '&checklistKey=' + encodeURIComponent(targetKey)
                     );
                     const result = await response.json();
@@ -3730,7 +3925,30 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
             const idLeftTableHtml = leftTableEl ? leftTableEl.innerHTML : '';
             const idRightTableHtml = rightTableEl ? rightTableEl.innerHTML : '';
             const debugLastEventEl = document.getElementById('debugLastEvent');
-            const APP_BASE_URL = window.location.origin;
+            const SERVER_APP_BASE_PATH = {app_base_path_json};
+            function detectAppBasePath() {{
+                if (SERVER_APP_BASE_PATH) return SERVER_APP_BASE_PATH;
+                const path = String(window.location.pathname || '');
+                const knownSuffixes = ['/popup', '/launch', '/textarea', '/install', '/version', '/debug/version'];
+                for (const suffix of knownSuffixes) {{
+                    if (path === suffix || path.endsWith(suffix)) {{
+                        return path.slice(0, path.length - suffix.length) || '';
+                    }}
+                }}
+                return '';
+            }}
+            const APP_BASE_PATH = detectAppBasePath();
+            function buildAppUrl(path) {{
+                if (!path) {{
+                    return APP_BASE_PATH || '/';
+                }}
+                if (/^https?:\\/\\//i.test(path)) {{
+                    return path;
+                }}
+                const normalized = String(path).startsWith('/') ? String(path) : '/' + String(path);
+                return (APP_BASE_PATH || '') + normalized;
+            }}
+            const APP_BASE_URL = window.location.origin + (APP_BASE_PATH || '');
             let closeSummarySent = false;
             let sessionDirty = false;
 
@@ -3963,7 +4181,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                     }}
 
                     const response = await fetch(
-                        '/api/checklist?dialogId=' + encodeURIComponent(dialogId) +
+                        buildAppUrl('/api/checklist') + '?dialogId=' + encodeURIComponent(dialogId) +
                         '&checklistKey=' + encodeURIComponent(targetKey)
                     );
                     const result = await response.json();
@@ -4028,7 +4246,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                                         title: title
                                     }});
                                     try {{
-                                        await fetch('/api/checklist/update-meta', {{
+                                        await fetch(buildAppUrl('/api/checklist/update-meta'), {{
                                             method: 'POST',
                                             headers: {{ 'Content-Type': 'application/json' }},
                                             body: JSON.stringify({{ dialogId, checklistKey: currentChecklistKey, field: 'collabTitle', value: title }})
@@ -4084,7 +4302,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
             }}
             async function updateItem(itemId, field, value, checklistKey = currentChecklistKey) {{
                 setSaveState('saving', 'Сохраняем...');
-                const response = await fetch('/api/checklist/update-item', {{
+                const response = await fetch(buildAppUrl('/api/checklist/update-item'), {{
                     method: 'POST',
                     headers: {{ 'Content-Type': 'application/json' }},
                     body: JSON.stringify({{ dialogId, checklistKey, itemId, field, value }})
@@ -4096,7 +4314,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
             }}
             async function addItem(groupId, name, checklistKey = currentChecklistKey) {{
                 setSaveState('saving', 'Сохраняем...');
-                const response = await fetch('/api/checklist/add-item', {{
+                const response = await fetch(buildAppUrl('/api/checklist/add-item'), {{
                     method: 'POST',
                     headers: {{ 'Content-Type': 'application/json' }},
                     body: JSON.stringify({{ dialogId, checklistKey, groupId, name }})
@@ -4108,7 +4326,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
             }}
             async function removeDocument(itemId, documentUrl = '') {{
                 setSaveState('saving', 'Сохраняем...');
-                const response = await fetch('/api/checklist/remove-document', {{
+                const response = await fetch(buildAppUrl('/api/checklist/remove-document'), {{
                     method: 'POST',
                     headers: {{ 'Content-Type': 'application/json' }},
                     body: JSON.stringify({{ dialogId, checklistKey: currentChecklistKey, itemId, documentUrl }})
@@ -4127,7 +4345,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                 formData.append('file', file);
                 formData.append('checklistKey', currentChecklistKey);
                 formData.append('itemGroup', String(item && item.group ? item.group : ''));
-                const response = await fetch('/api/checklist/upload-document', {{ method: 'POST', body: formData }});
+                const response = await fetch(buildAppUrl('/api/checklist/upload-document'), {{ method: 'POST', body: formData }});
                 const result = await response.json();
                 if (!response.ok || !result.ok) throw new Error(result.error || 'upload document failed');
                 setSaveState('', 'Сохранено');
@@ -5032,7 +5250,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                     }}
 
                     const response = await fetch(
-                        '/api/checklist?dialogId=' + encodeURIComponent(dialogId) +
+                        buildAppUrl('/api/checklist') + '?dialogId=' + encodeURIComponent(dialogId) +
                         '&checklistKey=' + encodeURIComponent(targetKey)
                     );
                     const result = await response.json();
@@ -5379,7 +5597,7 @@ async def api_checklist_upload_document(
 
     updated_item = {
         "id": item_id,
-        "documentUrl": "/uploads/" + rel_path.replace("\\", "/"),
+        "documentUrl": build_app_path("/uploads/" + rel_path.replace("\\", "/")),
         "documentName": Path(file.filename or "file.bin").name,
     }
 
@@ -5403,7 +5621,7 @@ async def api_checklist_remove_document(request: Request):
     dialog_id = normalize_dialog_id(payload.get("dialogId"))
     checklist_key = normalize_checklist_key(payload.get("checklistKey"))
     item_id = str(payload.get("itemId") or "").strip()
-    document_url = clean_cell_value(payload.get("documentUrl"))
+    document_url = normalize_document_url(payload.get("documentUrl"))
 
     if not dialog_id:
         return JSONResponse({"ok": False, "error": "dialogId is required"}, status_code=400)
@@ -5747,68 +5965,4 @@ def debug_logs():
     </html>
     """
 
-@app.get("/admin", response_class=HTMLResponse)
-def admin():
-    conn = get_conn()
-    rows = conn.execute("SELECT dialog_id, title FROM checklists ORDER BY dialog_id").fetchall()
-    conn.close()
 
-    items = "".join(
-        f"<li><b>{html.escape(row['dialog_id'])}</b> — {html.escape(row['title'])}</li>"
-        for row in rows
-    ) or "<li>Пока ничего не загружено</li>"
-
-    return f"""
-    <html>
-    <head>
-        <meta charset="utf-8">
-        <title>Загрузка чек-листа</title>
-    </head>
-    <body style="font-family:Arial,sans-serif;padding:40px;max-width:900px">
-        <h1>Загрузка Excel для коллабы</h1>
-        <p>Шаг 1: откройте коллабу и посмотрите значение <b>dialogId</b> в sidebar.</p>
-        <p>Шаг 2: вставьте этот dialogId сюда и загрузите .xlsx файл.</p>
-
-        <form action="/admin/upload" method="post" enctype="multipart/form-data" style="margin:30px 0">
-            <div style="margin-bottom:16px">
-                <label>dialogId</label><br>
-                <input type="text" name="dialog_id" required style="width:100%;padding:10px">
-            </div>
-
-            <div style="margin-bottom:16px">
-                <label>XLSX файл</label><br>
-                <input type="file" name="file" accept=".xlsx" required>
-            </div>
-
-            <button type="submit" style="padding:10px 16px">Загрузить чек-лист</button>
-        </form>
-
-        <h2>Уже загруженные чек-листы</h2>
-        <ul>{items}</ul>
-    </body>
-    </html>
-    """
-
-
-@app.post("/admin/upload", response_class=HTMLResponse)
-async def admin_upload(dialog_id: str = Form(...), file: UploadFile = File(...)):
-    dialog_id = normalize_dialog_id(dialog_id)
-    file_bytes = await file.read()
-    data = parse_xlsx_to_checklist(file_bytes)
-    save_checklist(dialog_id, data)
-
-    return f"""
-    <html>
-    <head>
-        <meta charset="utf-8">
-        <title>Готово</title>
-    </head>
-    <body style="font-family:Arial,sans-serif;padding:40px">
-        <h1>Чек-лист сохранён</h1>
-        <p><b>dialogId:</b> {html.escape(dialog_id)}</p>
-        <p><b>Файл:</b> {html.escape(file.filename or '')}</p>
-        <p>Теперь вернитесь в коллабу и обновите sidebar.</p>
-        <p><a href="/admin">Назад в /admin</a></p>
-    </body>
-    </html>
-    """
