@@ -917,6 +917,7 @@ def startup_event():
     print(f"APP_VERSION={APP_VERSION}")
     print(f"APP_BASE_PATH={APP_BASE_PATH or '/'}")
     print(f"Launcher route enabled: {build_app_path(LAUNCHER_ROUTE)}")
+    print(f"Popup route: {build_app_path('/popup')}")
     print("Root route mode: redirect to launch when dialogId exists, fallback page otherwise")
     print(f"APP_PORTAL_PATH={APP_PORTAL_PATH}")
     print(f"DB_PATH={DB_PATH}")
@@ -1007,6 +1008,14 @@ def build_request_app_url(request: Request, path: str = "/") -> str:
     return f"{base_url}{target_path}"
 
 
+def build_request_app_path(request: Request, path: str = "/") -> str:
+    app_base_path = get_request_app_base_path(request)
+    raw = str(path or "").strip() or "/"
+    if not raw.startswith("/"):
+        raw = "/" + raw
+    return f"{app_base_path}{raw}" if app_base_path else raw
+
+
 def build_public_app_url(path: str) -> str:
     public_base = PUBLIC_APP_BASE_URL
     if not public_base and BITRIX_TECH_WEBHOOK_URL:
@@ -1036,7 +1045,9 @@ def build_version_payload() -> dict:
         "appPortalPath": APP_PORTAL_PATH,
         "publicAppBaseUrl": PUBLIC_APP_BASE_URL,
         "launcherRoute": build_app_path(LAUNCHER_ROUTE),
+        "popupRoute": build_app_path("/popup"),
         "rootBehavior": "redirect-to-launch-when-params-exist",
+        "baseUrlExample": build_public_app_url(build_relative_launch_path("chat3122", "id")),
         "time": datetime.now().isoformat(),
         "dbPath": DB_PATH,
         "uploadRoot": str(UPLOAD_ROOT),
@@ -2166,7 +2177,6 @@ def app_home_html(initial_dialog_id: str = "", initial_checklist_key: str = "id"
     initial_dialog_id_json = json.dumps(normalize_dialog_id(initial_dialog_id), ensure_ascii=False)
     initial_checklist_key_json = json.dumps(normalize_checklist_key(initial_checklist_key), ensure_ascii=False)
     app_base_path_json = json.dumps(APP_BASE_PATH, ensure_ascii=False)
-    launcher_route_json = json.dumps(build_app_path(LAUNCHER_ROUTE), ensure_ascii=False)
 
     return f"""
     <html>
@@ -2175,7 +2185,6 @@ def app_home_html(initial_dialog_id: str = "", initial_checklist_key: str = "id"
         <title>Чек-листы проекта</title>
         <script>
             const SERVER_APP_BASE_PATH = {app_base_path_json};
-            const LAUNCHER_ROUTE_URL = {launcher_route_json};
             const initialDialogId = {initial_dialog_id_json};
             const initialChecklistKey = {initial_checklist_key_json};
 
@@ -2189,6 +2198,17 @@ def app_home_html(initial_dialog_id: str = "", initial_checklist_key: str = "id"
                     }}
                 }}
                 return '';
+            }}
+
+            function buildAppUrl(path) {{
+                if (!path) {{
+                    return detectAppBasePath() || '/';
+                }}
+                if (/^https?:\\/\\//i.test(path)) {{
+                    return path;
+                }}
+                const normalized = String(path).startsWith('/') ? String(path) : '/' + String(path);
+                return (detectAppBasePath() || '') + normalized;
             }}
 
             function resolveLaunchContext() {{
@@ -2221,7 +2241,7 @@ def app_home_html(initial_dialog_id: str = "", initial_checklist_key: str = "id"
                     return;
                 }}
 
-                const launchUrl = LAUNCHER_ROUTE_URL +
+                const launchUrl = buildAppUrl('/launch') +
                     '?dialogId=' + encodeURIComponent(resolved.dialogId) +
                     '&checklistKey=' + encodeURIComponent(resolved.checklistKey || 'id');
                 window.location.replace(launchUrl);
@@ -2241,7 +2261,6 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
     initial_dialog_id_json = json.dumps(initial_dialog_id or "", ensure_ascii=False)
     initial_context_text_json = json.dumps(initial_context_text or "", ensure_ascii=False)
     app_base_path_json = json.dumps(APP_BASE_PATH, ensure_ascii=False)
-    launcher_route_json = json.dumps(build_app_path(LAUNCHER_ROUTE), ensure_ascii=False)
 
 
     return f"""
@@ -2325,7 +2344,6 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
             var initialDialogId = {initial_dialog_id_json};
             var initialContextText = {initial_context_text_json};
             var serverAppBasePath = {app_base_path_json};
-            var launcherRouteUrl = {launcher_route_json};
             var autoOpened = false;
 
             function detectAppBasePath() {{
@@ -2387,7 +2405,7 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
                 }}
 
                 const launchUrl =
-                    launcherRouteUrl +
+                    buildAppUrl('/launch') +
                     '?dialogId=' + encodeURIComponent(dialogId) +
                     '&checklistKey=' + encodeURIComponent(checklistKey || 'id');
                 sendDebugEvent('textarea_open_checklist', {{
@@ -2492,19 +2510,24 @@ def health():
 
 
 @app.get("/", response_class=HTMLResponse)
-def home_get(dialogId: str = "", checklistKey: str = "id", mode: str = ""):
+def home_get(request: Request, dialogId: str = "", checklistKey: str = "id", mode: str = ""):
     dialog_id = normalize_dialog_id(dialogId)
     checklist_key = normalize_checklist_key(checklistKey)
+    launch_path = build_request_app_path(request, LAUNCHER_ROUTE)
     write_debug_log("home_get", {
         "version": APP_VERSION,
-        "appBasePath": APP_BASE_PATH,
+        "appBasePath": get_request_app_base_path(request),
         "dialogId": dialog_id,
         "checklistKey": checklist_key,
         "mode": mode,
+        "launchPath": launch_path,
         "action": "redirect_launch" if dialog_id else "fallback_home",
     })
     if dialog_id:
-        return RedirectResponse(url=build_relative_launch_path(dialog_id, checklist_key), status_code=302)
+        return RedirectResponse(
+            url=f"{launch_path}?dialogId={quote(dialog_id)}&checklistKey={quote(checklist_key)}",
+            status_code=302
+        )
     return app_home_html("", checklist_key)
 
 
@@ -2513,27 +2536,33 @@ async def home_post(request: Request):
     form = dict(await request.form())
     dialog_id = normalize_dialog_id(form.get("dialogId") or form.get("DIALOG_ID") or "")
     checklist_key = normalize_checklist_key(form.get("checklistKey") or form.get("CHECKLIST_KEY") or "id")
+    launch_path = build_request_app_path(request, LAUNCHER_ROUTE)
     write_debug_log("home_post", {
         "version": APP_VERSION,
-        "appBasePath": APP_BASE_PATH,
+        "appBasePath": get_request_app_base_path(request),
         "dialogId": dialog_id,
         "checklistKey": checklist_key,
+        "launchPath": launch_path,
         "action": "redirect_launch" if dialog_id else "fallback_home",
     })
     if dialog_id:
-        return RedirectResponse(url=build_relative_launch_path(dialog_id, checklist_key), status_code=302)
+        return RedirectResponse(
+            url=f"{launch_path}?dialogId={quote(dialog_id)}&checklistKey={quote(checklist_key)}",
+            status_code=302
+        )
     return app_home_html("", checklist_key)
 
 
 @app.get(LAUNCHER_ROUTE, response_class=HTMLResponse)
-def launch_get(dialogId: str = "", checklistKey: str = "id"):
+def launch_get(request: Request, dialogId: str = "", checklistKey: str = "id"):
     dialog_id = normalize_dialog_id(dialogId)
     checklist_key = normalize_checklist_key(checklistKey)
-    popup_url = build_relative_popup_path(dialog_id, checklist_key) if dialog_id else ""
+    popup_path = build_request_app_path(request, "/popup")
+    popup_url = f"{popup_path}?dialogId={quote(dialog_id)}&checklistKey={quote(checklist_key)}" if dialog_id else ""
 
     write_debug_log("launch_get", {
         "version": APP_VERSION,
-        "appBasePath": APP_BASE_PATH,
+        "appBasePath": get_request_app_base_path(request),
         "dialogId": dialog_id,
         "checklistKey": checklist_key,
         "popupUrl": popup_url,
@@ -2548,8 +2577,16 @@ def launch_get(dialogId: str = "", checklistKey: str = "id"):
 
 @app.get("/version")
 @app.get("/debug/version")
-def debug_version():
-    return JSONResponse(build_version_payload())
+def debug_version(request: Request):
+    payload = build_version_payload()
+    request_base_path = get_request_app_base_path(request)
+    payload.update({
+        "requestAppBasePath": request_base_path,
+        "requestLaunchRoute": build_request_app_path(request, LAUNCHER_ROUTE),
+        "requestPopupRoute": build_request_app_path(request, "/popup"),
+        "requestBaseUrlExample": build_request_app_url(request, LAUNCHER_ROUTE) + "?dialogId=chat3122&checklistKey=id",
+    })
+    return JSONResponse(payload)
 
 
 @app.get("/install", response_class=HTMLResponse)
@@ -2620,12 +2657,15 @@ async def install_post(request: Request):
 
 
 @app.get("/textarea", response_class=HTMLResponse)
-def textarea_get(dialogId: str = ""):
+def textarea_get(request: Request, dialogId: str = ""):
     dialog_id = normalize_dialog_id(dialogId)
+    launch_path = build_request_app_path(request, LAUNCHER_ROUTE)
     write_debug_log("textarea_get", {
         "version": APP_VERSION,
-        "appBasePath": APP_BASE_PATH,
+        "appBasePath": get_request_app_base_path(request),
         "dialogId": dialog_id,
+        "checklistKey": "id",
+        "launchPath": launch_path,
         "action": "render_textarea",
     })
     return textarea_html(dialog_id, "GET /textarea")
@@ -2636,11 +2676,14 @@ async def textarea_post(request: Request):
     form = dict(await request.form())
     dialog_id = extract_dialog_id_from_form(form)
     raw_context = json.dumps(form, ensure_ascii=False, indent=2)
+    checklist_key = normalize_checklist_key(form.get("checklistKey") or form.get("CHECKLIST_KEY") or "id")
+    launch_path = build_request_app_path(request, LAUNCHER_ROUTE)
     write_debug_log("textarea_post", {
         "version": APP_VERSION,
-        "appBasePath": APP_BASE_PATH,
+        "appBasePath": get_request_app_base_path(request),
         "dialogId": dialog_id,
-        "checklistKey": normalize_checklist_key(form.get("checklistKey") or form.get("CHECKLIST_KEY") or "id"),
+        "checklistKey": checklist_key,
+        "launchPath": f"{launch_path}?dialogId={quote(dialog_id)}&checklistKey={quote(checklist_key)}" if dialog_id else "",
         "action": "render_textarea",
     })
 
@@ -3948,7 +3991,6 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                 const normalized = String(path).startsWith('/') ? String(path) : '/' + String(path);
                 return (APP_BASE_PATH || '') + normalized;
             }}
-            const APP_BASE_URL = window.location.origin + (APP_BASE_PATH || '');
             let closeSummarySent = false;
             let sessionDirty = false;
 
@@ -4045,7 +4087,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                 setDebugText(event);
 
                 try {{
-                    const url = APP_BASE_URL + '/api/debug/event';
+                    const url = buildAppUrl('/api/debug/event');
 
                     if (useBeacon && navigator.sendBeacon) {{
                         const blob = new Blob([body], {{ type: 'application/json' }});
