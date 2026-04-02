@@ -5,7 +5,7 @@ from collections import defaultdict
 from pathlib import Path
 from fastapi import FastAPI, Request, UploadFile, File, Form
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 import requests
 import json
 import html
@@ -1577,6 +1577,13 @@ def get_checklist_link_caption(checklist_key: str) -> str:
     return mapping.get(normalize_checklist_key(checklist_key), "ЧЕК-ЛИСТ")
 
 
+def build_relative_launch_path(dialog_id: str, checklist_key: str = "id") -> str:
+    dialog_id = normalize_dialog_id(dialog_id)
+    checklist_key = normalize_checklist_key(checklist_key)
+    query = f"dialogId={quote(dialog_id)}&checklistKey={quote(checklist_key)}"
+    return f"/launch?{query}"
+
+
 def build_checklist_message_link(dialog_id: str, checklist_key: str) -> str:
     dialog_id = normalize_dialog_id(dialog_id)
     checklist_key = normalize_checklist_key(checklist_key)
@@ -1591,7 +1598,7 @@ def build_checklist_message_link(dialog_id: str, checklist_key: str) -> str:
     base_url = f"{parsed.scheme}://{parsed.netloc}"
     app_path = APP_PORTAL_PATH if APP_PORTAL_PATH.endswith("/") else APP_PORTAL_PATH + "/"
     query = f"dialogId={quote(dialog_id)}&checklistKey={quote(checklist_key)}"
-    return f"{base_url}{app_path}?{query}#{query}"
+    return f"{base_url}{app_path}launch?{query}#{query}"
 
 
 def build_editor_text(editor: dict) -> str:
@@ -2087,37 +2094,11 @@ def app_home_html():
                     return (searchParams.get(key) || hashParams.get(key) || fallback || '').trim();
                 }
 
-                function redirectToPopup(dialogId, checklistKey) {
-                    const popupUrl =
-                        '/popup?dialogId=' + encodeURIComponent(dialogId) +
+                function redirectToLaunch(dialogId, checklistKey) {
+                    const launchUrl =
+                        '/launch?dialogId=' + encodeURIComponent(dialogId) +
                         '&checklistKey=' + encodeURIComponent(checklistKey || 'id');
-
-                    const go = function () {
-                        window.location.replace(popupUrl);
-                    };
-
-                    try {
-                        if (window.BX24 && typeof window.BX24.init === 'function') {
-                            window.BX24.init(function () {
-                                try {
-                                    if (typeof window.BX24.resizeWindow === 'function') {
-                                        window.BX24.resizeWindow(1180, 680);
-                                    }
-                                    if (typeof window.BX24.fitWindow === 'function') {
-                                        window.BX24.fitWindow();
-                                    }
-                                } catch (e) {
-                                    console.log('bridge resize skipped:', e);
-                                }
-                                go();
-                            });
-                            return;
-                        }
-                    } catch (e) {
-                        console.log('bridge BX24 init skipped:', e);
-                    }
-
-                    go();
+                    window.location.replace(launchUrl);
                 }
 
                 try {
@@ -2151,12 +2132,12 @@ def app_home_html():
                             console.log('pending dialog save skipped:', e);
                         }
 
-                        redirectToPopup(dialogId, checklistKey);
+                        redirectToLaunch(dialogId, checklistKey);
                         return;
                     }
 
                     if (localPayload && localPayload.dialogId && age < 60000) {
-                        redirectToPopup(
+                        redirectToLaunch(
                             localPayload.dialogId,
                             (localPayload.checklistKey || 'id').trim() || 'id'
                         );
@@ -2169,8 +2150,78 @@ def app_home_html():
         </script>
     </head>
     <body style="margin:0;font-family:Arial,sans-serif;background:#f8fafc;color:#344054;display:flex;align-items:center;justify-content:center;min-height:100vh;">
-        <div style="padding:24px 28px;border:1px solid #e5e7eb;border-radius:14px;background:#fff;box-shadow:0 12px 30px rgba(15,23,42,0.08);font-size:14px;">
-            Открываем нужный чек-лист...
+        <div style="padding:24px 28px;border:1px solid #e5e7eb;border-radius:14px;background:#fff;box-shadow:0 12px 30px rgba(15,23,42,0.08);font-size:14px;max-width:460px;text-align:center;">
+            Откройте приложение из Bitrix24 или передайте dialogId и checklistKey для прямого запуска чек-листа.
+        </div>
+    </body>
+    </html>
+    """
+
+
+def launch_html(dialog_id: str = "", checklist_key: str = "id"):
+    dialog_id = normalize_dialog_id(dialog_id)
+    checklist_key = normalize_checklist_key(checklist_key)
+    dialog_id_json = json.dumps(dialog_id, ensure_ascii=False)
+    checklist_key_json = json.dumps(checklist_key, ensure_ascii=False)
+    popup_path_json = json.dumps(build_relative_launch_path(dialog_id, checklist_key).replace("/launch", "/popup", 1), ensure_ascii=False)
+
+    return f"""
+    <html>
+    <head>
+        <meta charset="utf-8">
+        <title>Запуск чек-листа</title>
+        <script src="https://api.bitrix24.com/api/v1/"></script>
+        <script>
+            (function () {{
+                const dialogId = {dialog_id_json};
+                const checklistKey = {checklist_key_json};
+                const popupUrl = {popup_path_json};
+
+                function go() {{
+                    if (!dialogId) {{
+                        return;
+                    }}
+                    window.location.replace(popupUrl);
+                }}
+
+                try {{
+                    localStorage.setItem('checklist_pending_dialog', JSON.stringify({{
+                        dialogId: dialogId,
+                        checklistKey: checklistKey,
+                        ts: Date.now()
+                    }}));
+                }} catch (e) {{
+                    console.log('launch localStorage skipped:', e);
+                }}
+
+                try {{
+                    if (window.BX24 && typeof window.BX24.init === 'function') {{
+                        window.BX24.init(function () {{
+                            try {{
+                                if (typeof window.BX24.resizeWindow === 'function') {{
+                                    window.BX24.resizeWindow(1180, 680);
+                                }}
+                                if (typeof window.BX24.fitWindow === 'function') {{
+                                    window.BX24.fitWindow();
+                                }}
+                            }} catch (e) {{
+                                console.log('launch resize skipped:', e);
+                            }}
+                            go();
+                        }});
+                        return;
+                    }}
+                }} catch (e) {{
+                    console.log('launch BX24 init skipped:', e);
+                }}
+
+                go();
+            }})();
+        </script>
+    </head>
+    <body style="margin:0;font-family:Arial,sans-serif;background:#f8fafc;color:#344054;display:flex;align-items:center;justify-content:center;min-height:100vh;">
+        <div style="padding:18px 22px;border:1px solid #e5e7eb;border-radius:14px;background:#fff;box-shadow:0 12px 30px rgba(15,23,42,0.08);font-size:14px;">
+            {'Открываем чек-лист...' if dialog_id else 'dialogId не найден'}
         </div>
     </body>
     </html>
@@ -2277,6 +2328,10 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
                     return;
                 }}
 
+                const launchUrl =
+                    '/launch?dialogId=' + encodeURIComponent(dialogId) +
+                    '&checklistKey=' + encodeURIComponent(checklistKey || 'id');
+
                 try {{
                     localStorage.setItem('checklist_pending_dialog', JSON.stringify({{
                         dialogId: dialogId,
@@ -2291,7 +2346,7 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
                     if (window.BX24 && typeof window.BX24.openApplication === 'function') {{
                         BX24.openApplication();
                         autoOpened = true;
-                        setMeta('Открываем popup для ' + dialogId);
+                        setMeta('Открываем чек-лист для ' + dialogId);
                         return;
                     }}
                 }} catch (e) {{
@@ -2299,8 +2354,7 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
                 }}
 
                 window.open(
-                    '/popup?dialogId=' + encodeURIComponent(dialogId) +
-                    '&checklistKey=' + encodeURIComponent(checklistKey),
+                    launchUrl,
                     '_blank'
                 );
             }}
@@ -2375,12 +2429,27 @@ def health():
 
 @app.get("/", response_class=HTMLResponse)
 def home_get(dialogId: str = "", checklistKey: str = "id", mode: str = ""):
+    dialog_id = normalize_dialog_id(dialogId)
+    checklist_key = normalize_checklist_key(checklistKey)
+    if dialog_id:
+        return RedirectResponse(url=build_relative_launch_path(dialog_id, checklist_key), status_code=302)
     return app_home_html()
 
 
 @app.post("/", response_class=HTMLResponse)
 async def home_post(request: Request):
     return app_home_html()
+
+
+@app.get("/launch", response_class=HTMLResponse)
+def launch_get(dialogId: str = "", checklistKey: str = "id"):
+    dialog_id = normalize_dialog_id(dialogId)
+    checklist_key = normalize_checklist_key(checklistKey)
+
+    if not dialog_id:
+        return app_home_html()
+
+    return launch_html(dialog_id, checklist_key)
 
 
 @app.get("/install", response_class=HTMLResponse)
