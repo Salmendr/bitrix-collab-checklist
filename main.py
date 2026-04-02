@@ -5,11 +5,12 @@ from collections import defaultdict
 from pathlib import Path
 from fastapi import FastAPI, Request, UploadFile, File, Form
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 import requests
 import json
 import html
 import sqlite3
+import re
 from io import BytesIO
 from datetime import datetime
 from urllib.parse import quote, urlparse
@@ -3862,7 +3863,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                 const nextKey = String(nextData.checklistKey || currentChecklistKey || 'id').trim() || 'id';
 
                 currentChecklistKey = nextKey;
-                checklistTitle = String(nextData.title || (nextKey === 'concept' ? 'Чек-лист Концепция' : 'Чек-лист ИД'));
+                checklistTitle = String(nextData.title || getChecklistDefaultTitle(nextKey));
                 collabTitle = String(nextData.collabTitle || collabTitle || '');
 
                 rawGroups = Array.isArray(nextData.groups) ? nextData.groups : [];
@@ -3892,17 +3893,12 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
 
             async function loadChecklistByKey(checklistKey) {{
                 const targetKey = String(checklistKey || '').trim() || 'id';
-
-                if (targetKey === 'opr') {{
-                    alert('Этот чек-лист подключим следующим этапом.');
-                    return;
-                }}
-
                 if (targetKey === currentChecklistKey) {{
                     return;
                 }}
 
-                await flushCurrentChecklistSummary();
+                syncChecklistCache();
+                await releaseChecklistLock(currentChecklistKey, false);
                 setSaveState('saving', 'Загружаем...');
 
                 try {{
@@ -3913,6 +3909,8 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                         debugLog('checklist_switched_cached', {{
                             checklistKey: targetKey
                         }});
+                        await acquireChecklistLock(targetKey, true);
+                        startLockHeartbeat();
                         setSaveState('', 'Сохранено');
                         return;
                     }}
@@ -3932,6 +3930,8 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                     debugLog('checklist_switched', {{
                         checklistKey: targetKey
                     }});
+                    await acquireChecklistLock(targetKey, true);
+                    startLockHeartbeat();
                     setSaveState('', 'Сохранено');
                 }} catch (e) {{
                     console.log('loadChecklistByKey error:', e);
@@ -3940,59 +3940,13 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
             }}
 
             function sendCloseSummaryOnce(eventName) {{
-                if (closeSummarySent) {{
+                if (eventName === 'popup_hidden' || suppressAutoCloseSave || closeSummarySent) {{
                     return;
                 }}
 
                 closeSummarySent = true;
-
-                const payload = {{
-                    dialogId,
-                    checklistKey: currentChecklistKey,
-                    editor: currentEditor,
-                    data: buildChecklistSnapshot(),
-                    changes: sessionChanges,
-                    closeEvent: eventName,
-                    ts: new Date().toISOString()
-                }};
-
-                debugLog('close_summary_start', payload, true);
-
-                try {{
-                    const closeUrl = APP_BASE_URL + '/api/checklist/close-session';
-                    const debugUrl = APP_BASE_URL + '/api/debug/event';
-
-                    const closeBlob = new Blob([JSON.stringify(payload)], {{
-                        type: 'application/json'
-                    }});
-
-                    const closeOk = navigator.sendBeacon
-                        ? navigator.sendBeacon(closeUrl, closeBlob)
-                        : false;
-
-                    const debugBlob = new Blob([JSON.stringify({{
-                        event: 'close_summary_beacon_sent',
-                        dialogId,
-                        payload: {{
-                            closeEvent: eventName,
-                            closeOk,
-                            changesCount: sessionChanges.length,
-                            editor: currentEditor
-                        }},
-                        ts: new Date().toISOString()
-                    }})], {{
-                        type: 'application/json'
-                    }});
-
-                    if (navigator.sendBeacon) {{
-                        navigator.sendBeacon(debugUrl, debugBlob);
-                    }}
-
-                    setDebugText('close_summary_sent | beacon=' + closeOk + ' | changes=' + sessionChanges.length);
-                }} catch (e) {{
-                    console.log('sendCloseSummaryOnce error:', e);
-                    setDebugText('close_summary_error');
-                }}
+                persistDirtyChecklists(eventName, true);
+                releaseChecklistLock(currentChecklistKey, true);
             }}
 
             document.addEventListener('visibilitychange', function () {{
@@ -4781,22 +4735,22 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
             }}
             function oprIndicatorClass(item) {{
                 const status = normalizeStatus(item && item.status);
-                if (status === 'Р•СЃС‚СЊ') return 'status-indicator green';
-                if (status === 'РќРµС‚' || status === 'РќРµ С‚СЂРµР±СѓРµС‚СЃСЏ') return 'status-indicator gray';
+                if (status === 'Есть') return 'status-indicator green';
+                if (status === 'Нет' || status === 'Не требуется') return 'status-indicator gray';
                 return 'status-indicator';
             }}
             function buildOprStatusCell(item) {{
                 return `
                     <select class="status-select" data-role="opr-status" data-item-id="${{esc(item.id)}}">
                         <option value="" ${{normalizeStatus(item.status) === '' ? 'selected' : ''}}></option>
-                        <option value="Р•СЃС‚СЊ" ${{normalizeStatus(item.status) === 'Р•СЃС‚СЊ' ? 'selected' : ''}}>Р•СЃС‚СЊ</option>
-                        <option value="РќРµС‚" ${{normalizeStatus(item.status) === 'РќРµС‚' ? 'selected' : ''}}>РќРµС‚</option>
-                        <option value="РќРµ С‚СЂРµР±СѓРµС‚СЃСЏ" ${{normalizeStatus(item.status) === 'РќРµ С‚СЂРµР±СѓРµС‚СЃСЏ' ? 'selected' : ''}}>РќРµ С‚СЂРµР±СѓРµС‚СЃСЏ</option>
+                        <option value="Есть" ${{normalizeStatus(item.status) === 'Есть' ? 'selected' : ''}}>Есть</option>
+                        <option value="Нет" ${{normalizeStatus(item.status) === 'Нет' ? 'selected' : ''}}>Нет</option>
+                        <option value="Не требуется" ${{normalizeStatus(item.status) === 'Не требуется' ? 'selected' : ''}}>Не требуется</option>
                     </select>
                 `;
             }}
             function buildOprExtraCell(item) {{
-                return `<textarea class="concept-extra-textarea" data-role="opr-extra" data-item-id="${{esc(item.id)}}" placeholder="Р”РѕРї РёРЅС„РѕСЂРјР°С†РёСЏ">${{esc(item.extraInfo || '')}}</textarea>`;
+                return `<textarea class="concept-extra-textarea" data-role="opr-extra" data-item-id="${{esc(item.id)}}" placeholder="Доп информация">${{esc(item.extraInfo || '')}}</textarea>`;
             }}
             function renderOprGroup(group) {{
                 const groupItems = getItemsByGroup(group.id);
@@ -4806,7 +4760,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                         <div class="td">
                             <div class="cell-name">
                                 <div class="${{oprIndicatorClass(item)}}"></div>
-                                <div class="item-name" style="${{normalizeStatus(item.status) === 'РќРµ С‚СЂРµР±СѓРµС‚СЃСЏ' ? 'text-decoration:line-through;color:#98a2b3;' : ''}}">
+                                <div class="item-name" style="${{normalizeStatus(item.status) === 'Не требуется' ? 'text-decoration:line-through;color:#98a2b3;' : ''}}">
                                     ${{esc(item.name)}}
                                 </div>
                             </div>
@@ -4820,8 +4774,8 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
 
                 const addBlock = allowAdd ? `
                     <div class="add-item-row">
-                        <input class="add-item-input" id="oprAddItemInput_${{group.id}}" type="text" placeholder="РќРѕРІС‹Р№ РїСѓРЅРєС‚">
-                        <button class="add-item-btn" type="button" data-role="opr-add-item" data-group-id="${{group.id}}">Р”РѕР±Р°РІРёС‚СЊ РїСѓРЅРєС‚</button>
+                        <input class="add-item-input" id="oprAddItemInput_${{group.id}}" type="text" placeholder="Новый пункт">
+                        <button class="add-item-btn" type="button" data-role="opr-add-item" data-group-id="${{group.id}}">Добавить пункт</button>
                     </div>
                 ` : '';
 
@@ -4831,11 +4785,11 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                 return `
                     <div class="thead">
                         <div class="thead-top" style="grid-template-columns: 1.05fr 110px 130px 136px 1.25fr;">
-                            <div class="th">РџСѓРЅРєС‚</div>
-                            <div class="th">Р”РѕРєСѓРјРµРЅС‚</div>
-                            <div class="th">РЎС‚Р°С‚СѓСЃ</div>
-                            <div class="th">РџР»Р°РЅРёСЂСѓРµРјР°СЏ РґР°С‚Р°</div>
-                            <div class="th">Р”РѕРї РёРЅС„РѕСЂРјР°С†РёСЏ</div>
+                            <div class="th">Пункт</div>
+                            <div class="th">Документ</div>
+                            <div class="th">Статус</div>
+                            <div class="th">Планируемая дата</div>
+                            <div class="th">Доп информация</div>
                         </div>
                     </div>
                     <div>${{oprGroups.map(renderOprGroup).join('')}}</div>
@@ -4889,8 +4843,8 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                     if (!progressValueEl || !progressBarEl) {{
                         return;
                     }}
-                    const activeItems = items.filter(x => normalizeStatus(x.status) !== 'РќРµ С‚СЂРµР±СѓРµС‚СЃСЏ');
-                    const completedItems = activeItems.filter(x => normalizeStatus(x.status) === 'Р•СЃС‚СЊ');
+                    const activeItems = items.filter(x => normalizeStatus(x.status) !== 'Не требуется');
+                    const completedItems = activeItems.filter(x => normalizeStatus(x.status) === 'Есть');
                     const activeCount = activeItems.length;
                     const completedCount = completedItems.length;
                     const percent = activeCount ? Math.round((completedCount / activeCount) * 100) : 0;
@@ -4921,7 +4875,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                         const newValue = this.value;
                         item.status = newValue;
 
-                        if (newValue === 'РќРµ С‚СЂРµР±СѓРµС‚СЃСЏ') {{
+                        if (newValue === 'Не требуется') {{
                             item.group = 10;
                         }} else if (Number(item.group) === 10) {{
                             item.group = resolveOprGroupId(item);
@@ -5016,7 +4970,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                 }}
 
                 await flushCurrentChecklistSummary();
-                setSaveState('saving', 'Р—Р°РіСЂСѓР¶Р°РµРј...');
+                setSaveState('saving', 'Загружаем...');
 
                 try {{
                     const cachedData = checklistCache[targetKey];
@@ -5026,7 +4980,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                         debugLog('checklist_switched_cached', {{
                             checklistKey: targetKey
                         }});
-                        setSaveState('', 'РЎРѕС…СЂР°РЅРµРЅРѕ');
+                        setSaveState('', 'Сохранено');
                         return;
                     }}
 
@@ -5045,10 +4999,10 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                     debugLog('checklist_switched', {{
                         checklistKey: targetKey
                     }});
-                    setSaveState('', 'РЎРѕС…СЂР°РЅРµРЅРѕ');
+                    setSaveState('', 'Сохранено');
                 }} catch (e) {{
                     console.log('loadChecklistByKey error:', e);
-                    setSaveState('error', 'РћС€РёР±РєР° Р·Р°РіСЂСѓР·РєРё С‡РµРє-Р»РёСЃС‚Р°');
+                    setSaveState('error', 'Ошибка загрузки чек-листа');
                 }}
             }};
             {popup_session_enhancements_js}
@@ -5113,56 +5067,6 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
     </body>
     </html>
     """
-
-
-@app.get("/view", response_class=HTMLResponse)
-def view_get(dialogId: str = ""):
-    dialog_id = normalize_dialog_id(dialogId)
-    data = get_checklist(dialog_id)
-
-    items_html = ""
-    for item in data.get("items", []):
-        items_html += f"""
-        <div style="border-top:1px solid #eee;padding:12px 0;">
-            <div style="font-weight:700;margin-bottom:4px;">{html.escape(item.get('name', ''))}</div>
-            <div style="font-size:13px;color:#444;">Статус: {html.escape(item.get('status', '—'))}</div>
-            <div style="font-size:13px;color:#666;">План: {html.escape(item.get('plan', '—'))}</div>
-            <div style="font-size:13px;color:#666;">Факт: {html.escape(item.get('fact', '—'))}</div>
-        </div>
-        """
-
-    if not items_html:
-        items_html = '<div style="color:#666;">Нет пунктов чек-листа</div>'
-
-    notice_html = ""
-    if data.get("notice"):
-        notice_html = f"""
-        <div style="background:#fff8e1;border:1px solid #f3d37a;border-radius:10px;padding:12px;margin-bottom:16px;">
-            {html.escape(data.get("notice", ""))}
-        </div>
-        """
-
-    return f"""
-    <html>
-    <head>
-        <meta charset="utf-8">
-        <title>{html.escape(data.get("title", "Чек-лист ИД"))}</title>
-    </head>
-    <body style="font-family:Arial,sans-serif;padding:24px;max-width:900px;margin:0 auto;">
-        <h1 style="margin-bottom:8px;">{html.escape(data.get("title", "Чек-лист ИД"))}</h1>
-        <div style="color:#666;margin-bottom:6px;">dialogId: {html.escape(dialog_id or 'не передан')}</div>
-        <div style="color:#666;margin-bottom:6px;">Срок по договору: {html.escape(data.get("contractDeadline", "—"))}</div>
-        <div style="color:#666;margin-bottom:20px;">Начало работ: {html.escape(data.get("startDate", "—"))}</div>
-
-        {notice_html}
-
-        <div style="border:1px solid #e5e7eb;border-radius:12px;padding:16px;">
-            {items_html}
-        </div>
-    </body>
-    </html>
-    """
-
 
 @app.get("/api/checklist")
 def api_checklist(dialogId: str = "", checklistKey: str = "id"):
@@ -5861,11 +5765,3 @@ async def admin_upload(dialog_id: str = Form(...), file: UploadFile = File(...))
     </body>
     </html>
     """
-
-
-@app.get("/api/test")
-def api_test():
-    return JSONResponse({
-        "ok": True,
-        "message": "API проекта работает"
-    })
