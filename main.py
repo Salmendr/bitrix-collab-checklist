@@ -1470,7 +1470,8 @@ def status_emoji(status: str) -> str:
     return "🟢" if status else "⚪️"
 
 
-MESSAGE_FIGURE_SPACE = " "
+MESSAGE_ALIGNMENT_SPACE = " "
+MESSAGE_ALIGNMENT_SPACE_FACTOR = 2
 MESSAGE_CHECKLIST_ORDER = ["concept", "id", "opr"]
 MESSAGE_CHECKLIST_TITLES = {
     "id": "Чек-лист ИД",
@@ -1557,8 +1558,8 @@ def message_visible_length(value: str) -> int:
 
 
 def pad_message_left(value: str, target_width: int) -> str:
-    padding = max(target_width - message_visible_length(value), 0)
-    return value + (MESSAGE_FIGURE_SPACE * padding)
+    missing = max(target_width - message_visible_length(value), 0)
+    return value + (MESSAGE_ALIGNMENT_SPACE * (missing * MESSAGE_ALIGNMENT_SPACE_FACTOR))
 
 
 def get_checklist_message_title(checklist_key: str, checklist_title: str = "") -> str:
@@ -1653,7 +1654,7 @@ def should_show_empty_old_value(field: str) -> bool:
     return field in {"extraInfo", "source", "name"}
 
 
-def build_change_row(change: dict, field: str, checklist_key: str) -> tuple[str, str]:
+def build_change_entry(change: dict, field: str, checklist_key: str) -> dict:
     item_name = clean_cell_value(change.get("itemName")) or "Без названия"
     old_value = normalize_message_value(field, change.get("oldValue"), checklist_key)
     new_value = normalize_message_value(field, change.get("newValue"), checklist_key) or "—"
@@ -1661,7 +1662,16 @@ def build_change_row(change: dict, field: str, checklist_key: str) -> tuple[str,
     prefix = build_change_emoji(field, new_value, checklist_key)
 
     if field == "add-item":
-        return f"{prefix}{item_name} / {label}: →", "добавлен"
+        left = f"{prefix}{item_name} / {label}: →"
+        right = "добавлен"
+        return {
+            "field": field,
+            "itemName": item_name,
+            "oldValue": old_value,
+            "newValue": new_value,
+            "leftText": left,
+            "rightText": right,
+        }
 
     if old_value:
         left = f"{prefix}{item_name} / {label}: {old_value} →"
@@ -1670,22 +1680,44 @@ def build_change_row(change: dict, field: str, checklist_key: str) -> tuple[str,
     else:
         left = f"{prefix}{item_name} / {label}: →"
 
-    return left, new_value
+    return {
+        "field": field,
+        "itemName": item_name,
+        "oldValue": old_value,
+        "newValue": new_value,
+        "leftText": left,
+        "rightText": new_value,
+    }
 
 
-def build_aligned_section_lines(section_title: str, rows: list[tuple[str, str]]) -> list[str]:
+def collect_global_alignment_width(section_blocks: list[dict]) -> int:
+    widths = []
+    for block in section_blocks:
+        for section in block.get("sections") or []:
+            for row in section.get("rows") or []:
+                widths.append(message_visible_length(row.get("leftText") or ""))
+
+    return max(widths) if widths else 0
+
+
+def format_aligned_change_line(row: dict, target_width: int) -> str:
+    left = str(row.get("leftText") or "")
+    right = str(row.get("rightText") or "—")
+    return f"{pad_message_left(left, target_width)}|[b]{right}[/b]"
+
+
+def build_aligned_section_lines(section_title: str, rows: list[dict], target_width: int) -> list[str]:
     if not rows:
         return []
 
-    width = max(message_visible_length(left) for left, _ in rows)
     lines = [f"[b]{section_title}:[/b]", ""]
-    for left, right in rows:
-        lines.append(f"{pad_message_left(left, width)} |[b]{right}[/b]")
+    for row in rows:
+        lines.append(format_aligned_change_line(row, target_width))
     lines.append("")
     return lines
 
 
-def build_recent_changes_sections(changes: list, checklist_key: str) -> list[tuple[str, list[tuple[str, str]]]]:
+def build_recent_changes_sections(changes: list, checklist_key: str) -> list[dict]:
     grouped = split_changes(changes)
     key = normalize_checklist_key(checklist_key)
     section_order = ["status", "date"]
@@ -1701,30 +1733,42 @@ def build_recent_changes_sections(changes: list, checklist_key: str) -> list[tup
         field_changes = grouped.get(field) or []
         if not field_changes:
             continue
-        rows = [build_change_row(change, field, key) for change in field_changes]
-        sections.append((MESSAGE_SECTION_LABELS.get(field, field), rows))
+        rows = [build_change_entry(change, field, key) for change in field_changes]
+        sections.append({
+            "field": field,
+            "title": MESSAGE_SECTION_LABELS.get(field, field),
+            "rows": rows,
+        })
     return sections
 
 
 def build_recent_changes_text(
     changes: list,
     checklist_title: str = "Чек-лист ИД",
-    checklist_key: str = "id"
+    checklist_key: str = "id",
+    sections: list[dict] | None = None,
+    alignment_width: int = 0,
 ) -> str:
     title = get_checklist_message_title(checklist_key, checklist_title).upper()
-    sections = build_recent_changes_sections(changes, checklist_key)
+    sections = sections if sections is not None else build_recent_changes_sections(changes, checklist_key)
     lines = [f"✏️[b]ИЗМЕНЕНИЯ В {title}[/b]", ""]
 
     if sections:
-        for section_title, rows in sections:
-            lines.extend(build_aligned_section_lines(section_title, rows))
+        target_width = alignment_width or collect_global_alignment_width([{"sections": sections}])
+        for section in sections:
+            lines.extend(build_aligned_section_lines(section["title"], section["rows"], target_width))
     else:
         lines.extend(["Изменений нет", ""])
 
     return "\n".join(lines).strip()
 
 
-def build_checklist_message_block(data: dict, changes: list) -> str:
+def build_checklist_message_block(
+    data: dict,
+    changes: list,
+    sections: list[dict] | None = None,
+    alignment_width: int = 0,
+) -> str:
     checklist_key = normalize_checklist_key(data.get("checklistKey") or "id")
     checklist_title = get_checklist_message_title(checklist_key, data.get("title") or "")
     dialog_id = normalize_dialog_id(data.get("resolvedDialogId") or data.get("dialogId") or "")
@@ -1732,7 +1776,13 @@ def build_checklist_message_block(data: dict, changes: list) -> str:
     link_caption = get_checklist_link_caption(checklist_key)
 
     parts = [
-        build_recent_changes_text(changes, checklist_title, checklist_key),
+        build_recent_changes_text(
+            changes,
+            checklist_title,
+            checklist_key,
+            sections=sections,
+            alignment_width=alignment_width,
+        ),
         "",
         build_progress_text(data),
         "",
@@ -1761,6 +1811,7 @@ def build_multi_checklist_chat_message(sessions: list, editor: dict) -> str:
             "checklistKey": checklist_key,
             "data": data,
             "changes": changes,
+            "sections": build_recent_changes_sections(changes, checklist_key),
         })
 
     if not indexed:
@@ -1768,10 +1819,16 @@ def build_multi_checklist_chat_message(sessions: list, editor: dict) -> str:
 
     order_map = {key: index for index, key in enumerate(MESSAGE_CHECKLIST_ORDER)}
     indexed.sort(key=lambda item: order_map.get(item["checklistKey"], 999))
+    alignment_width = collect_global_alignment_width(indexed)
 
     parts = []
     for entry in indexed:
-        block = build_checklist_message_block(entry["data"], entry["changes"])
+        block = build_checklist_message_block(
+            entry["data"],
+            entry["changes"],
+            sections=entry["sections"],
+            alignment_width=alignment_width,
+        )
         if block:
             parts.append(block)
 
@@ -1786,11 +1843,16 @@ def build_multi_checklist_chat_message(sessions: list, editor: dict) -> str:
 
 
 def build_checklist_chat_message(data: dict, changes: list, editor: dict) -> str:
+    checklist_key = normalize_checklist_key(data.get("checklistKey") or "id")
+    sections = build_recent_changes_sections(changes, checklist_key)
+    alignment_width = collect_global_alignment_width([{"sections": sections}])
     return build_multi_checklist_chat_message([
         {
-            "checklistKey": normalize_checklist_key(data.get("checklistKey") or "id"),
+            "checklistKey": checklist_key,
             "data": data,
             "changes": changes,
+            "sections": sections,
+            "alignmentWidth": alignment_width,
         }
     ], editor)
 
