@@ -1,16 +1,19 @@
 import os
+import threading
 import uuid
 from collections import defaultdict
 from pathlib import Path
 from fastapi import FastAPI, Request, UploadFile, File, Form
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 import requests
 import json
 import html
 import sqlite3
+import re
 from io import BytesIO
 from datetime import datetime
+from urllib.parse import quote, urlparse
 import openpyxl
 
 app = FastAPI()
@@ -36,13 +39,17 @@ DEBUG_DIR = BASE_DIR / "debug"
 DEBUG_DIR.mkdir(parents=True, exist_ok=True)
 
 DEBUG_LOG_PATH = DEBUG_DIR / "close_popup.log"
+EDIT_LOCK_TTL_SECONDS = 45
+EDIT_LOCK_HEARTBEAT_SECONDS = 15
+ACTIVE_CHECKLIST_LOCKS = {}
+ACTIVE_CHECKLIST_LOCKS_GUARD = threading.Lock()
 
 app.mount("/uploads", StaticFiles(directory=str(UPLOAD_ROOT)), name="uploads")
 
 PROJECT_CHECKLISTS = [
     {"key": "id", "title": "Чек-лист ИД"},
-    {"key": "opr", "title": "Чек-лист ОПР"},
     {"key": "concept", "title": "Чек-лист Концепция"},
+    {"key": "opr", "title": "Чек-лист ОПР"},
 ]
 
 CHECKLIST_GROUPS = {
@@ -193,6 +200,106 @@ CONCEPT_GROUPS = [
     },
 ]
 
+OPR_GROUPS = [
+    {
+        "id": 1,
+        "title": "Генеральный план",
+        "items": [
+            "схема генплана с указанием проектируемых и существующих зданий, сооружений, площадок, парковок, технико-экономическими показателями (расчетными и нормативными)",
+            "схема существующих СЗЗ, водоохранных зон, приаэродромных территорий, территорий и зон ОКН, зон ЗСО водозаборов, оползнеопасных зон, подтопления и затопления и т.д.",
+            "схема зонирования территории по функционалу",
+            "схема пешеходно-транспортных связей",
+            "схема пожарных проездов",
+            "принципиальная схема благоустройства",
+            "принципиальная схема вертикальной планировки",
+            "принципиальная схема сводного плана сетей",
+        ],
+    },
+    {
+        "id": 2,
+        "title": "Архитектурные решения",
+        "items": [
+            "схемы функционального зонирования",
+            "планировки",
+            "разрезы",
+            "схема вертикальных связей и потоков",
+            "технико-экономические показатели",
+        ],
+    },
+    {
+        "id": 3,
+        "title": "Конструктивные решения",
+        "items": [
+            "принципиальные схемы несущих конструкций",
+            "блок-схема разделения зданий на блоки (при необходимости)",
+        ],
+    },
+    {
+        "id": 4,
+        "title": "Технологические решения",
+        "items": [
+            "принципиальные технологические решения с указанием наименований помещений, потоков",
+            "количество сотрудников/посетителей",
+            "режим работы",
+        ],
+    },
+    {
+        "id": 5,
+        "title": "Электроснабжение",
+        "items": [
+            "принципиальный план наружных сетей электроснабжения",
+            "принципиальная схема электроснабжения",
+            "места расстановки основного щитового оборудования на планах (ВРУ, ГРЩ)",
+            "сбор укрупненных нагрузок, категории электроснабжения",
+        ],
+    },
+    {
+        "id": 6,
+        "title": "Водоснабжение и водоотведение",
+        "items": [
+            "принципиальный план наружных сетей водоснабжения и водоотведения",
+            "принципиальные схемы водоснабжения и водоотведения",
+            "места прохода основных стояков сетей",
+            "сбор укрупненных нагрузок",
+        ],
+    },
+    {
+        "id": 7,
+        "title": "Отопление, вентиляция и кондиционирование",
+        "items": [
+            "блок-схема теплоснабжения",
+            "планы принципиального размещения вентоборудования и кондиционирования",
+            "план-схема с размещением вертикальных шахт размещения вентиляции и трубопроводов",
+            "принципиальные схемы системы вентиляции",
+            "принципиальные схемы системы отопления",
+            "принципиальные схемы системы кондиционирования",
+            "принципиальные схемы тепловой сети",
+        ],
+    },
+    {
+        "id": 8,
+        "title": "Противопожарные системы",
+        "items": [
+            "схемы путей эвакуации",
+            "схема разделения на пожарные отсеки",
+            "схемы противопожарных преград",
+            "схема противопожарного водопровода",
+        ],
+    },
+    {
+        "id": 9,
+        "title": "Карточка согласования основных материалов и оборудования",
+        "items": [
+            "карточка согласования основных материалов и оборудования",
+        ],
+    },
+    {
+        "id": 10,
+        "title": "Не требуется",
+        "items": [],
+    },
+]
+
 STATUS_OPTIONS = [
     "",
     "Есть",
@@ -206,6 +313,8 @@ PRIORITY_OPTIONS = ["white", "green", "gray"]
 def build_default_groups(checklist_key: str = "id"):
     if checklist_key == "concept":
         return [{"id": group["id"], "title": group["title"]} for group in CONCEPT_GROUPS]
+    if checklist_key == "opr":
+        return [{"id": group["id"], "title": group["title"]} for group in OPR_GROUPS]
 
     return [
         {"id": group_id, "title": group_data["title"]}
@@ -229,6 +338,16 @@ def resolve_concept_group_id_by_item_id_or_name(item: dict) -> int:
     item_id = str(item.get("id") or "")
     name = str(item.get("name") or "").strip()
 
+    if item_id.startswith("concept_g"):
+        try:
+            group_part = item_id.split("_", 2)[1]
+            if group_part.startswith("g"):
+                group_id = int(group_part[1:])
+                if group_id != 10:
+                    return group_id
+        except Exception:
+            pass
+
     for group in CONCEPT_GROUPS:
         if group["id"] == 10:
             continue
@@ -236,6 +355,33 @@ def resolve_concept_group_id_by_item_id_or_name(item: dict) -> int:
         for order, spec in enumerate(group["items"], start=1):
             expected_id = f"concept_g{group['id']}_{order}"
             if item_id == expected_id or name == spec["name"]:
+                return group["id"]
+
+    current_group = int(item.get("group") or 1)
+    return 1 if current_group == 10 else current_group
+
+
+def resolve_opr_group_id_by_item_id_or_name(item: dict) -> int:
+    item_id = str(item.get("id") or "")
+    name = str(item.get("name") or "").strip()
+
+    if item_id.startswith("opr_g"):
+        match = item_id.split("_", 2)
+        if len(match) > 1 and match[1].startswith("g"):
+            try:
+                group_id = int(match[1][1:])
+                if group_id != 10:
+                    return group_id
+            except Exception:
+                pass
+
+    for group in OPR_GROUPS:
+        if group["id"] == 10:
+            continue
+
+        for order, item_name in enumerate(group["items"], start=1):
+            expected_id = f"opr_g{group['id']}_{order}"
+            if item_id == expected_id or name == item_name:
                 return group["id"]
 
     current_group = int(item.get("group") or 1)
@@ -382,6 +528,37 @@ def build_default_checklist_template(dialog_id: str = "", checklist_key: str = "
             "notice": "",
         }, "concept")
 
+    if checklist_key == "opr":
+        for group in OPR_GROUPS:
+            if group["id"] == 10:
+                continue
+
+            for order, name in enumerate(group["items"], start=1):
+                items.append({
+                    "id": f"opr_g{group['id']}_{order}",
+                    "group": group["id"],
+                    "order": order,
+                    "name": name,
+                    "priority": "white",
+                    "status": "",
+                    "plannedDate": "",
+                    "extraInfo": "",
+                    "documentUrl": "",
+                    "documentName": "",
+                    "isCustom": False,
+                })
+
+        return normalize_checklist_data({
+            "title": "Чек-лист ОПР",
+            "checklistKey": "opr",
+            "collabTitle": "",
+            "contractDeadline": "",
+            "startDate": "",
+            "groups": build_default_groups("opr"),
+            "items": items,
+            "notice": "",
+        }, "opr")
+
     for group_id, group_data in CHECKLIST_GROUPS.items():
         if group_id == 4:
             continue
@@ -433,6 +610,55 @@ def calculate_progress(items: list) -> dict:
     }
 
 
+def calculate_concept_progress(items: list) -> dict:
+    items = items or []
+
+    def is_active(item: dict) -> bool:
+        return clean_cell_value(item.get("status")) != "Не требуется"
+
+    def is_completed(item: dict) -> bool:
+        status = clean_cell_value(item.get("status"))
+        status_kind = clean_cell_value(item.get("statusKind")) or "bool"
+
+        if status == "Не требуется":
+            return False
+
+        if status_kind == "bool":
+            return status == "Да"
+
+        return bool(status)
+
+    active_items = [item for item in items if is_active(item)]
+    completed_items = [item for item in active_items if is_completed(item)]
+
+    active_count = len(active_items)
+    completed_count = len(completed_items)
+    progress_percent = round((completed_count / active_count) * 100) if active_count else 0
+
+    return {
+        "activeCount": active_count,
+        "completedCount": completed_count,
+        "progressPercent": progress_percent,
+    }
+
+
+def calculate_opr_progress(items: list) -> dict:
+    items = items or []
+
+    active_items = [item for item in items if normalize_status(item.get("status")) != "Не требуется"]
+    completed_items = [item for item in active_items if normalize_status(item.get("status")) == "Есть"]
+
+    active_count = len(active_items)
+    completed_count = len(completed_items)
+    progress_percent = round((completed_count / active_count) * 100) if active_count else 0
+
+    return {
+        "activeCount": active_count,
+        "completedCount": completed_count,
+        "progressPercent": progress_percent,
+    }
+
+
 def normalize_checklist_data(data: dict, checklist_key: str = "id") -> dict:
     data = dict(data or {})
     checklist_key = str(checklist_key or data.get("checklistKey") or "id").strip() or "id"
@@ -474,6 +700,8 @@ def normalize_checklist_data(data: dict, checklist_key: str = "id") -> dict:
                 if not item.get("id"):
                     item["id"] = f"concept_g{group['id']}_{order}"
 
+        progress = calculate_concept_progress(normalized_items)
+
         return {
             "title": data.get("title") or "Чек-лист Концепция",
             "checklistKey": "concept",
@@ -484,9 +712,66 @@ def normalize_checklist_data(data: dict, checklist_key: str = "id") -> dict:
             "projectChecklists": build_project_checklists(),
             "items": normalized_items,
             "notice": data.get("notice", ""),
-            "activeCount": 0,
-            "completedCount": 0,
-            "progressPercent": 0,
+            "activeCount": progress["activeCount"],
+            "completedCount": progress["completedCount"],
+            "progressPercent": progress["progressPercent"],
+        }
+
+    if checklist_key == "opr":
+        raw_items = data.get("items", []) or []
+        normalized_items = []
+
+        for item in raw_items:
+            item = dict(item or {})
+            name = clean_cell_value(item.get("name"))
+            if not name:
+                continue
+
+            status = normalize_status(item.get("status"))
+            group_id = int(item.get("group") or 0)
+            if status == "Не требуется":
+                group_id = 10
+            elif group_id == 10 or not group_id:
+                group_id = resolve_opr_group_id_by_item_id_or_name(item)
+
+            normalized_items.append({
+                "id": str(item.get("id") or ""),
+                "group": group_id,
+                "order": int(item.get("order") or 0),
+                "name": name,
+                "priority": derive_indicator_from_status(status),
+                "status": status,
+                "plannedDate": normalize_date_string(item.get("plannedDate")),
+                "extraInfo": clean_cell_value(item.get("extraInfo")),
+                "documentUrl": clean_cell_value(item.get("documentUrl")),
+                "documentName": clean_cell_value(item.get("documentName")),
+                "isCustom": bool(item.get("isCustom", False)),
+            })
+
+        normalized_items.sort(key=lambda x: (x["group"], x["order"], x["name"]))
+
+        for group in OPR_GROUPS:
+            group_items = [x for x in normalized_items if x["group"] == group["id"]]
+            for order, item in enumerate(group_items, start=1):
+                item["order"] = order
+                if not item.get("id"):
+                    item["id"] = f"opr_g{group['id']}_{order}"
+
+        progress = calculate_opr_progress(normalized_items)
+
+        return {
+            "title": data.get("title") or "Чек-лист ОПР",
+            "checklistKey": "opr",
+            "collabTitle": clean_cell_value(data.get("collabTitle")),
+            "contractDeadline": "",
+            "startDate": "",
+            "groups": [{"id": group["id"], "title": group["title"]} for group in OPR_GROUPS],
+            "projectChecklists": build_project_checklists(),
+            "items": normalized_items,
+            "notice": data.get("notice", ""),
+            "activeCount": progress["activeCount"],
+            "completedCount": progress["completedCount"],
+            "progressPercent": progress["progressPercent"],
         }
 
     raw_items = data.get("items", []) or []
@@ -642,10 +927,143 @@ def write_debug_log(event: str, payload: dict):
         f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
 
-def status_emoji(status: str) -> str:
-    status = normalize_status(status)
+def make_checklist_lock_key(dialog_id: str, checklist_key: str) -> str:
+    return f"{normalize_dialog_id(dialog_id)}::{normalize_checklist_key(checklist_key)}"
 
-    if status == "Есть":
+
+def _cleanup_expired_checklist_locks(now_ts: float | None = None):
+    now_ts = now_ts or datetime.now().timestamp()
+    expired_keys = []
+
+    for lock_key, lock_data in ACTIVE_CHECKLIST_LOCKS.items():
+        updated_at = float(lock_data.get("updatedAtTs") or 0)
+        if now_ts - updated_at > EDIT_LOCK_TTL_SECONDS:
+            expired_keys.append(lock_key)
+
+    for lock_key in expired_keys:
+        ACTIVE_CHECKLIST_LOCKS.pop(lock_key, None)
+
+
+def acquire_checklist_lock(
+    dialog_id: str,
+    checklist_key: str,
+    user_id: str,
+    user_name: str,
+    lock_id: str,
+) -> dict:
+    dialog_id = normalize_dialog_id(dialog_id)
+    checklist_key = normalize_checklist_key(checklist_key)
+    user_id = str(user_id or "").strip()
+    user_name = str(user_name or "").strip()
+    lock_id = str(lock_id or "").strip()
+    now = datetime.now()
+    now_ts = now.timestamp()
+    lock_key = make_checklist_lock_key(dialog_id, checklist_key)
+
+    with ACTIVE_CHECKLIST_LOCKS_GUARD:
+        _cleanup_expired_checklist_locks(now_ts)
+        existing = ACTIVE_CHECKLIST_LOCKS.get(lock_key)
+
+        if existing and existing.get("lockId") != lock_id:
+            return {
+                "ok": True,
+                "owned": False,
+                "lockedByOther": True,
+                "lockId": str(existing.get("lockId") or ""),
+                "dialogId": dialog_id,
+                "checklistKey": checklist_key,
+                "userId": str(existing.get("userId") or ""),
+                "userName": str(existing.get("userName") or "Другой сотрудник"),
+                "updatedAt": str(existing.get("updatedAt") or ""),
+            }
+
+        if not lock_id:
+            lock_id = uuid.uuid4().hex
+
+        ACTIVE_CHECKLIST_LOCKS[lock_key] = {
+            "lockId": lock_id,
+            "dialogId": dialog_id,
+            "checklistKey": checklist_key,
+            "userId": user_id,
+            "userName": user_name or "Неизвестный пользователь",
+            "updatedAt": now.isoformat(),
+            "updatedAtTs": now_ts,
+        }
+
+        return {
+            "ok": True,
+            "owned": True,
+            "lockedByOther": False,
+            "lockId": lock_id,
+            "dialogId": dialog_id,
+            "checklistKey": checklist_key,
+            "userId": user_id,
+            "userName": user_name or "Неизвестный пользователь",
+            "updatedAt": now.isoformat(),
+        }
+
+
+def heartbeat_checklist_lock(
+    dialog_id: str,
+    checklist_key: str,
+    user_id: str,
+    user_name: str,
+    lock_id: str,
+) -> dict:
+    return acquire_checklist_lock(dialog_id, checklist_key, user_id, user_name, lock_id)
+
+
+def release_checklist_lock(dialog_id: str, checklist_key: str, lock_id: str = "", user_id: str = "") -> dict:
+    dialog_id = normalize_dialog_id(dialog_id)
+    checklist_key = normalize_checklist_key(checklist_key)
+    lock_id = str(lock_id or "").strip()
+    user_id = str(user_id or "").strip()
+    lock_key = make_checklist_lock_key(dialog_id, checklist_key)
+
+    with ACTIVE_CHECKLIST_LOCKS_GUARD:
+        _cleanup_expired_checklist_locks()
+        existing = ACTIVE_CHECKLIST_LOCKS.get(lock_key)
+        if not existing:
+            return {
+                "ok": True,
+                "released": False,
+                "dialogId": dialog_id,
+                "checklistKey": checklist_key,
+            }
+
+        if lock_id and existing.get("lockId") != lock_id:
+            return {
+                "ok": True,
+                "released": False,
+                "dialogId": dialog_id,
+                "checklistKey": checklist_key,
+                "lockedByOther": True,
+                "userName": str(existing.get("userName") or ""),
+            }
+
+        if not lock_id and user_id and str(existing.get("userId") or "") != user_id:
+            return {
+                "ok": True,
+                "released": False,
+                "dialogId": dialog_id,
+                "checklistKey": checklist_key,
+                "lockedByOther": True,
+                "userName": str(existing.get("userName") or ""),
+            }
+
+        ACTIVE_CHECKLIST_LOCKS.pop(lock_key, None)
+        return {
+            "ok": True,
+            "released": True,
+            "dialogId": dialog_id,
+            "checklistKey": checklist_key,
+        }
+
+
+def status_emoji(status: str) -> str:
+    status = display_status_text(status)
+
+    if status == "Есть" or status == "Да":
         return "🟢"
     if status == "Нет":
         return "🔴"
@@ -655,8 +1073,9 @@ def status_emoji(status: str) -> str:
 
 
 def display_status_text(status: str) -> str:
-    status = normalize_status(status)
-    return status if status else ""
+    status = clean_cell_value(status)
+    normalized = normalize_status(status)
+    return normalized or status
 
 
 def format_plan_suffix(plan: str) -> str:
@@ -666,21 +1085,28 @@ def format_plan_suffix(plan: str) -> str:
     return f" | До {plan}"
 
 
-def split_changes(changes: list) -> tuple[list, list]:
+def split_changes(changes: list) -> tuple[list, list, list, list, list]:
     status_changes = []
     date_changes = []
+    document_changes = []
+    add_item_changes = []
+    extra_info_changes = []
 
     for change in changes or []:
         field = str(change.get("field") or "").strip()
 
         if field == "status":
             status_changes.append(change)
-        elif field == "plan":
+        elif field in {"plan", "plannedDate"}:
             date_changes.append(change)
-        # fact полностью игнорируем
-        # document/add-item в верхнем блоке не показываем
+        elif field == "document":
+            document_changes.append(change)
+        elif field == "add-item":
+            add_item_changes.append(change)
+        elif field == "extraInfo":
+            extra_info_changes.append(change)
 
-    return status_changes, date_changes
+    return status_changes, date_changes, document_changes, add_item_changes, extra_info_changes
 
 
 def format_change_arrow(old_value: str, new_value: str) -> str:
@@ -694,8 +1120,8 @@ def format_change_arrow(old_value: str, new_value: str) -> str:
 
 def format_status_change_line(change: dict) -> str:
     item_name = str(change.get("itemName") or "").strip() or "Без названия"
-    new_value = normalize_status(change.get("newValue"))
-    old_value = normalize_status(change.get("oldValue"))
+    new_value = display_status_text(change.get("newValue"))
+    old_value = display_status_text(change.get("oldValue"))
 
     emoji = status_emoji(new_value)
     arrow = format_change_arrow(old_value, new_value)
@@ -710,6 +1136,25 @@ def format_plan_change_line(change: dict) -> str:
 
     arrow = format_change_arrow(old_value, new_value)
     return f"📆{item_name} / План: {arrow}"
+
+
+def format_document_change_line(change: dict) -> str:
+    item_name = str(change.get("itemName") or "").strip() or "Без названия"
+    old_value = str(change.get("oldValue") or "").strip() or "—"
+    new_value = str(change.get("newValue") or "").strip() or "—"
+    return f"📎{item_name} / Документ: {old_value} → [B]{new_value}[/B]"
+
+
+def format_add_item_change_line(change: dict) -> str:
+    item_name = str(change.get("itemName") or "").strip() or "Без названия"
+    return f"➕{item_name} / Пункт: → [B]добавлен[/B]"
+
+
+def format_extra_info_change_line(change: dict) -> str:
+    item_name = str(change.get("itemName") or "").strip() or "Без названия"
+    old_value = str(change.get("oldValue") or "").strip() or "—"
+    new_value = str(change.get("newValue") or "").strip() or "—"
+    return f"📝{item_name} / Доп информация: {old_value} → [B]{new_value}[/B]"
 
 
 def collect_item_change_meta(item_id: str, changes: list) -> dict:
@@ -771,11 +1216,12 @@ def build_checklist_line(item: dict, changes: list) -> str:
     return line
 
 
-def build_recent_changes_text(changes: list) -> str:
-    status_changes, date_changes = split_changes(changes)
+def build_recent_changes_text(changes: list, checklist_title: str = "Чек-лист ИД") -> str:
+    status_changes, date_changes, document_changes, add_item_changes, extra_info_changes = split_changes(changes)
+    checklist_title = clean_cell_value(checklist_title) or "Чек-лист ИД"
 
     lines = [
-        "[B]✏️ИЗМЕНЕНИЯ В ЧЕК-ЛИСТ ИД[/B]",
+        f"[B]✏️ИЗМЕНЕНИЯ В {checklist_title.upper()}[/B]",
         "",
     ]
 
@@ -793,11 +1239,51 @@ def build_recent_changes_text(changes: list) -> str:
             lines.append(format_plan_change_line(change))
         lines.append("")
 
-    if not status_changes and not date_changes:
+    if document_changes:
+        lines.append("[B]Документы:[/B]")
+        lines.append("")
+        for change in document_changes:
+            lines.append(format_document_change_line(change))
+        lines.append("")
+
+    if add_item_changes:
+        lines.append("[B]Пункты:[/B]")
+        lines.append("")
+        for change in add_item_changes:
+            lines.append(format_add_item_change_line(change))
+        lines.append("")
+
+    if extra_info_changes:
+        lines.append("[B]Доп информация:[/B]")
+        lines.append("")
+        for change in extra_info_changes:
+            lines.append(format_extra_info_change_line(change))
+        lines.append("")
+
+    if not status_changes and not date_changes and not document_changes and not add_item_changes and not extra_info_changes:
         lines.append("Изменений нет")
         lines.append("")
 
     return "\n".join(lines).strip()
+
+
+def build_checklist_message_link(dialog_id: str, checklist_key: str) -> str:
+    dialog_id = normalize_dialog_id(dialog_id)
+    checklist_key = normalize_checklist_key(checklist_key)
+
+    if not BITRIX_TECH_WEBHOOK_URL:
+        return ""
+
+    parsed = urlparse(BITRIX_TECH_WEBHOOK_URL)
+    if not parsed.scheme or not parsed.netloc:
+        return ""
+
+    base_url = f"{parsed.scheme}://{parsed.netloc}"
+    app_path = APP_PORTAL_PATH if APP_PORTAL_PATH.endswith("/") else APP_PORTAL_PATH + "/"
+    return (
+        f"{base_url}{app_path}"
+        f"?dialogId={quote(dialog_id)}&checklistKey={quote(checklist_key)}"
+    )
 
 
 def build_editor_text(editor: dict) -> str:
@@ -856,14 +1342,519 @@ def build_checklist_full_text(data: dict, changes: list) -> str:
 
 
 def build_checklist_chat_message(data: dict, changes: list, editor: dict) -> str:
+    checklist_title = (data.get("title") or "Чек-лист ИД").strip()
     parts = [
-        build_recent_changes_text(changes),
+        build_recent_changes_text(changes, checklist_title),
         "",
         build_editor_text(editor),
-        "",
-        build_checklist_full_text(data, changes),
     ]
+    dialog_id = normalize_dialog_id(data.get("resolvedDialogId") or data.get("dialogId") or "")
+    checklist_key = normalize_checklist_key(data.get("checklistKey") or "id")
+    link_url = build_checklist_message_link(dialog_id, checklist_key)
+    if link_url:
+        parts.extend([
+            "",
+            f"[URL={link_url}]Чтобы посмотреть весь чек-лист нажмите на этот текст[/URL]",
+        ])
+    else:
+        parts.extend([
+            "",
+            "Чтобы посмотреть весь чек-лист нажмите на этот текст",
+        ])
     return "\n".join(parts).strip()
+
+
+def format_plan_change_line(change: dict) -> str:
+    item_name = str(change.get("itemName") or "").strip() or "Без названия"
+    old_value = str(change.get("oldValue") or "").strip()
+    new_value = str(change.get("newValue") or "").strip()
+
+    arrow = format_change_arrow(old_value, new_value)
+    field = str(change.get("field") or "").strip()
+    field_title = "Планируемая дата" if field == "plannedDate" else "План"
+    return f"📆{item_name} / {field_title}: {arrow}"
+
+
+def build_recent_changes_text(
+    changes: list,
+    checklist_title: str = "Чек-лист ИД",
+    checklist_key: str = "id"
+) -> str:
+    status_changes, date_changes, document_changes, add_item_changes, extra_info_changes = split_changes(changes)
+    checklist_title = clean_cell_value(checklist_title) or "Чек-лист ИД"
+    checklist_key = normalize_checklist_key(checklist_key)
+
+    lines = [
+        f"[B]✏️ИЗМЕНЕНИЯ В {checklist_title.upper()}[/B]",
+        "",
+    ]
+
+    if status_changes:
+        lines.append("[B]Статусы:[/B]")
+        lines.append("")
+        for change in status_changes:
+            lines.append(format_status_change_line(change))
+        lines.append("")
+
+    if date_changes:
+        lines.append("[B]Даты:[/B]")
+        lines.append("")
+        for change in date_changes:
+            lines.append(format_plan_change_line(change))
+        lines.append("")
+
+    if checklist_key != "opr" and document_changes:
+        lines.append("[B]Документы:[/B]")
+        lines.append("")
+        for change in document_changes:
+            lines.append(format_document_change_line(change))
+        lines.append("")
+
+    if checklist_key != "opr" and add_item_changes:
+        lines.append("[B]Пункты:[/B]")
+        lines.append("")
+        for change in add_item_changes:
+            lines.append(format_add_item_change_line(change))
+        lines.append("")
+
+    if checklist_key != "opr" and extra_info_changes:
+        lines.append("[B]Доп информация:[/B]")
+        lines.append("")
+        for change in extra_info_changes:
+            lines.append(format_extra_info_change_line(change))
+        lines.append("")
+
+    has_visible_changes = bool(status_changes or date_changes)
+    if checklist_key != "opr":
+        has_visible_changes = has_visible_changes or bool(document_changes or add_item_changes or extra_info_changes)
+
+    if not has_visible_changes:
+        lines.append("Изменений нет")
+        lines.append("")
+
+    return "\n".join(lines).strip()
+
+
+def build_checklist_chat_message(data: dict, changes: list, editor: dict) -> str:
+    checklist_title = (data.get("title") or "Чек-лист ИД").strip()
+    checklist_key = normalize_checklist_key(data.get("checklistKey") or "id")
+    parts = [
+        build_recent_changes_text(changes, checklist_title, checklist_key),
+        "",
+        build_editor_text(editor),
+    ]
+    dialog_id = normalize_dialog_id(data.get("resolvedDialogId") or data.get("dialogId") or "")
+    link_url = build_checklist_message_link(dialog_id, checklist_key)
+    if link_url:
+        parts.extend([
+            "",
+            f"[URL={link_url}]Чтобы посмотреть весь чек-лист нажмите на этот текст[/URL]",
+        ])
+    else:
+        parts.extend([
+            "",
+            "Чтобы посмотреть весь чек-лист нажмите на этот текст",
+        ])
+    return "\n".join(parts).strip()
+
+
+def status_emoji(status: str) -> str:
+    status = display_status_text(status)
+
+    if status in {"Есть", "Да"}:
+        return "🟢"
+    if status == "Нет":
+        return "🔴"
+    if status == "Не требуется":
+        return "🚫"
+    return "🟢" if status else "⚪️"
+
+
+MESSAGE_ALIGNMENT_SPACE = " "
+MESSAGE_ALIGNMENT_SPACE_FACTOR = 2
+MESSAGE_CHECKLIST_ORDER = ["concept", "id", "opr"]
+MESSAGE_CHECKLIST_TITLES = {
+    "id": "Чек-лист ИД",
+    "concept": "Чек-лист Концепция",
+    "opr": "Чек-лист ОПР",
+}
+MESSAGE_SECTION_LABELS = {
+    "status": "Статусы",
+    "date": "Даты",
+    "extraInfo": "Доп информация",
+    "source": "Нормативы",
+    "name": "Пункты",
+    "document": "Документы",
+    "add-item": "Пункты",
+}
+
+
+def display_status_text(status: str) -> str:
+    status = clean_cell_value(status)
+    normalized = normalize_status(status)
+    return normalized or status
+
+
+def build_progress_text(data: dict) -> str:
+    checklist_key = normalize_checklist_key(data.get("checklistKey") or "id")
+    items = data.get("items") or []
+
+    if checklist_key == "concept":
+        active_items = [item for item in items if clean_cell_value(item.get("status")) != "Не требуется"]
+        completed_items = []
+        for item in active_items:
+            status = clean_cell_value(item.get("status"))
+            status_kind = clean_cell_value(item.get("statusKind")) or "bool"
+            if status_kind == "bool":
+                if status == "Да":
+                    completed_items.append(item)
+            elif status:
+                completed_items.append(item)
+    else:
+        active_items = [item for item in items if display_status_text(item.get("status")) != "Не требуется"]
+        completed_items = [item for item in active_items if display_status_text(item.get("status")) == "Есть"]
+
+    percent = round((len(completed_items) / len(active_items)) * 100) if active_items else 0
+    return f"📊Прогресс: {percent}%"
+
+
+def split_changes(changes: list) -> dict:
+    groups = {
+        "status": [],
+        "date": [],
+        "extraInfo": [],
+        "source": [],
+        "name": [],
+        "document": [],
+        "add-item": [],
+    }
+
+    for change in changes or []:
+        field = str(change.get("field") or "").strip()
+        if field == "status":
+            groups["status"].append(change)
+        elif field in {"plan", "plannedDate"}:
+            groups["date"].append(change)
+        elif field == "extraInfo":
+            groups["extraInfo"].append(change)
+        elif field == "source":
+            groups["source"].append(change)
+        elif field == "name":
+            groups["name"].append(change)
+        elif field == "document":
+            groups["document"].append(change)
+        elif field == "add-item":
+            groups["add-item"].append(change)
+
+    return groups
+
+
+def strip_message_markup(value: str) -> str:
+    return re.sub(r"\[[^\]]+\]", "", str(value or ""))
+
+
+def message_visible_length(value: str) -> int:
+    return len(strip_message_markup(value))
+
+
+def pad_message_left(value: str, target_width: int) -> str:
+    missing = max(target_width - message_visible_length(value), 0)
+    return value + (MESSAGE_ALIGNMENT_SPACE * (missing * MESSAGE_ALIGNMENT_SPACE_FACTOR))
+
+
+def get_checklist_message_title(checklist_key: str, checklist_title: str = "") -> str:
+    normalized_key = normalize_checklist_key(checklist_key)
+    cleaned_title = clean_cell_value(checklist_title)
+    return cleaned_title or MESSAGE_CHECKLIST_TITLES.get(normalized_key, "Чек-лист ИД")
+
+
+def get_checklist_link_caption(checklist_key: str) -> str:
+    mapping = {
+        "id": "ИД",
+        "concept": "КОНЦЕПЦИЯ",
+        "opr": "ОПР",
+    }
+    return mapping.get(normalize_checklist_key(checklist_key), "ЧЕК-ЛИСТ")
+
+
+def build_checklist_message_link(dialog_id: str, checklist_key: str) -> str:
+    dialog_id = normalize_dialog_id(dialog_id)
+    checklist_key = normalize_checklist_key(checklist_key)
+
+    if not dialog_id or not BITRIX_TECH_WEBHOOK_URL:
+        return ""
+
+    parsed = urlparse(BITRIX_TECH_WEBHOOK_URL)
+    if not parsed.scheme or not parsed.netloc:
+        return ""
+
+    base_url = f"{parsed.scheme}://{parsed.netloc}"
+    app_path = APP_PORTAL_PATH if APP_PORTAL_PATH.endswith("/") else APP_PORTAL_PATH + "/"
+    query = f"dialogId={quote(dialog_id)}&checklistKey={quote(checklist_key)}"
+    return f"{base_url}{app_path}?{query}#{query}"
+
+
+def build_editor_text(editor: dict) -> str:
+    editor_name = str(editor.get("name") or "").strip()
+    editor_id = str(editor.get("id") or "").strip()
+
+    if editor_name and editor_id:
+        return f"👤Кем изменено: {editor_name} (ID {editor_id})"
+    if editor_name:
+        return f"👤Кем изменено: {editor_name}"
+    if editor_id:
+        return f"👤Кем изменено: ID {editor_id}"
+    return "👤Кем изменено: неизвестно"
+
+
+def normalize_message_value(field: str, value, checklist_key: str) -> str:
+    raw = clean_cell_value(value)
+    if field == "status":
+        return display_status_text(raw)
+    return raw
+
+
+def build_change_left_label(field: str, checklist_key: str) -> str:
+    if field == "status":
+        return "Статус"
+    if field == "date":
+        return "Планируемая дата" if normalize_checklist_key(checklist_key) == "opr" else "План"
+    if field == "extraInfo":
+        return "Доп информация"
+    if field == "source":
+        return "Нормативы"
+    if field == "name":
+        return "Пункт"
+    if field == "document":
+        return "Документ"
+    if field == "add-item":
+        return "Пункт"
+    return field
+
+
+def build_change_emoji(field: str, new_value: str, checklist_key: str) -> str:
+    if field == "status":
+        return status_emoji(new_value)
+    if field == "date":
+        return "📆"
+    if field == "extraInfo":
+        return "📝"
+    if field == "source":
+        return "📚"
+    if field == "name":
+        return "✏️"
+    if field == "document":
+        return "📎"
+    if field == "add-item":
+        return "➕"
+    return "✏️"
+
+
+def should_show_empty_old_value(field: str) -> bool:
+    return field in {"extraInfo", "source", "name"}
+
+
+def build_change_entry(change: dict, field: str, checklist_key: str) -> dict:
+    item_name = clean_cell_value(change.get("itemName")) or "Без названия"
+    old_value = normalize_message_value(field, change.get("oldValue"), checklist_key)
+    new_value = normalize_message_value(field, change.get("newValue"), checklist_key) or "—"
+    label = build_change_left_label(field, checklist_key)
+    prefix = build_change_emoji(field, new_value, checklist_key)
+
+    if field == "add-item":
+        left = f"{prefix}{item_name} / {label}: →"
+        right = "добавлен"
+        return {
+            "field": field,
+            "itemName": item_name,
+            "oldValue": old_value,
+            "newValue": new_value,
+            "leftText": left,
+            "rightText": right,
+        }
+
+    if old_value:
+        left = f"{prefix}{item_name} / {label}: {old_value} →"
+    elif should_show_empty_old_value(field):
+        left = f"{prefix}{item_name} / {label}: — →"
+    else:
+        left = f"{prefix}{item_name} / {label}: →"
+
+    return {
+        "field": field,
+        "itemName": item_name,
+        "oldValue": old_value,
+        "newValue": new_value,
+        "leftText": left,
+        "rightText": new_value,
+    }
+
+
+def collect_global_alignment_width(section_blocks: list[dict]) -> int:
+    widths = []
+    for block in section_blocks:
+        for section in block.get("sections") or []:
+            for row in section.get("rows") or []:
+                widths.append(message_visible_length(row.get("leftText") or ""))
+
+    return max(widths) if widths else 0
+
+
+def format_aligned_change_line(row: dict, target_width: int) -> str:
+    left = str(row.get("leftText") or "")
+    right = str(row.get("rightText") or "—")
+    return f"{pad_message_left(left, target_width)}|[b]{right}[/b]"
+
+
+def build_aligned_section_lines(section_title: str, rows: list[dict], target_width: int) -> list[str]:
+    if not rows:
+        return []
+
+    lines = [f"[b]{section_title}:[/b]", ""]
+    for row in rows:
+        lines.append(format_aligned_change_line(row, target_width))
+    lines.append("")
+    return lines
+
+
+def build_recent_changes_sections(changes: list, checklist_key: str) -> list[dict]:
+    grouped = split_changes(changes)
+    key = normalize_checklist_key(checklist_key)
+    section_order = ["status", "date"]
+    if key == "concept":
+        section_order.extend(["source", "extraInfo", "name", "add-item"])
+    elif key == "id":
+        section_order.extend(["document", "add-item"])
+    elif key == "opr":
+        section_order.extend(["add-item"])
+
+    sections = []
+    for field in section_order:
+        field_changes = grouped.get(field) or []
+        if not field_changes:
+            continue
+        rows = [build_change_entry(change, field, key) for change in field_changes]
+        sections.append({
+            "field": field,
+            "title": MESSAGE_SECTION_LABELS.get(field, field),
+            "rows": rows,
+        })
+    return sections
+
+
+def build_recent_changes_text(
+    changes: list,
+    checklist_title: str = "Чек-лист ИД",
+    checklist_key: str = "id",
+    sections: list[dict] | None = None,
+    alignment_width: int = 0,
+) -> str:
+    title = get_checklist_message_title(checklist_key, checklist_title).upper()
+    sections = sections if sections is not None else build_recent_changes_sections(changes, checklist_key)
+    lines = [f"✏️[b]ИЗМЕНЕНИЯ В {title}[/b]", ""]
+
+    if sections:
+        target_width = alignment_width or collect_global_alignment_width([{"sections": sections}])
+        for section in sections:
+            lines.extend(build_aligned_section_lines(section["title"], section["rows"], target_width))
+    else:
+        lines.extend(["Изменений нет", ""])
+
+    return "\n".join(lines).strip()
+
+
+def build_checklist_message_block(
+    data: dict,
+    changes: list,
+    sections: list[dict] | None = None,
+    alignment_width: int = 0,
+) -> str:
+    checklist_key = normalize_checklist_key(data.get("checklistKey") or "id")
+    checklist_title = get_checklist_message_title(checklist_key, data.get("title") or "")
+    dialog_id = normalize_dialog_id(data.get("resolvedDialogId") or data.get("dialogId") or "")
+    link_url = build_checklist_message_link(dialog_id, checklist_key)
+    link_caption = get_checklist_link_caption(checklist_key)
+
+    parts = [
+        build_recent_changes_text(
+            changes,
+            checklist_title,
+            checklist_key,
+            sections=sections,
+            alignment_width=alignment_width,
+        ),
+        "",
+        build_progress_text(data),
+        "",
+    ]
+
+    if link_url:
+        parts.append(f"[URL={link_url}]Чтобы посмотреть весь чек-лист {link_caption} нажмите на этот текст[/URL]")
+    else:
+        parts.append(f"Чтобы посмотреть весь чек-лист {link_caption} нажмите на этот текст")
+
+    return "\n".join(parts).strip()
+
+
+def build_multi_checklist_chat_message(sessions: list, editor: dict) -> str:
+    if not sessions:
+        return ""
+
+    indexed = []
+    for session in sessions:
+        data = session.get("data") or {}
+        changes = session.get("changes") or []
+        checklist_key = normalize_checklist_key(session.get("checklistKey") or data.get("checklistKey") or "id")
+        if not changes:
+            continue
+        indexed.append({
+            "checklistKey": checklist_key,
+            "data": data,
+            "changes": changes,
+            "sections": build_recent_changes_sections(changes, checklist_key),
+        })
+
+    if not indexed:
+        return ""
+
+    order_map = {key: index for index, key in enumerate(MESSAGE_CHECKLIST_ORDER)}
+    indexed.sort(key=lambda item: order_map.get(item["checklistKey"], 999))
+    alignment_width = collect_global_alignment_width(indexed)
+
+    parts = []
+    for entry in indexed:
+        block = build_checklist_message_block(
+            entry["data"],
+            entry["changes"],
+            sections=entry["sections"],
+            alignment_width=alignment_width,
+        )
+        if block:
+            parts.append(block)
+
+    if not parts:
+        return ""
+
+    parts.extend([
+        "",
+        build_editor_text(editor),
+    ])
+    return "\n\n".join(parts).strip()
+
+
+def build_checklist_chat_message(data: dict, changes: list, editor: dict) -> str:
+    checklist_key = normalize_checklist_key(data.get("checklistKey") or "id")
+    sections = build_recent_changes_sections(changes, checklist_key)
+    alignment_width = collect_global_alignment_width([{"sections": sections}])
+    return build_multi_checklist_chat_message([
+        {
+            "checklistKey": checklist_key,
+            "data": data,
+            "changes": changes,
+            "sections": sections,
+            "alignmentWidth": alignment_width,
+        }
+    ], editor)
 
 
 def install_finish_block():
@@ -1089,40 +2080,106 @@ def app_home_html():
     <html>
     <head>
         <meta charset="utf-8">
-        <title>Чек-лист ИД</title>
+        <title>Чек-листы проекта</title>
         <script>
             (function () {
+                function pickValue(searchParams, hashParams, key, fallback) {
+                    return (searchParams.get(key) || hashParams.get(key) || fallback || '').trim();
+                }
+
+                function redirectToPopup(dialogId, checklistKey) {
+                    const popupUrl =
+                        '/popup?dialogId=' + encodeURIComponent(dialogId) +
+                        '&checklistKey=' + encodeURIComponent(checklistKey || 'id');
+
+                    const go = function () {
+                        window.location.replace(popupUrl);
+                    };
+
+                    try {
+                        if (window.BX24 && typeof window.BX24.init === 'function') {
+                            window.BX24.init(function () {
+                                try {
+                                    if (typeof window.BX24.resizeWindow === 'function') {
+                                        window.BX24.resizeWindow(1180, 680);
+                                    }
+                                    if (typeof window.BX24.fitWindow === 'function') {
+                                        window.BX24.fitWindow();
+                                    }
+                                } catch (e) {
+                                    console.log('bridge resize skipped:', e);
+                                }
+                                go();
+                            });
+                            return;
+                        }
+                    } catch (e) {
+                        console.log('bridge BX24 init skipped:', e);
+                    }
+
+                    go();
+                }
+
                 try {
+                    const searchParams = new URLSearchParams(window.location.search || '');
+                    const hashRaw = String(window.location.hash || '').replace(/^#/, '');
+                    const hashParams = new URLSearchParams(hashRaw);
                     const raw = localStorage.getItem('checklist_pending_dialog');
-                    if (!raw) return;
+                    let localPayload = null;
 
-                    const payload = JSON.parse(raw);
-                    if (!payload || !payload.dialogId) return;
+                    if (raw) {
+                        try {
+                            localPayload = JSON.parse(raw);
+                        } catch (e) {
+                            console.log('pending dialog parse skipped:', e);
+                        }
+                    }
 
-                    const age = Date.now() - (payload.ts || 0);
-                    localStorage.removeItem('checklist_pending_dialog');
+                    const dialogId = pickValue(searchParams, hashParams, 'dialogId', localPayload && localPayload.dialogId);
+                    const checklistKey = pickValue(searchParams, hashParams, 'checklistKey', localPayload && localPayload.checklistKey) || 'id';
+                    const ts = Number((localPayload && localPayload.ts) || 0);
+                    const age = ts ? (Date.now() - ts) : 0;
 
-                    if (age < 60000) {
-                        window.location.replace('/popup?dialogId=' + encodeURIComponent(payload.dialogId));
+                    if (dialogId) {
+                        try {
+                            localStorage.setItem('checklist_pending_dialog', JSON.stringify({
+                                dialogId: dialogId,
+                                checklistKey: checklistKey,
+                                ts: Date.now()
+                            }));
+                        } catch (e) {
+                            console.log('pending dialog save skipped:', e);
+                        }
+
+                        redirectToPopup(dialogId, checklistKey);
+                        return;
+                    }
+
+                    if (localPayload && localPayload.dialogId && age < 60000) {
+                        redirectToPopup(
+                            localPayload.dialogId,
+                            (localPayload.checklistKey || 'id').trim() || 'id'
+                        );
                         return;
                     }
                 } catch (e) {
-                    console.log('pending dialog redirect skipped:', e);
+                    console.log('launcher redirect skipped:', e);
                 }
             })();
         </script>
     </head>
-    <body style="font-family:Arial,sans-serif;padding:40px">
-        <h1>Чек-лист ИД</h1>
-        <p>Открывайте приложение из Bitrix24.</p>
+    <body style="margin:0;font-family:Arial,sans-serif;background:#f8fafc;color:#344054;display:flex;align-items:center;justify-content:center;min-height:100vh;">
+        <div style="padding:24px 28px;border:1px solid #e5e7eb;border-radius:14px;background:#fff;box-shadow:0 12px 30px rgba(15,23,42,0.08);font-size:14px;">
+            Открываем нужный чек-лист...
+        </div>
     </body>
     </html>
     """
 
-
 def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
     initial_dialog_id_json = json.dumps(initial_dialog_id or "", ensure_ascii=False)
     initial_context_text_json = json.dumps(initial_context_text or "", ensure_ascii=False)
+
 
     return f"""
     <!doctype html>
@@ -1214,7 +2271,7 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
                 document.getElementById('error').textContent = text || '';
             }}
 
-            function openChecklist(dialogId) {{
+            function openChecklist(dialogId, checklistKey = 'id') {{
                 if (!dialogId) {{
                     setError('dialogId не найден');
                     return;
@@ -1223,6 +2280,7 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
                 try {{
                     localStorage.setItem('checklist_pending_dialog', JSON.stringify({{
                         dialogId: dialogId,
+                        checklistKey: checklistKey,
                         ts: Date.now()
                     }}));
                 }} catch (e) {{
@@ -1240,7 +2298,11 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
                     setError('BX24.openApplication error: ' + String(e));
                 }}
 
-                window.open('/popup?dialogId=' + encodeURIComponent(dialogId), '_blank');
+                window.open(
+                    '/popup?dialogId=' + encodeURIComponent(dialogId) +
+                    '&checklistKey=' + encodeURIComponent(checklistKey),
+                    '_blank'
+                );
             }}
 
             document.getElementById('openBtn').addEventListener('click', function () {{
@@ -1312,12 +2374,7 @@ def health():
 
 
 @app.get("/", response_class=HTMLResponse)
-def home_get(dialogId: str = "", mode: str = ""):
-    dialog_id = normalize_dialog_id(dialogId)
-
-    if dialog_id:
-        return popup_get(dialog_id)
-
+def home_get(dialogId: str = "", checklistKey: str = "id", mode: str = ""):
     return app_home_html()
 
 
@@ -1414,7 +2471,7 @@ async def textarea_post(request: Request):
 @app.get("/popup", response_class=HTMLResponse)
 def popup_get(dialogId: str = "", checklistKey: str = "id"):
     dialog_id = normalize_dialog_id(dialogId)
-    checklist_key = str(checklistKey or "id").strip() or "id"
+    checklist_key = normalize_checklist_key(checklistKey)
     data = get_checklist(dialog_id, checklist_key)
 
     title_raw = data.get("title", "Чек-лист ИД")
@@ -1431,7 +2488,1072 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
     collab_title_json = json.dumps(collab_title_raw, ensure_ascii=False)
     checklist_key_json = json.dumps(checklist_key, ensure_ascii=False)
     checklist_title_json = json.dumps(title_raw, ensure_ascii=False)
-    checklist_title_json = json.dumps(title_raw, ensure_ascii=False)
+
+    popup_session_enhancements_js = """
+            const clientSessionId = 'popup_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+            let checklistSessionState = {};
+            let currentChecklistLock = {
+                owned: false,
+                lockedByOther: false,
+                lockId: '',
+                userId: '',
+                userName: '',
+                checklistKey: ''
+            };
+            let lockHeartbeatTimer = null;
+            let suppressAutoCloseSave = false;
+            let activeInlineEditor = { role: '', itemId: '' };
+
+            const headerRightEl = document.querySelector('.header-right');
+            if (headerRightEl && !document.getElementById('lockNotice')) {
+                const lockNode = document.createElement('div');
+                lockNode.id = 'lockNotice';
+                lockNode.style.fontSize = '12px';
+                lockNode.style.fontWeight = '700';
+                lockNode.style.padding = '7px 10px';
+                lockNode.style.borderRadius = '999px';
+                lockNode.style.background = '#fff4e5';
+                lockNode.style.color = '#b26a00';
+                lockNode.style.whiteSpace = 'nowrap';
+                lockNode.style.display = 'none';
+                headerRightEl.insertBefore(lockNode, saveStateEl);
+            }
+            const lockNoticeEl = document.getElementById('lockNotice');
+
+            const contentEl = document.querySelector('.content');
+            if (contentEl && !document.getElementById('footerActions')) {
+                const footerNode = document.createElement('div');
+                footerNode.id = 'footerActions';
+                footerNode.style.position = 'sticky';
+                footerNode.style.bottom = '0';
+                footerNode.style.zIndex = '30';
+                footerNode.style.marginTop = '14px';
+                footerNode.style.padding = '10px 12px';
+                footerNode.style.display = 'flex';
+                footerNode.style.gap = '10px';
+                footerNode.style.justifyContent = 'flex-end';
+                footerNode.style.alignItems = 'center';
+                footerNode.style.border = '1px solid #e5e7eb';
+                footerNode.style.borderRadius = '12px';
+                footerNode.style.background = '#fafbfc';
+                footerNode.style.boxShadow = '0 -4px 18px rgba(15,23,42,.06)';
+                footerNode.innerHTML = `
+                    <button id="saveCloseBtn" type="button" style="min-width:150px;height:34px;border:none;border-radius:8px;background:#16a34a;color:#fff;font-size:12px;font-weight:700;cursor:pointer;">
+                        Сохранить и закрыть
+                    </button>
+                    <button id="cancelBtn" type="button" style="min-width:100px;height:34px;border:none;border-radius:8px;background:#dc2626;color:#fff;font-size:12px;font-weight:700;cursor:pointer;">
+                        Отмена
+                    </button>
+                `;
+                contentEl.appendChild(footerNode);
+            }
+            const saveCloseBtn = document.getElementById('saveCloseBtn');
+            const cancelBtn = document.getElementById('cancelBtn');
+
+            function getChecklistDefaultTitle(key) {
+                if (key === 'concept') return 'Чек-лист Концепция';
+                if (key === 'opr') return 'Чек-лист ОПР';
+                return 'Чек-лист ИД';
+            }
+
+            function getChecklistState(key) {
+                const stateKey = String(key || '').trim() || 'id';
+                if (!checklistSessionState[stateKey]) {
+                    checklistSessionState[stateKey] = { changes: [], dirty: false };
+                }
+                return checklistSessionState[stateKey];
+            }
+
+            function getCurrentEditorIdentity() {
+                return {
+                    userId: String(currentEditor.id || clientSessionId),
+                    userName: String(currentEditor.name || 'Пользователь')
+                };
+            }
+
+            function isChecklistLockedByOther() {
+                return !!(currentChecklistLock.lockedByOther && currentChecklistLock.checklistKey === currentChecklistKey);
+            }
+
+            function isEditingAllowed() {
+                return !isChecklistLockedByOther();
+            }
+
+            function disabledAttr() {
+                return isEditingAllowed() ? '' : 'disabled';
+            }
+
+            function setActionButtonState() {
+                if (saveCloseBtn) {
+                    saveCloseBtn.disabled = !isEditingAllowed();
+                    saveCloseBtn.style.opacity = saveCloseBtn.disabled ? '0.55' : '1';
+                    saveCloseBtn.style.cursor = saveCloseBtn.disabled ? 'not-allowed' : 'pointer';
+                }
+                if (cancelBtn) {
+                    cancelBtn.disabled = false;
+                }
+            }
+
+            function updateSaveStateBySession() {
+                if (isChecklistLockedByOther()) {
+                    setSaveState('error', 'Только просмотр');
+                    return;
+                }
+                if (sessionDirty) {
+                    setSaveState('saving', 'Есть несохраненные изменения');
+                    return;
+                }
+                setSaveState('', 'Сохранено');
+            }
+
+            function updateLockNotice() {
+                if (!lockNoticeEl) return;
+                if (isChecklistLockedByOther()) {
+                    const ownerName = currentChecklistLock.userName || 'другой сотрудник';
+                    lockNoticeEl.textContent = 'Сейчас с этим чек-листом работает ' + ownerName + ', дождитесь завершения сессии';
+                    lockNoticeEl.style.display = '';
+                } else {
+                    lockNoticeEl.textContent = '';
+                    lockNoticeEl.style.display = 'none';
+                }
+                setActionButtonState();
+                updateSaveStateBySession();
+            }
+
+            const previousSyncChecklistCache = syncChecklistCache;
+            syncChecklistCache = function () {
+                checklistCache[currentChecklistKey] = buildChecklistSnapshot();
+                checklistSessionState[currentChecklistKey] = {
+                    changes: deepClone(sessionChanges),
+                    dirty: !!sessionDirty
+                };
+                if (typeof previousSyncChecklistCache === 'function') {
+                    return;
+                }
+            };
+
+            const previousApplyChecklistData = applyChecklistData;
+            applyChecklistData = function (data) {
+                previousApplyChecklistData(data);
+                checklistTitle = String((data && data.title) || checklistTitle || getChecklistDefaultTitle(currentChecklistKey));
+                const cachedState = getChecklistState(currentChecklistKey);
+                sessionChanges = deepClone(cachedState.changes || []);
+                sessionDirty = !!cachedState.dirty;
+                closeSummarySent = false;
+                activeInlineEditor = { role: '', itemId: '' };
+                currentChecklistLock.checklistKey = currentChecklistKey;
+                updateLockNotice();
+            };
+
+            function clearChecklistSessionState(checklistKey) {
+                const targetKey = String(checklistKey || '').trim() || 'id';
+                checklistSessionState[targetKey] = { changes: [], dirty: false };
+                if (targetKey === currentChecklistKey) {
+                    sessionChanges = [];
+                    sessionDirty = false;
+                    closeSummarySent = false;
+                    updateLockNotice();
+                }
+            }
+
+            function getDirtyChecklistKeys() {
+                syncChecklistCache();
+                return Object.keys(checklistSessionState).filter(key => {
+                    const state = checklistSessionState[key];
+                    return !!(state && state.dirty && Array.isArray(state.changes) && state.changes.length && checklistCache[key]);
+                });
+            }
+
+            function buildClosePayloadForKey(checklistKey, closeEvent) {
+                const key = String(checklistKey || '').trim() || 'id';
+                const snapshot = key === currentChecklistKey
+                    ? buildChecklistSnapshot()
+                    : deepClone(checklistCache[key] || {});
+                const state = key === currentChecklistKey
+                    ? { changes: deepClone(sessionChanges), dirty: !!sessionDirty }
+                    : deepClone(checklistSessionState[key] || { changes: [], dirty: false });
+
+                return {
+                    dialogId,
+                    checklistKey: key,
+                    editor: currentEditor,
+                    data: snapshot,
+                    changes: state.changes || [],
+                    closeEvent,
+                    ts: new Date().toISOString()
+                };
+            }
+
+            function buildCloseBatchPayload(closeEvent) {
+                const dirtyKeys = getDirtyChecklistKeys();
+                return {
+                    dialogId,
+                    editor: currentEditor,
+                    closeEvent,
+                    ts: new Date().toISOString(),
+                    sessions: dirtyKeys.map(key => buildClosePayloadForKey(key, closeEvent))
+                };
+            }
+
+            async function persistDirtyChecklists(closeEvent, useBeacon = false) {
+                const dirtyKeys = getDirtyChecklistKeys();
+                if (!dirtyKeys.length) {
+                    return {
+                        savedCount: 0,
+                        messageOk: true,
+                        messageSkipped: true,
+                        result: {}
+                    };
+                }
+
+                const payload = buildCloseBatchPayload(closeEvent);
+
+                if (useBeacon && navigator.sendBeacon) {
+                    const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' });
+                    navigator.sendBeacon(APP_BASE_URL + '/api/checklist/close-session', blob);
+                    dirtyKeys.forEach(clearChecklistSessionState);
+                    return {
+                        savedCount: dirtyKeys.length,
+                        messageOk: true,
+                        messageSkipped: false,
+                        result: {}
+                    };
+                }
+
+                const response = await fetch('/api/checklist/close-session', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(payload),
+                    keepalive: true
+                });
+                const result = await response.json().catch(() => ({}));
+                if (!response.ok) {
+                    throw new Error(result.error || 'close-session failed');
+                }
+
+                if (result && result.messageOk === false) {
+                    debugLog('close_session_message_warning', {
+                        closeEvent,
+                        dialogId,
+                        checklistKeys: dirtyKeys,
+                        result
+                    });
+                } else {
+                    debugLog('close_session_completed', {
+                        closeEvent,
+                        dialogId,
+                        checklistKeys: dirtyKeys,
+                        result
+                    });
+                }
+
+                dirtyKeys.forEach(clearChecklistSessionState);
+                return {
+                    savedCount: dirtyKeys.length,
+                    messageOk: result.messageOk !== false,
+                    messageSkipped: !!result.messageSkipped,
+                    result
+                };
+            }
+
+            function stopLockHeartbeat() {
+                if (lockHeartbeatTimer) {
+                    clearInterval(lockHeartbeatTimer);
+                    lockHeartbeatTimer = null;
+                }
+            }
+
+            async function acquireChecklistLock(checklistKey = currentChecklistKey, silent = false) {
+                const targetKey = String(checklistKey || '').trim() || 'id';
+                const editorIdentity = getCurrentEditorIdentity();
+                const payload = {
+                    dialogId,
+                    checklistKey: targetKey,
+                    userId: editorIdentity.userId,
+                    userName: editorIdentity.userName,
+                    lockId: currentChecklistLock.checklistKey === targetKey ? currentChecklistLock.lockId : ''
+                };
+
+                try {
+                    const response = await fetch('/api/checklist/lock/acquire', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify(payload),
+                        keepalive: true
+                    });
+                    const result = await response.json();
+                    if (!response.ok) {
+                        throw new Error(result.error || 'lock acquire failed');
+                    }
+
+                    if (targetKey !== currentChecklistKey) {
+                        return result;
+                    }
+
+                    const prevOwned = currentChecklistLock.owned;
+                    const prevBlocked = currentChecklistLock.lockedByOther;
+                    const prevLockId = currentChecklistLock.lockId;
+                    currentChecklistLock = {
+                        owned: !!result.owned,
+                        lockedByOther: !!result.lockedByOther,
+                        lockId: String(result.lockId || ''),
+                        userId: String(result.userId || ''),
+                        userName: String(result.userName || ''),
+                        checklistKey: targetKey
+                    };
+                    updateLockNotice();
+
+                    if (prevOwned !== currentChecklistLock.owned || prevBlocked !== currentChecklistLock.lockedByOther || prevLockId !== currentChecklistLock.lockId) {
+                        renderAll();
+                    }
+                    return result;
+                } catch (e) {
+                    if (!silent) {
+                        console.log('acquireChecklistLock error:', e);
+                    }
+                    return null;
+                }
+            }
+
+            async function heartbeatChecklistLock(silent = true) {
+                if (!currentChecklistLock.lockId || currentChecklistLock.checklistKey !== currentChecklistKey) {
+                    return null;
+                }
+
+                const editorIdentity = getCurrentEditorIdentity();
+                try {
+                    const response = await fetch('/api/checklist/lock/heartbeat', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            dialogId,
+                            checklistKey: currentChecklistKey,
+                            userId: editorIdentity.userId,
+                            userName: editorIdentity.userName,
+                            lockId: currentChecklistLock.lockId
+                        }),
+                        keepalive: true
+                    });
+                    const result = await response.json();
+                    if (!response.ok) {
+                        throw new Error(result.error || 'lock heartbeat failed');
+                    }
+                    currentChecklistLock = {
+                        owned: !!result.owned,
+                        lockedByOther: !!result.lockedByOther,
+                        lockId: String(result.lockId || ''),
+                        userId: String(result.userId || ''),
+                        userName: String(result.userName || ''),
+                        checklistKey: currentChecklistKey
+                    };
+                    updateLockNotice();
+                    return result;
+                } catch (e) {
+                    if (!silent) {
+                        console.log('heartbeatChecklistLock error:', e);
+                    }
+                    return null;
+                }
+            }
+
+            function startLockHeartbeat() {
+                stopLockHeartbeat();
+                lockHeartbeatTimer = setInterval(async function () {
+                    if (currentChecklistLock.owned) {
+                        await heartbeatChecklistLock(true);
+                    } else {
+                        await acquireChecklistLock(currentChecklistKey, true);
+                    }
+                }, 15000);
+            }
+
+            async function releaseChecklistLock(checklistKey = currentChecklistKey, useBeacon = false) {
+                const targetKey = String(checklistKey || '').trim() || 'id';
+                const lockId = currentChecklistLock.checklistKey === targetKey ? currentChecklistLock.lockId : '';
+                const editorIdentity = getCurrentEditorIdentity();
+                stopLockHeartbeat();
+
+                if (!lockId && currentChecklistLock.checklistKey === targetKey) {
+                    currentChecklistLock = {
+                        owned: false,
+                        lockedByOther: false,
+                        lockId: '',
+                        userId: '',
+                        userName: '',
+                        checklistKey: targetKey
+                    };
+                    updateLockNotice();
+                    return;
+                }
+
+                const payload = {
+                    dialogId,
+                    checklistKey: targetKey,
+                    lockId,
+                    userId: editorIdentity.userId
+                };
+
+                if (useBeacon && navigator.sendBeacon) {
+                    const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' });
+                    navigator.sendBeacon(APP_BASE_URL + '/api/checklist/lock/release', blob);
+                } else {
+                    try {
+                        await fetch('/api/checklist/lock/release', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify(payload),
+                            keepalive: true
+                        });
+                    } catch (e) {
+                        console.log('releaseChecklistLock error:', e);
+                    }
+                }
+
+                if (currentChecklistLock.checklistKey === targetKey) {
+                    currentChecklistLock = {
+                        owned: false,
+                        lockedByOther: false,
+                        lockId: '',
+                        userId: '',
+                        userName: '',
+                        checklistKey: targetKey
+                    };
+                    updateLockNotice();
+                }
+            }
+
+            function closePopupWindow() {
+                try {
+                    if (window.BX24 && typeof window.BX24.closeApplication === 'function') {
+                        window.BX24.closeApplication();
+                        return;
+                    }
+                } catch (e) {
+                    console.log('BX24.closeApplication error:', e);
+                }
+
+                try {
+                    window.close();
+                } catch (e) {
+                    console.log('window.close error:', e);
+                }
+            }
+
+            async function finalizePopupSession(saveChanges) {
+                suppressAutoCloseSave = true;
+                closeSummarySent = true;
+                syncChecklistCache();
+
+                let persistResult = {
+                    savedCount: 0,
+                    messageOk: true,
+                    messageSkipped: true,
+                    result: {}
+                };
+
+                try {
+                    if (saveChanges) {
+                        persistResult = await persistDirtyChecklists('save_and_close', false);
+                    }
+                } catch (e) {
+                    console.log('finalizePopupSession error:', e);
+                    setSaveState('error', saveChanges ? 'Ошибка сохранения' : 'Ошибка отмены');
+                    return;
+                }
+
+                if (saveChanges) {
+                    if (persistResult.messageOk === false) {
+                        setSaveState('saving', 'Сохранено, сообщение не отправлено');
+                    } else if (persistResult.savedCount > 0) {
+                        setSaveState('', 'Сохранено');
+                    }
+                }
+
+                await releaseChecklistLock(currentChecklistKey, false);
+                closePopupWindow();
+            }
+
+            if (saveCloseBtn) {
+                saveCloseBtn.addEventListener('click', async function () {
+                    await finalizePopupSession(true);
+                });
+            }
+
+            if (cancelBtn) {
+                cancelBtn.addEventListener('click', async function () {
+                    await finalizePopupSession(false);
+                });
+            }
+
+            sendCloseSummaryOnce = function (eventName) {
+                if (eventName === 'popup_hidden' || suppressAutoCloseSave || closeSummarySent) {
+                    return;
+                }
+
+                closeSummarySent = true;
+                persistDirtyChecklists(eventName, true);
+                releaseChecklistLock(currentChecklistKey, true);
+            };
+
+            loadChecklistByKey = async function (checklistKey) {
+                const targetKey = String(checklistKey || '').trim() || 'id';
+                if (targetKey === currentChecklistKey) {
+                    return;
+                }
+
+                syncChecklistCache();
+                await releaseChecklistLock(currentChecklistKey, false);
+                setSaveState('saving', 'Загружаем...');
+
+                try {
+                    const cachedData = checklistCache[targetKey];
+                    if (cachedData) {
+                        applyChecklistData(deepClone(cachedData));
+                        renderAll();
+                        await acquireChecklistLock(targetKey, true);
+                        startLockHeartbeat();
+                        return;
+                    }
+
+                    const response = await fetch(
+                        '/api/checklist?dialogId=' + encodeURIComponent(dialogId) +
+                        '&checklistKey=' + encodeURIComponent(targetKey)
+                    );
+                    const result = await response.json();
+                    if (!response.ok) {
+                        throw new Error(result.error || 'load checklist failed');
+                    }
+
+                    applyChecklistData(result);
+                    renderAll();
+                    await acquireChecklistLock(targetKey, true);
+                    startLockHeartbeat();
+                } catch (e) {
+                    console.log('loadChecklistByKey enhanced error:', e);
+                    setSaveState('error', 'Ошибка загрузки чек-листа');
+                }
+            };
+
+            buildDocumentCell = function (item) {
+                const hasDocument = !!(item.documentUrl && String(item.documentUrl).trim());
+
+                if (hasDocument) {
+                    return `
+                        <button class="doc-btn" type="button" data-role="view-document" data-document-url="${esc(item.documentUrl)}">
+                            Посмотреть
+                        </button>
+                    `;
+                }
+
+                return `
+                    <button class="upload-btn" type="button" data-role="upload" data-item-id="${esc(item.id)}" ${disabledAttr()}>
+                        Загрузить
+                    </button>
+                    <input type="file" data-role="file-input" data-item-id="${esc(item.id)}" style="display:none;" ${disabledAttr()}>
+                `;
+            };
+
+            renderGroup = function (group) {
+                const groupItems = getItemsByGroup(group.id);
+                const allowAdd = Number(group.id) !== 4;
+                const rows = groupItems.map(item => {
+                    const rowClass = normalizeStatus(item.status) === 'Не требуется' ? 'row not-required' : 'row';
+                    return `
+                        <div class="${rowClass}" data-item-id="${esc(item.id)}">
+                            <div class="td"><div class="cell-name"><div class="${indicatorClass(item.status)}"></div><div class="item-name">${esc(item.name)}</div></div></div>
+                            <div class="td">${buildDocumentCell(item)}</div>
+                            <div class="td">
+                                <select class="status-select" data-role="status" data-item-id="${esc(item.id)}" ${disabledAttr()}>
+                                    <option value="" ${normalizeStatus(item.status) === '' ? 'selected' : ''}></option>
+                                    <option value="Есть" ${normalizeStatus(item.status) === 'Есть' ? 'selected' : ''}>Есть</option>
+                                    <option value="Нет" ${normalizeStatus(item.status) === 'Нет' ? 'selected' : ''}>Нет</option>
+                                    <option value="Не требуется" ${normalizeStatus(item.status) === 'Не требуется' ? 'selected' : ''}>Не требуется</option>
+                                </select>
+                            </div>
+                            <div class="td"><input class="date-input" type="date" data-role="plan" data-item-id="${esc(item.id)}" value="${esc(toInputDate(item.plan))}" ${disabledAttr()}></div>
+                            <div class="td"><input class="date-input" type="date" data-role="fact" data-item-id="${esc(item.id)}" value="${esc(toInputDate(item.fact))}" ${disabledAttr()}></div>
+                        </div>
+                    `;
+                }).join('');
+                const addBlock = allowAdd ? `
+                    <div class="add-item-row">
+                        <input class="add-item-input" id="addItemInput_${group.id}" type="text" placeholder="Новый пункт" ${disabledAttr()}>
+                        <button class="add-item-btn" type="button" data-role="add-item" data-group-id="${group.id}" ${disabledAttr()}>Добавить пункт</button>
+                    </div>` : '';
+                return `<div class="group-block"><div class="group-title">${esc(group.title)}</div>${rows}${addBlock}</div>`;
+            };
+
+            function getInlineEditorDomId(role, itemId) {
+                return 'inline_' + String(role || '').replace(/[^a-z0-9_-]/ig, '_') + '_' + String(itemId || '').replace(/[^a-z0-9_-]/ig, '_');
+            }
+
+            function isInlineEditorActive(role, itemId) {
+                return activeInlineEditor.role === role && String(activeInlineEditor.itemId || '') === String(itemId || '');
+            }
+
+            function startInlineEditor(role, itemId) {
+                if (!isEditingAllowed()) {
+                    return;
+                }
+                activeInlineEditor = {
+                    role,
+                    itemId: String(itemId || '')
+                };
+                renderAll();
+            }
+
+            function stopInlineEditor() {
+                activeInlineEditor = { role: '', itemId: '' };
+            }
+
+            function focusActiveInlineEditor() {
+                if (!activeInlineEditor.role || !activeInlineEditor.itemId) {
+                    return;
+                }
+                const el = document.getElementById(getInlineEditorDomId(activeInlineEditor.role, activeInlineEditor.itemId));
+                if (!el) {
+                    return;
+                }
+                if (typeof el.focus === 'function') {
+                    el.focus();
+                }
+                if (typeof el.select === 'function') {
+                    el.select();
+                }
+                if (el.tagName === 'TEXTAREA') {
+                    el.dataset.initialValue = String(el.value || '');
+                    el.dataset.baseHeight = '32';
+                    autoGrowTextarea(el);
+                }
+            }
+
+            function buildConceptInlineCell(role, item, value, placeholder, extraStyle = '') {
+                const itemId = String(item.id || '');
+                const isActive = isInlineEditorActive(role, itemId) && isEditingAllowed();
+                const displayValue = String(value || '').trim();
+                const content = displayValue || String(placeholder || '').trim() || '';
+                const displayClass = 'concept-inline-display' + (displayValue ? '' : ' empty') + (isEditingAllowed() ? '' : ' disabled');
+                const styleAttr = extraStyle ? ` style="${extraStyle}"` : '';
+
+                if (isActive) {
+                    return `
+                        <textarea
+                            id="${esc(getInlineEditorDomId(role, itemId))}"
+                            class="concept-inline-input"
+                            data-role="${esc(role + '-edit')}"
+                            data-item-id="${esc(itemId)}"
+                            data-initial-value="${esc(value || '')}"
+                            placeholder="${esc(placeholder || '')}"
+                            ${disabledAttr()}
+                        >${esc(value || '')}</textarea>
+                    `;
+                }
+
+                return `
+                    <div
+                        class="${displayClass}"
+                        data-role="${esc(role + '-display')}"
+                        data-item-id="${esc(itemId)}"
+                        tabindex="${isEditingAllowed() ? '0' : '-1'}"
+                        ${styleAttr}
+                    >${esc(content) || '&nbsp;'}</div>
+                `;
+            }
+
+            function buildConceptNameCell(item) {
+                const textStyle = item.status === 'Не требуется' ? 'text-decoration:line-through;color:#98a2b3;' : '';
+                return buildConceptInlineCell('concept-name', item, item.name || '', 'Название пункта', textStyle);
+            }
+
+            function buildConceptSourceCell(item) {
+                return buildConceptInlineCell('concept-source', item, item.source || '', 'Нормативы');
+            }
+
+            buildConceptStatusCell = function (item) {
+                if (item.statusKind === 'bool') {
+                    return `
+                        <select class="status-select" data-role="concept-status" data-item-id="${esc(item.id)}" ${disabledAttr()}>
+                            <option value="" ${item.status === '' ? 'selected' : ''}></option>
+                            <option value="Да" ${item.status === 'Да' ? 'selected' : ''}>Да</option>
+                            <option value="Нет" ${item.status === 'Нет' ? 'selected' : ''}>Нет</option>
+                            <option value="Не требуется" ${item.status === 'Не требуется' ? 'selected' : ''}>Не требуется</option>
+                        </select>
+                    `;
+                }
+                if (item.statusKind === 'select') {
+                    const options = [''].concat(item.statusOptions || [], ['Не требуется']);
+                    return `
+                        <select class="status-select" data-role="concept-status" data-item-id="${esc(item.id)}" ${disabledAttr()}>
+                            ${options.map(option => `<option value="${esc(option)}" ${item.status === option ? 'selected' : ''}>${esc(option)}</option>`).join('')}
+                        </select>
+                    `;
+                }
+                return `<input class="status-select" type="text" data-role="concept-status" data-item-id="${esc(item.id)}" placeholder="${esc(item.statusPlaceholder || '')}" value="${esc(item.status || '')}" ${disabledAttr()}>`;
+            };
+
+            buildConceptExtraCell = function (item) {
+                return `<textarea class="concept-extra-textarea" data-role="concept-extra" data-item-id="${esc(item.id)}" placeholder="${esc(item.extraInfoPlaceholder || '')}" ${disabledAttr()}>${esc(item.extraInfo || '')}</textarea>`;
+            };
+
+            renderConceptGroup = function (group) {
+                const groupItems = getItemsByGroup(group.id);
+                const allowAdd = Number(group.id) !== 10;
+                const rows = groupItems.map(item => `
+                    <div class="row" style="grid-template-columns: 1.05fr 0.9fr 110px 150px 1.15fr;" data-item-id="${esc(item.id)}">
+                        <div class="td"><div class="cell-name"><div class="${conceptIndicatorClass(item)}"></div>${buildConceptNameCell(item)}</div></div>
+                        <div class="td">${buildConceptSourceCell(item)}</div>
+                        <div class="td">${buildDocumentCell(item)}</div>
+                        <div class="td">${buildConceptStatusCell(item)}</div>
+                        <div class="td">${buildConceptExtraCell(item)}</div>
+                    </div>
+                `).join('');
+
+                const addBlock = allowAdd ? `
+                    <div class="add-item-row">
+                        <input class="add-item-input" id="conceptAddItemInput_${group.id}" type="text" placeholder="Новый пункт" ${disabledAttr()}>
+                        <button class="add-item-btn" type="button" data-role="concept-add-item" data-group-id="${group.id}" ${disabledAttr()}>Добавить пункт</button>
+                    </div>
+                ` : '';
+
+                return `<div class="group-block"><div class="group-title">${esc(group.title)}</div>${rows}${addBlock}</div>`;
+            };
+
+            function buildConceptTableHtmlEnhanced(conceptGroups) {
+                return `
+                    <div class="thead">
+                        <div class="thead-top" style="grid-template-columns: 1.05fr 0.9fr 110px 150px 1.15fr;">
+                            <div class="th">Пункт</div>
+                            <div class="th">Нормативы</div>
+                            <div class="th">Документ</div>
+                            <div class="th">Статус</div>
+                            <div class="th">Доп информация</div>
+                        </div>
+                    </div>
+                    <div>${conceptGroups.map(renderConceptGroup).join('')}</div>
+                `;
+            }
+
+            renderConceptTable = function () {
+                if (!leftTableEl || !rightTableEl || !tablesGridEl) {
+                    throw new Error('concept table containers not found');
+                }
+
+                tablesGridEl.style.gridTemplateColumns = '1fr 1fr';
+                if (tablePanels[1]) {
+                    tablePanels[1].style.display = '';
+                }
+
+                const visibleGroups = groups.filter(group => {
+                    if (Number(group.id) !== 10) return true;
+                    return items.some(x => Number(x.group) === 10);
+                });
+
+                const leftGroups = visibleGroups.filter(group => [1, 3, 5, 7, 9].includes(Number(group.id)));
+                const rightGroups = visibleGroups.filter(group => [2, 4, 6, 8, 10].includes(Number(group.id)));
+
+                leftTableEl.innerHTML = buildConceptTableHtmlEnhanced(leftGroups);
+                rightTableEl.innerHTML = buildConceptTableHtmlEnhanced(rightGroups);
+            };
+
+            renderProjectChecklistList = function () {
+                if (!projectChecklistListEl) {
+                    return;
+                }
+
+                const normalizedList = (Array.isArray(projectChecklists) ? projectChecklists : []).map(item => {
+                    const key = String(item && item.key || '').trim();
+                    return {
+                        key,
+                        title: getChecklistDefaultTitle(key)
+                    };
+                });
+
+                projectChecklistListEl.innerHTML = normalizedList.map(item => {
+                    const active = item.key === currentChecklistKey ? 'side-link active' : 'side-link';
+                    return `<button type="button" class="${active}" data-checklist-key="${esc(item.key)}">${esc(item.title)}</button>`;
+                }).join('');
+
+                projectChecklistListEl.querySelectorAll('[data-checklist-key]').forEach(btn => {
+                    btn.addEventListener('click', async function () {
+                        const key = this.dataset.checklistKey;
+                        await loadChecklistByKey(key);
+                    });
+                });
+            };
+
+            oprIndicatorClass = function (item) {
+                const status = normalizeStatus(item && item.status);
+                if (status === 'Есть') return 'status-indicator green';
+                if (status === 'Нет' || status === 'Не требуется') return 'status-indicator gray';
+                return 'status-indicator';
+            };
+
+            function buildOprStatusCellUi(item) {
+                return `
+                    <select class="status-select" data-role="opr-status" data-item-id="${esc(item.id)}" ${disabledAttr()}>
+                        <option value="" ${normalizeStatus(item.status) === '' ? 'selected' : ''}></option>
+                        <option value="Есть" ${normalizeStatus(item.status) === 'Есть' ? 'selected' : ''}>Есть</option>
+                        <option value="Нет" ${normalizeStatus(item.status) === 'Нет' ? 'selected' : ''}>Нет</option>
+                        <option value="Не требуется" ${normalizeStatus(item.status) === 'Не требуется' ? 'selected' : ''}>Не требуется</option>
+                    </select>
+                `;
+            }
+
+            function buildOprExtraCellUi(item) {
+                return `<textarea class="concept-extra-textarea" data-role="opr-extra" data-item-id="${esc(item.id)}" placeholder="Доп информация" ${disabledAttr()}>${esc(item.extraInfo || '')}</textarea>`;
+            }
+
+            function renderOprGroupUi(group) {
+                const groupItems = getItemsByGroup(group.id);
+                const allowAdd = Number(group.id) !== 10;
+                const rows = groupItems.map(item => `
+                    <div class="row" style="grid-template-columns: 1.05fr 110px 130px 136px 1.25fr;" data-item-id="${esc(item.id)}">
+                        <div class="td">
+                            <div class="cell-name">
+                                <div class="${oprIndicatorClass(item)}"></div>
+                                <div class="item-name" style="${normalizeStatus(item.status) === 'Не требуется' ? 'text-decoration:line-through;color:#98a2b3;' : ''}">
+                                    ${esc(item.name)}
+                                </div>
+                            </div>
+                        </div>
+                        <div class="td">${buildDocumentCell(item)}</div>
+                        <div class="td">${buildOprStatusCellUi(item)}</div>
+                        <div class="td"><input class="date-input" type="date" data-role="opr-planned-date" data-item-id="${esc(item.id)}" value="${esc(toInputDate(item.plannedDate || ''))}" ${disabledAttr()}></div>
+                        <div class="td">${buildOprExtraCellUi(item)}</div>
+                    </div>
+                `).join('');
+
+                const addBlock = allowAdd ? `
+                    <div class="add-item-row">
+                        <input class="add-item-input" id="oprAddItemInput_${group.id}" type="text" placeholder="Новый пункт" ${disabledAttr()}>
+                        <button class="add-item-btn" type="button" data-role="opr-add-item" data-group-id="${group.id}" ${disabledAttr()}>Добавить пункт</button>
+                    </div>
+                ` : '';
+
+                return `<div class="group-block"><div class="group-title">${esc(group.title)}</div>${rows}${addBlock}</div>`;
+            }
+
+            renderOprTables = function () {
+                if (!leftTableEl || !rightTableEl || !tablesGridEl) {
+                    throw new Error('opr table containers not found');
+                }
+
+                tablesGridEl.style.gridTemplateColumns = '1fr 1fr';
+                if (tablePanels[1]) {
+                    tablePanels[1].style.display = '';
+                }
+
+                const visibleGroups = groups.filter(group => {
+                    if (Number(group.id) !== 10) return true;
+                    return items.some(x => Number(x.group) === 10);
+                });
+                const leftGroups = visibleGroups.filter(group => [1, 3, 5, 7, 9].includes(Number(group.id)));
+                const rightGroups = visibleGroups.filter(group => [2, 4, 6, 8, 10].includes(Number(group.id)));
+
+                leftTableEl.innerHTML = `
+                    <div class="thead">
+                        <div class="thead-top" style="grid-template-columns: 1.05fr 110px 130px 136px 1.25fr;">
+                            <div class="th">Пункт</div>
+                            <div class="th">Документ</div>
+                            <div class="th">Статус</div>
+                            <div class="th">Планируемая дата</div>
+                            <div class="th">Доп информация</div>
+                        </div>
+                    </div>
+                    <div>${leftGroups.map(renderOprGroupUi).join('')}</div>
+                `;
+
+                rightTableEl.innerHTML = `
+                    <div class="thead">
+                        <div class="thead-top" style="grid-template-columns: 1.05fr 110px 130px 136px 1.25fr;">
+                            <div class="th">Пункт</div>
+                            <div class="th">Документ</div>
+                            <div class="th">Статус</div>
+                            <div class="th">Планируемая дата</div>
+                            <div class="th">Доп информация</div>
+                        </div>
+                    </div>
+                    <div>${rightGroups.map(renderOprGroupUi).join('')}</div>
+                `;
+            };
+
+            const previousRenderAll = renderAll;
+            renderAll = function () {
+                previousRenderAll();
+                updateLockNotice();
+                focusActiveInlineEditor();
+            };
+
+            const previousBindEventsEnhanced = bindEvents;
+            bindEvents = function () {
+                previousBindEventsEnhanced();
+
+                document.querySelectorAll('[data-role="concept-extra"], [data-role="opr-extra"], [data-role="concept-name-edit"], [data-role="concept-source-edit"]').forEach(el => {
+                    el.dataset.initialValue = String(el.value || '');
+                    el.dataset.baseHeight = '32';
+                    el.style.height = '32px';
+                    el.addEventListener('input', function () {
+                        autoGrowTextarea(this);
+                    });
+                });
+
+                document.querySelectorAll('[data-role="concept-name-display"]').forEach(el => {
+                    const openEditor = function () {
+                        startInlineEditor('concept-name', this.dataset.itemId);
+                    };
+                    el.addEventListener('click', openEditor);
+                    el.addEventListener('keydown', function (e) {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            openEditor.call(this);
+                        }
+                    });
+                });
+
+                document.querySelectorAll('[data-role="concept-source-display"]').forEach(el => {
+                    const openEditor = function () {
+                        startInlineEditor('concept-source', this.dataset.itemId);
+                    };
+                    el.addEventListener('click', openEditor);
+                    el.addEventListener('keydown', function (e) {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            openEditor.call(this);
+                        }
+                    });
+                });
+
+                document.querySelectorAll('[data-role="concept-name-edit"]').forEach(el => {
+                    const commit = function () {
+                        const item = items.find(x => x.id === this.dataset.itemId);
+                        if (!item) return;
+                        const oldValue = item.name || '';
+                        const newValue = String(this.value || '').trim();
+                        item.name = newValue;
+                        pushSessionChange(item.id, newValue || oldValue || item.id, 'name', oldValue, newValue);
+                        stopInlineEditor();
+                        renderAll();
+                    };
+                    const cancel = function () {
+                        stopInlineEditor();
+                        renderAll();
+                    };
+                    el.addEventListener('blur', commit);
+                    el.addEventListener('keydown', function (e) {
+                        if (e.key === 'Escape') {
+                            e.preventDefault();
+                            cancel();
+                            return;
+                        }
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                            e.preventDefault();
+                            commit.call(this);
+                        }
+                    });
+                });
+
+                document.querySelectorAll('[data-role="concept-source-edit"]').forEach(el => {
+                    const commit = function () {
+                        const item = items.find(x => x.id === this.dataset.itemId);
+                        if (!item) return;
+                        const oldValue = item.source || '';
+                        const newValue = String(this.value || '').trim();
+                        item.source = newValue;
+                        pushSessionChange(item.id, item.name || item.id, 'source', oldValue, newValue);
+                        stopInlineEditor();
+                        renderAll();
+                    };
+                    const cancel = function () {
+                        stopInlineEditor();
+                        renderAll();
+                    };
+                    el.addEventListener('blur', commit);
+                    el.addEventListener('keydown', function (e) {
+                        if (e.key === 'Escape') {
+                            e.preventDefault();
+                            cancel();
+                            return;
+                        }
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                            e.preventDefault();
+                            commit.call(this);
+                        }
+                    });
+                });
+
+                document.querySelectorAll('[data-role="opr-status"]').forEach(el => {
+                    el.addEventListener('change', function() {
+                        const item = items.find(x => x.id === this.dataset.itemId);
+                        if (!item) return;
+                        const oldValue = item.status || '';
+                        const newValue = this.value;
+                        item.status = newValue;
+                        if (newValue === 'Не требуется') {
+                            item.group = 10;
+                        } else if (Number(item.group) === 10) {
+                            item.group = resolveOprGroupId(item);
+                        }
+                        pushSessionChange(item.id, item.name, 'status', oldValue, newValue);
+                        renderAll();
+                    });
+                });
+
+                document.querySelectorAll('[data-role="opr-planned-date"]').forEach(el => {
+                    el.addEventListener('change', function() {
+                        const item = items.find(x => x.id === this.dataset.itemId);
+                        if (!item) return;
+                        const oldValue = item.plannedDate || '';
+                        const newValue = fromInputDate(this.value);
+                        item.plannedDate = newValue;
+                        pushSessionChange(item.id, item.name, 'plannedDate', oldValue, newValue);
+                        renderAll();
+                    });
+                });
+
+                document.querySelectorAll('[data-role="opr-extra"]').forEach(el => {
+                    const handler = function () {
+                        const item = items.find(x => x.id === this.dataset.itemId);
+                        if (!item) return;
+                        const oldValue = item.extraInfo || '';
+                        const newValue = this.value;
+                        item.extraInfo = newValue;
+                        pushSessionChange(item.id, item.name, 'extraInfo', oldValue, newValue);
+                        renderAll();
+                    };
+                    el.addEventListener('change', handler);
+                    el.addEventListener('blur', handler);
+                });
+
+                document.querySelectorAll('[data-role="opr-add-item"]').forEach(btn => {
+                    btn.addEventListener('click', function() {
+                        const groupId = Number(this.dataset.groupId);
+                        const input = document.getElementById('oprAddItemInput_' + groupId);
+                        if (!input) return;
+                        const name = (input.value || '').trim();
+                        if (!name) return;
+                        const newItem = createLocalItem(groupId, name, 'opr');
+                        items.push(newItem);
+                        pushSessionChange(newItem.id, newItem.name, 'add-item', '', newItem.name);
+                        input.value = '';
+                        renderAll();
+                    });
+                });
+            };
+
+            setTimeout(function () {
+                acquireChecklistLock(currentChecklistKey, true);
+                startLockHeartbeat();
+                updateLockNotice();
+            }, 0);
+    """
 
     return f"""
     <html>
@@ -1487,6 +3609,12 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
             .status-indicator.gray {{ background:#9ca3af; border-color:#9ca3af; }}
             .item-name {{ font-size:13px; font-weight:700; color:#1f2328; line-height:1.15; min-width:0; word-break:break-word; max-width:165px; }}
             .status-select,.date-input {{ width:100%; border:1px solid #d0d7de; border-radius:8px; padding:6px 8px; font-size:12px; background:#fff; }}
+            .concept-extra-textarea {{ width:100%; height:32px; min-height:32px; border:1px solid #d0d7de; border-radius:8px; padding:6px 8px; font-size:12px; background:#fff; resize:vertical; overflow:hidden; line-height:1.35; }}
+            .concept-inline-display {{ min-height:32px; padding:6px 8px; border:1px solid transparent; border-radius:8px; font-size:12px; line-height:1.35; white-space:pre-wrap; word-break:break-word; cursor:text; }}
+            .concept-inline-display:hover {{ background:#f8fafc; border-color:#e5e7eb; }}
+            .concept-inline-display.empty {{ color:#98a2b3; }}
+            .concept-inline-display.disabled {{ cursor:default; background:#f8fafc; border-color:transparent; }}
+            .concept-inline-input {{ width:100%; min-height:32px; height:32px; border:1px solid #d0d7de; border-radius:8px; padding:6px 8px; font-size:12px; background:#fff; resize:vertical; overflow:hidden; line-height:1.35; }}
             .doc-btn,.upload-btn,.add-item-btn {{ display:inline-block; width:100%; text-align:center; padding:6px 8px; border:1px solid #d0d7de; border-radius:8px; background:#f8fafc; color:#1f2328; font-size:12px; text-decoration:none; cursor:pointer; }}
             .doc-btn:hover,.upload-btn:hover,.side-link:hover,.add-item-btn:hover {{ background:#f1f5f9; }}
             .add-item-row {{ padding:9px 12px 10px; min-height:52px; border-top:1px solid #edf0f2; background:#fcfcfd; display:flex; gap:8px; align-items:center; justify-content:flex-start; }}
@@ -1586,21 +3714,23 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
         </div>
         <script>
             const dialogId = {dialog_id_json};
-            const rawGroups = {groups_json};
-            const rawProjectChecklists = {project_checklists_json};
+            let rawGroups = {groups_json};
+            let rawProjectChecklists = {project_checklists_json};
             let rawItems = {items_json};
             let collabTitle = {collab_title_json};
 
-            const groups = Array.isArray(rawGroups) ? rawGroups : [];
-            const projectChecklists = Array.isArray(rawProjectChecklists) ? rawProjectChecklists : [];
+            let groups = Array.isArray(rawGroups) ? rawGroups : [];
+            let projectChecklists = Array.isArray(rawProjectChecklists) ? rawProjectChecklists : [];
             let items = Array.isArray(rawItems) ? rawItems : [];
 
+            let currentChecklistKey = {checklist_key_json};
+            let checklistTitle = {checklist_title_json};
+            let checklistCache = {{}};
             let sessionChanges = [];
-            let currentEditor = {
+            let currentEditor = {{
                 id: "",
                 name: ""
-            };
-
+            }};
             const saveStateEl = document.getElementById('saveState');
             const leftTableBodyEl = document.getElementById('leftTableBody');
             const rightTableBodyEl = document.getElementById('rightTableBody');
@@ -1608,6 +3738,12 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
             const progressBarEl = document.getElementById('progressBar');
             const popupTitleEl = document.getElementById('popupTitle');
             const projectChecklistListEl = document.getElementById('projectChecklistList');
+            const tablePanels = document.querySelectorAll('.table-panel');
+            const tablesGridEl = document.querySelector('.tables-grid');
+            const leftTableEl = tablePanels[0] ? tablePanels[0].querySelector('.table') : null;
+            const rightTableEl = tablePanels[1] ? tablePanels[1].querySelector('.table') : null;
+            const idLeftTableHtml = leftTableEl ? leftTableEl.innerHTML : '';
+            const idRightTableHtml = rightTableEl ? rightTableEl.innerHTML : '';
             const debugLastEventEl = document.getElementById('debugLastEvent');
             const APP_BASE_URL = window.location.origin;
             let closeSummarySent = false;
@@ -1697,11 +3833,12 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                 const body = JSON.stringify({{
                     event,
                     dialogId,
+                    checklistKey: currentChecklistKey,
                     payload,
                     href: window.location.href,
                     ts: new Date().toISOString()
                 }});
-                
+
                 setDebugText(event);
 
                 try {{
@@ -1733,59 +3870,145 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                     setDebugText(event + ' | js error');
                 }}
             }}
+            function logRenderState(stage) {{
+                debugLog('render_state', {{
+                    stage,
+                    groupsType: typeof rawGroups,
+                    itemsType: typeof rawItems,
+                    projectChecklistsType: typeof rawProjectChecklists,
+                    groupsIsArray: Array.isArray(groups),
+                    itemsIsArray: Array.isArray(items),
+                    projectChecklistsIsArray: Array.isArray(projectChecklists),
+                    groupsLength: groups.length,
+                    itemsLength: items.length,
+                    projectChecklistsLength: projectChecklists.length,
+                    leftTableExists: !!leftTableBodyEl,
+                    rightTableExists: !!rightTableBodyEl,
+                    titleExists: !!popupTitleEl,
+                    sidePanelExists: !!projectChecklistListEl
+                }});
+            }}
+
+            function logRenderError(stage, error) {{
+                const message = (error && error.message) ? error.message : String(error || 'unknown error');
+                const stack = (error && error.stack) ? error.stack : '';
+
+                setDebugText(stage + ' | ERROR: ' + message);
+
+                debugLog('render_error', {{
+                    stage,
+                    message,
+                    stack
+                }});
+            }}
+            function deepClone(value) {{
+                return JSON.parse(JSON.stringify(value));
+            }}
+
+            function buildChecklistSnapshot() {{
+                return {{
+                    checklistKey: currentChecklistKey,
+                    title: checklistTitle,
+                    collabTitle,
+                    groups: deepClone(groups),
+                    projectChecklists: deepClone(projectChecklists),
+                    items: deepClone(items)
+                }};
+            }}
+
+            function syncChecklistCache() {{
+                checklistCache[currentChecklistKey] = buildChecklistSnapshot();
+            }}
+
+            function applyChecklistData(data) {{
+                const nextData = data || {{}};
+                const nextKey = String(nextData.checklistKey || currentChecklistKey || 'id').trim() || 'id';
+
+                currentChecklistKey = nextKey;
+                checklistTitle = String(nextData.title || getChecklistDefaultTitle(nextKey));
+                collabTitle = String(nextData.collabTitle || collabTitle || '');
+
+                rawGroups = Array.isArray(nextData.groups) ? nextData.groups : [];
+                rawProjectChecklists = Array.isArray(nextData.projectChecklists)
+                    ? nextData.projectChecklists
+                    : rawProjectChecklists;
+                rawItems = Array.isArray(nextData.items) ? nextData.items : [];
+
+                groups = Array.isArray(rawGroups) ? rawGroups : [];
+                projectChecklists = Array.isArray(rawProjectChecklists) ? rawProjectChecklists : [];
+                items = Array.isArray(rawItems) ? rawItems : [];
+
+                document.title = collabTitle
+                    ? checklistTitle + ' — ' + collabTitle
+                    : checklistTitle;
+            }}
+
+            async function flushCurrentChecklistSummary(reason = 'checklist_switch') {{
+                syncChecklistCache();
+                debugLog('close_summary_switch_skipped', {{
+                    checklistKey: currentChecklistKey,
+                    reason,
+                    changesCount: sessionChanges.length,
+                    dirty: !!sessionDirty
+                }});
+            }}
+
+            async function loadChecklistByKey(checklistKey) {{
+                const targetKey = String(checklistKey || '').trim() || 'id';
+                if (targetKey === currentChecklistKey) {{
+                    return;
+                }}
+
+                syncChecklistCache();
+                await releaseChecklistLock(currentChecklistKey, false);
+                setSaveState('saving', 'Загружаем...');
+
+                try {{
+                    const cachedData = checklistCache[targetKey];
+                    if (cachedData) {{
+                        applyChecklistData(deepClone(cachedData));
+                        renderAll();
+                        debugLog('checklist_switched_cached', {{
+                            checklistKey: targetKey
+                        }});
+                        await acquireChecklistLock(targetKey, true);
+                        startLockHeartbeat();
+                        setSaveState('', 'Сохранено');
+                        return;
+                    }}
+
+                    const response = await fetch(
+                        '/api/checklist?dialogId=' + encodeURIComponent(dialogId) +
+                        '&checklistKey=' + encodeURIComponent(targetKey)
+                    );
+                    const result = await response.json();
+
+                    if (!response.ok) {{
+                        throw new Error(result.error || 'load checklist failed');
+                    }}
+
+                    applyChecklistData(result);
+                    renderAll();
+                    debugLog('checklist_switched', {{
+                        checklistKey: targetKey
+                    }});
+                    await acquireChecklistLock(targetKey, true);
+                    startLockHeartbeat();
+                    setSaveState('', 'Сохранено');
+                }} catch (e) {{
+                    console.log('loadChecklistByKey error:', e);
+                    setSaveState('error', 'Ошибка загрузки чек-листа');
+                }}
+            }}
 
             function sendCloseSummaryOnce(eventName) {{
-                if (closeSummarySent) {{
+                if (eventName === 'popup_hidden' || suppressAutoCloseSave || closeSummarySent) {{
                     return;
                 }}
 
                 closeSummarySent = true;
-
-                const payload = {{
-                    dialogId,
-                    editor: currentEditor,
-                    changes: sessionChanges,
-                    closeEvent: eventName,
-                    ts: new Date().toISOString()
-                }};
-
-                debugLog('close_summary_start', payload, true);
-
-                try {{
-                    const closeUrl = APP_BASE_URL + '/api/checklist/close-session';
-                    const debugUrl = APP_BASE_URL + '/api/debug/event';
-
-                    const closeBlob = new Blob([JSON.stringify(payload)], {{
-                        type: 'application/json'
-                    }});
-
-                    const closeOk = navigator.sendBeacon
-                        ? navigator.sendBeacon(closeUrl, closeBlob)
-                        : false;
-
-                    const debugBlob = new Blob([JSON.stringify({{
-                        event: 'close_summary_beacon_sent',
-                        dialogId,
-                        payload: {{
-                            closeEvent: eventName,
-                            closeOk,
-                            changesCount: sessionChanges.length,
-                            editor: currentEditor
-                        }},
-                        ts: new Date().toISOString()
-                    }})], {{
-                        type: 'application/json'
-                    }});
-
-                    if (navigator.sendBeacon) {{
-                        navigator.sendBeacon(debugUrl, debugBlob);
-                    }}
-
-                    setDebugText('close_summary_sent | beacon=' + closeOk + ' | changes=' + sessionChanges.length);
-                }} catch (e) {{
-                    console.log('sendCloseSummaryOnce error:', e);
-                    setDebugText('close_summary_error');
-                }}
+                persistDirtyChecklists(eventName, true);
+                releaseChecklistLock(currentChecklistKey, true);
             }}
 
             document.addEventListener('visibilitychange', function () {{
@@ -1844,9 +4067,26 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                 }}
             }}
             function calculateProgress() {{
-                if (currentChecklistKey !== 'id') {{
-                    progressValueEl.textContent = '';
-                    progressBarEl.style.width = '0%';
+                if (!progressValueEl || !progressBarEl) {{
+                    return;
+                }}
+                if (currentChecklistKey === 'concept') {{
+                    const activeItems = items.filter(item => String(item.status || '').trim() !== 'Не требуется');
+                    const completedItems = activeItems.filter(item => {{
+                        const status = String(item.status || '').trim();
+                        const kind = String(item.statusKind || '').trim() || 'bool';
+
+                        if (kind === 'bool') {{
+                            return status === 'Да';
+                        }}
+
+                        return !!status;
+                    }});
+                    const activeCount = activeItems.length;
+                    const completedCount = completedItems.length;
+                    const percent = activeCount ? Math.round((completedCount / activeCount) * 100) : 0;
+                    progressValueEl.textContent = percent + '%';
+                    progressBarEl.style.width = percent + '%';
                     return;
                 }}
                 const activeItems = items.filter(x => normalizeStatus(x.status) !== 'Не требуется');
@@ -1881,12 +4121,12 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                 setSaveState('', 'Сохранено');
                 return result;
             }}
-            async function removeDocument(itemId) {{
+            async function removeDocument(itemId, documentUrl = '') {{
                 setSaveState('saving', 'Сохраняем...');
                 const response = await fetch('/api/checklist/remove-document', {{
                     method: 'POST',
                     headers: {{ 'Content-Type': 'application/json' }},
-                    body: JSON.stringify({{ dialogId, checklistKey: currentChecklistKey, itemId }})
+                    body: JSON.stringify({{ dialogId, checklistKey: currentChecklistKey, itemId, documentUrl }})
                 }});
                 const result = await response.json();
                 if (!response.ok || !result.ok) throw new Error(result.error || 'remove document failed');
@@ -1895,11 +4135,13 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
             }}
             async function uploadDocument(itemId, file) {{
                 setSaveState('saving', 'Сохраняем...');
+                const item = items.find(x => x.id === itemId);
                 const formData = new FormData();
                 formData.append('dialogId', dialogId);
                 formData.append('itemId', itemId);
                 formData.append('file', file);
                 formData.append('checklistKey', currentChecklistKey);
+                formData.append('itemGroup', String(item && item.group ? item.group : ''));
                 const response = await fetch('/api/checklist/upload-document', {{ method: 'POST', body: formData }});
                 const result = await response.json();
                 if (!response.ok || !result.ok) throw new Error(result.error || 'upload document failed');
@@ -1907,29 +4149,196 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                 return result;
             }}
             function getItemsByGroup(groupId) {{
-                return items.filter(item => item.group === groupId).sort((a, b) => a.order - b.order);
+                return items
+                    .filter(item => Number(item.group) === Number(groupId))
+                    .sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
             }}
             function hasItemsInGroup(groupId) {{
                 return getItemsByGroup(groupId).length > 0;
             }}
             function renderProjectChecklistList() {{
+                if (!projectChecklistListEl) {{
+                    return;
+                }}
+
+                if (!Array.isArray(projectChecklists) || !projectChecklists.length) {{
+                    projectChecklistListEl.innerHTML = '';
+                    return;
+                }}
+
                 projectChecklistListEl.innerHTML = projectChecklists.map(item => {{
                     const active = item.key === currentChecklistKey ? 'side-link active' : 'side-link';
                     return `<button type="button" class="${{active}}" data-checklist-key="${{esc(item.key)}}">${{esc(item.title)}}</button>`;
                 }}).join('');
                 projectChecklistListEl.querySelectorAll('[data-checklist-key]').forEach(btn => {{
-                    btn.addEventListener('click', function () {{
+                    btn.addEventListener('click', async function () {{
                         const key = this.dataset.checklistKey;
-                        if (key === 'opr') {{
-                            alert('Этот чек-лист подключим следующим этапом.');
-                            return;
-                        }}
-                        if (key === currentChecklistKey) {{
-                            return;
-                        }}
-                        window.location.href = '/popup?dialogId=' + encodeURIComponent(dialogId) + '&checklistKey=' + encodeURIComponent(key);
+                        await loadChecklistByKey(key);
                     }});
                 }});
+            }}
+            function buildDocumentCell(item) {{
+                const hasDocument = !!(item.documentUrl && String(item.documentUrl).trim());
+
+                if (hasDocument) {{
+                    return `
+                        <button
+                            class="doc-btn"
+                            type="button"
+                            data-role="view-document"
+                            data-document-url="${{esc(item.documentUrl)}}"
+                        >
+                            Посмотреть
+                        </button>
+                    `;
+                }}
+
+                return `
+                    <button
+                        class="upload-btn"
+                        type="button"
+                        data-role="upload"
+                        data-item-id="${{esc(item.id)}}"
+                    >
+                        Загрузить
+                    </button>
+                    <input
+                        type="file"
+                        data-role="file-input"
+                        data-item-id="${{esc(item.id)}}"
+                        style="display:none;"
+                    >
+                `;
+            }}
+            function pushSessionChange(itemId, itemName, field, oldValue, newValue) {{
+                if (String(oldValue || '') === String(newValue || '')) {{
+                    return;
+                }}
+
+                sessionChanges.push({{
+                    field,
+                    itemId: itemId || '',
+                    itemName: itemName || '',
+                    oldValue: oldValue || '',
+                    newValue: newValue || ''
+                }});
+                sessionDirty = true;
+                closeSummarySent = false;
+                setSaveState('saving', 'Есть несохраненные изменения');
+            }}
+            function autoGrowTextarea(el) {{
+                if (!el) return;
+
+                const baseHeight = Number(el.dataset.baseHeight || 0) || 32;
+                const initialValue = String(el.dataset.initialValue || '');
+                el.dataset.baseHeight = String(baseHeight);
+                el.style.height = baseHeight + 'px';
+
+                if (String(el.value || '').length <= initialValue.length) {{
+                    return;
+                }}
+
+                let nextHeight = baseHeight;
+                while (el.scrollHeight > el.clientHeight && nextHeight < 1600) {{
+                    nextHeight *= 2;
+                    el.style.height = nextHeight + 'px';
+                }}
+            }}
+            function extractConceptUnit(placeholder) {{
+                const raw = String(placeholder || '').trim();
+                const match = raw.match(new RegExp('^_+\\s*(.+)$'));
+                return match ? match[1].trim() : '';
+            }}
+            function formatConceptTextStatus(value, placeholder) {{
+                const rawValue = String(value || '').trim();
+                if (!rawValue) {{
+                    return '';
+                }}
+
+                if (rawValue === 'Не требуется') {{
+                    return rawValue;
+                }}
+
+                const unit = extractConceptUnit(placeholder);
+                if (!unit) {{
+                    return rawValue;
+                }}
+
+                if (rawValue.toLowerCase().endsWith(unit.toLowerCase())) {{
+                    return rawValue;
+                }}
+
+                if (!/^[0-9]+([.,][0-9]+)?$/.test(rawValue)) {{
+                    return rawValue;
+                }}
+
+                return unit.startsWith('%') ? rawValue + unit : rawValue + ' ' + unit;
+            }}
+            function buildClientItemId(prefix) {{
+                return prefix + '_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+            }}
+            function createLocalItem(groupId, name, checklistKey) {{
+                const groupItems = getItemsByGroup(groupId);
+                const nextOrder = groupItems.length + 1;
+
+                if (checklistKey === 'concept') {{
+                    return {{
+                        id: buildClientItemId('concept_g' + groupId + '_custom'),
+                        group: groupId,
+                        order: nextOrder,
+                        name,
+                        source: '',
+                        statusKind: 'text',
+                        statusOptions: [],
+                        statusPlaceholder: '',
+                        status: '',
+                        extraInfo: '',
+                        extraInfoPlaceholder: '',
+                        documentUrl: '',
+                        documentName: '',
+                        isCustom: true,
+                        priority: 'white'
+                    }};
+                }}
+
+                return {{
+                    id: buildClientItemId('item_g' + groupId + '_custom'),
+                    group: groupId,
+                    order: nextOrder,
+                    name,
+                    priority: 'white',
+                    status: '',
+                    plan: '',
+                    fact: '',
+                    documentUrl: '',
+                    documentName: '',
+                    isCustom: true
+                }};
+            }}
+            function resolveConceptGroupId(item) {{
+                const itemId = String(item && item.id || '');
+                const name = String(item && item.name || '').trim();
+
+                if (itemId.startsWith('concept_g')) {{
+                    const match = itemId.match(new RegExp('^concept_g(\\d+)_'));
+                    if (match) {{
+                        const groupId = Number(match[1]);
+                        if (groupId && groupId !== 10) {{
+                            return groupId;
+                        }}
+                    }}
+                }}
+
+                const byName = groups.find(group => Number(group.id) !== 10 && Array.isArray(items) && items.some(existing =>
+                    existing !== item &&
+                    Number(existing.group) === Number(group.id) &&
+                    String(existing.name || '').trim() === name
+                ));
+                if (byName) {{
+                    return Number(byName.id);
+                }}
+
+                return 1;
             }}
             function conceptIndicatorClass(item) {{
                 const status = String(item.status || '').trim();
@@ -1969,21 +4378,41 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                 return `<input class="status-select" type="text" data-role="concept-status" data-item-id="${{esc(item.id)}}" placeholder="${{esc(item.statusPlaceholder || '')}}" value="${{esc(item.status || '')}}">`;
             }}
             function buildConceptExtraCell(item) {{
-                return `<input class="status-select" type="text" data-role="concept-extra" data-item-id="${{esc(item.id)}}" placeholder="${{esc(item.extraInfoPlaceholder || '')}}" value="${{esc(item.extraInfo || '')}}">`;
+                return `<textarea class="concept-extra-textarea" data-role="concept-extra" data-item-id="${{esc(item.id)}}" placeholder="${{esc(item.extraInfoPlaceholder || '')}}">${{esc(item.extraInfo || '')}}</textarea>`;
             }}
-            function renderConceptTable() {{
-                if (!leftTableEl || !tablesGridEl) return;
-                tablesGridEl.style.gridTemplateColumns = '1fr';
-                if (tablePanels[1]) {{
-                    tablePanels[1].style.display = 'none';
-                }}
-                const visibleGroups = groups.filter(group => {{
-                    if (group.id !== 10) return true;
-                    return items.some(x => x.group === 10);
-                }});
-                leftTableEl.innerHTML = `
+            function renderConceptGroup(group) {{
+                const groupItems = getItemsByGroup(group.id);
+                const allowAdd = Number(group.id) !== 10;
+                const rows = groupItems.map(item => `
+                    <div class="row" style="grid-template-columns: 1.05fr 0.8fr 110px 150px 1.15fr;" data-item-id="${{esc(item.id)}}">
+                        <div class="td">
+                            <div class="cell-name">
+                                <div class="${{conceptIndicatorClass(item)}}"></div>
+                                <div class="item-name" style="${{item.status === 'Не требуется' ? 'text-decoration:line-through;color:#98a2b3;' : ''}}">
+                                    ${{esc(item.name)}}
+                                </div>
+                            </div>
+                        </div>
+                        <div class="td">${{esc(item.source || '')}}</div>
+                        <div class="td">${{buildDocumentCell(item)}}</div>
+                        <div class="td">${{buildConceptStatusCell(item)}}</div>
+                        <div class="td">${{buildConceptExtraCell(item)}}</div>
+                    </div>
+                `).join('');
+
+                const addBlock = allowAdd ? `
+                    <div class="add-item-row">
+                        <input class="add-item-input" id="conceptAddItemInput_${{group.id}}" type="text" placeholder="Новый пункт">
+                        <button class="add-item-btn" type="button" data-role="concept-add-item" data-group-id="${{group.id}}">Добавить пункт</button>
+                    </div>
+                ` : '';
+
+                return `<div class="group-block"><div class="group-title">${{esc(group.title)}}</div>${{rows}}${{addBlock}}</div>`;
+            }}
+            function buildConceptTableHtml(conceptGroups) {{
+                return `
                     <div class="thead">
-                        <div class="thead-top" style="grid-template-columns: 1.2fr 0.8fr 110px 160px 1fr;">
+                        <div class="thead-top" style="grid-template-columns: 1.05fr 0.8fr 110px 150px 1.15fr;">
                             <div class="th">Пункт</div>
                             <div class="th">Нормативы</div>
                             <div class="th">Документ</div>
@@ -1991,27 +4420,29 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                             <div class="th">Доп информация</div>
                         </div>
                     </div>
-                    <div id="conceptTableBody">${{visibleGroups.map(group => {{
-                        const groupItems = getItemsByGroup(group.id);
-                        const rows = groupItems.map(item => `
-                            <div class="row" style="grid-template-columns: 1.2fr 0.8fr 110px 160px 1fr;" data-item-id="${{esc(item.id)}}">
-                                <div class="td">
-                                    <div class="cell-name">
-                                        <div class="${{conceptIndicatorClass(item)}}"></div>
-                                        <div class="item-name" style="${{item.status === 'Не требуется' ? 'text-decoration:line-through;color:#98a2b3;' : ''}}">
-                                            ${{esc(item.name)}}
-                                        </div>
-                                    </div>
-                                </div>
-                                <div class="td">${{esc(item.source || '')}}</div>
-                                <div class="td">${{buildDocumentCell(item)}}</div>
-                                <div class="td">${{buildConceptStatusCell(item)}}</div>
-                                <div class="td">${{buildConceptExtraCell(item)}}</div>
-                            </div>
-                        `).join('');
-                        return `<div class="group-block"><div class="group-title">${{esc(group.title)}}</div>${{rows}}</div>`;
-                    }}) .join('')}}</div>
+                    <div>${{conceptGroups.map(renderConceptGroup).join('')}}</div>
                 `;
+            }}
+            function renderConceptTable() {{
+                if (!leftTableEl || !rightTableEl || !tablesGridEl) {{
+                    throw new Error('concept table containers not found');
+                }}
+
+                tablesGridEl.style.gridTemplateColumns = '1fr 1fr';
+                if (tablePanels[1]) {{
+                    tablePanels[1].style.display = '';
+                }}
+
+                const visibleGroups = groups.filter(group => {{
+                    if (Number(group.id) !== 10) return true;
+                    return items.some(x => Number(x.group) === 10);
+                }});
+
+                const leftGroups = visibleGroups.filter(group => [1, 3, 5, 7, 9].includes(Number(group.id)));
+                const rightGroups = visibleGroups.filter(group => [2, 4, 6, 8, 10].includes(Number(group.id)));
+
+                leftTableEl.innerHTML = buildConceptTableHtml(leftGroups);
+                rightTableEl.innerHTML = buildConceptTableHtml(rightGroups);
             }}
             function renderGroup(group) {{
                 const groupItems = getItemsByGroup(group.id);
@@ -2057,18 +4488,21 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                 if (rightTableEl) rightTableEl.innerHTML = idRightTableHtml;
                 const leftBody = document.getElementById('leftTableBody');
                 const rightBody = document.getElementById('rightTableBody');
-                const leftGroups = groups.filter(g => g.id === 1 || g.id === 3);
-                const rightGroups = groups.filter(g => g.id === 2);
+                if (!leftBody || !rightBody) {{
+                    throw new Error('leftTableBody or rightTableBody not found');
+                }}
+                const leftGroups = groups.filter(g => Number(g.id) === 1 || Number(g.id) === 3);
+                const rightGroups = groups.filter(g => Number(g.id) === 2);
 
                 if (hasItemsInGroup(4)) {{
-                    const notRequiredGroup = groups.find(g => g.id === 4);
+                    const notRequiredGroup = groups.find(g => Number(g.id) === 4);
                     if (notRequiredGroup) {{
                         rightGroups.push(notRequiredGroup);
                     }}
                 }}
 
-                if (leftBody) leftBody.innerHTML = leftGroups.map(renderGroup).join('');
-                if (rightBody) rightBody.innerHTML = rightGroups.map(renderGroup).join('');
+                leftBody.innerHTML = leftGroups.map(renderGroup).join('');
+                rightBody.innerHTML = rightGroups.map(renderGroup).join('');
             }}
             function renderAll() {{
                 renderTables();
@@ -2076,59 +4510,71 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                 calculateProgress();
                 renderTitle();
                 renderProjectChecklistList();
+                syncChecklistCache();
             }}
             function replaceItem(updatedItem) {{
                 if (!updatedItem) return;
                 const idx = items.findIndex(x => x.id === updatedItem.id);
-                if (idx >= 0) items[idx] = updatedItem; else items.push(updatedItem);
+                if (idx >= 0) items[idx] = Object.assign({{}}, items[idx], updatedItem); else items.push(updatedItem);
             }}
             function bindEvents() {{
                 document.querySelectorAll('[data-role="concept-status"]').forEach(el => {{
-                    const handler = async function () {{
+                    const commitConceptStatus = function () {{
                         const item = items.find(x => x.id === this.dataset.itemId);
                         if (!item) return;
 
-                        const oldItem = JSON.parse(JSON.stringify(item));
-                        const newValue = this.value;
+                        const oldValue = item.status || '';
+                        let newValue = this.value;
+
+                        if (String(item.statusKind || '') === 'text') {{
+                            newValue = formatConceptTextStatus(newValue, item.statusPlaceholder || '');
+                            this.value = newValue;
+                        }}
+
+                        if (newValue === 'Не требуется') {{
+                            item.group = 10;
+                        }} else if (Number(item.group) === 10) {{
+                            item.group = resolveConceptGroupId(item);
+                        }}
 
                         item.status = newValue;
-                        sessionDirty = true;
-
-                        try {{
-                            const result = await updateItem(this.dataset.itemId, 'status', newValue, currentChecklistKey);
-                            replaceItem(result.item);
-                            renderAll();
-                        }} catch (e) {{
-                            replaceItem(oldItem);
-                            renderAll();
-                            setSaveState('error', 'Ошибка сохранения');
-                        }}
+                        pushSessionChange(item.id, item.name, 'status', oldValue, newValue);
+                        renderAll();
                     }};
 
-                    el.addEventListener('change', handler);
-                    el.addEventListener('blur', handler);
+                    const item = items.find(x => x.id === el.dataset.itemId);
+                    if (!item) return;
+
+                    if (String(item.statusKind || '') === 'text') {{
+                        el.addEventListener('blur', commitConceptStatus);
+                        el.addEventListener('keydown', function (e) {{
+                            if (e.key === 'Enter') {{
+                                e.preventDefault();
+                                commitConceptStatus.call(this);
+                            }}
+                        }});
+                    }} else {{
+                        el.addEventListener('change', commitConceptStatus);
+                    }}
                 }});
 
                 document.querySelectorAll('[data-role="concept-extra"]').forEach(el => {{
-                    const handler = async function () {{
+                    el.dataset.initialValue = String(el.value || '');
+                    el.dataset.baseHeight = '32';
+                    el.style.height = '32px';
+                    el.addEventListener('input', function () {{
+                        autoGrowTextarea(this);
+                    }});
+
+                    const handler = function () {{
                         const item = items.find(x => x.id === this.dataset.itemId);
                         if (!item) return;
 
-                        const oldItem = JSON.parse(JSON.stringify(item));
+                        const oldValue = item.extraInfo || '';
                         const newValue = this.value;
-
                         item.extraInfo = newValue;
-                        sessionDirty = true;
-
-                        try {{
-                            const result = await updateItem(this.dataset.itemId, 'extraInfo', newValue, currentChecklistKey);
-                            replaceItem(result.item);
-                            renderAll();
-                        }} catch (e) {{
-                            replaceItem(oldItem);
-                            renderAll();
-                            setSaveState('error', 'Ошибка сохранения');
-                        }}
+                        pushSessionChange(item.id, item.name, 'extraInfo', oldValue, newValue);
+                        renderAll();
                     }};
 
                     el.addEventListener('change', handler);
@@ -2139,18 +4585,10 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                         const item = items.find(x => x.id === this.dataset.itemId);
                         if (!item) return;
                         const oldItem = JSON.parse(JSON.stringify(item));
-                        const changeCountBefore = sessionChanges.length;
                         const newValue = this.value;
 
                         item.status = newValue;
-                        sessionChanges.push({{
-                            field: 'status',
-                            itemId: item.id,
-                            itemName: item.name,
-                            oldValue: oldItem.status || '',
-                            newValue: newValue || ''
-                        }});
-                        sessionDirty = true;
+                        pushSessionChange(item.id, item.name, 'status', oldItem.status || '', newValue || '');
                         debugLog('status_changed', {{
                             itemId: item.id,
                             itemName: item.name,
@@ -2158,55 +4596,36 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                             newValue: newValue || ''
                         }});
 
-                        if (this.selectedIndex === 2 && oldItem.documentUrl) {{
-                            sessionChanges.push({{
-                                field: 'document',
-                                itemId: item.id,
-                                itemName: item.name,
-                                oldValue: 'uploaded',
-                                newValue: 'removed'
-                            }});
-                            sessionDirty = true;
+                        if (newValue === 'Нет' && oldItem.documentUrl) {{
+                            pushSessionChange(item.id, item.name, 'document', 'uploaded', 'removed');
                             debugLog('document_removed_by_status', {{
                                 itemId: item.id,
                                 itemName: item.name,
                                 oldValue: 'uploaded',
                                 newValue: 'removed'
                             }});
+                            item.documentUrl = '';
+                            item.documentName = '';
+                            try {{
+                                await removeDocument(item.id, oldItem.documentUrl);
+                            }} catch (e) {{
+                                console.log('remove document by status error:', e);
+                            }}
                         }}
 
                         renderAll();
-
-                        try {{
-                            const result = await updateItem(this.dataset.itemId, 'status', newValue);
-                            replaceItem(result.item);
-                            renderAll();
-                        }} catch (e) {{
-                            sessionChanges.splice(changeCountBefore);
-                            replaceItem(oldItem);
-                            renderAll();
-                            setSaveState('error', 'Save error');
-                        }}
                     }});
                 }});
 
                 document.querySelectorAll('[data-role="plan"]').forEach(el => {{
-                    el.addEventListener('change', async function() {{
+                    el.addEventListener('change', function() {{
                         const item = items.find(x => x.id === this.dataset.itemId);
                         if (!item) return;
                         const oldItem = JSON.parse(JSON.stringify(item));
-                        const changeCountBefore = sessionChanges.length;
                         const newValue = fromInputDate(this.value);
 
                         item.plan = newValue;
-                        sessionChanges.push({{
-                            field: 'plan',
-                            itemId: item.id,
-                            itemName: item.name,
-                            oldValue: oldItem.plan || '',
-                            newValue: newValue || ''
-                        }});
-                        sessionDirty = true;
+                        pushSessionChange(item.id, item.name, 'plan', oldItem.plan || '', newValue || '');
                         debugLog('plan_changed', {{
                             itemId: item.id,
                             itemName: item.name,
@@ -2215,37 +4634,18 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                         }});
 
                         renderAll();
-
-                        try {{
-                            const result = await updateItem(this.dataset.itemId, 'plan', newValue);
-                            replaceItem(result.item);
-                            renderAll();
-                        }} catch (e) {{
-                            sessionChanges.splice(changeCountBefore);
-                            replaceItem(oldItem);
-                            renderAll();
-                            setSaveState('error', 'Save error');
-                        }}
                     }});
                 }});
 
                 document.querySelectorAll('[data-role="fact"]').forEach(el => {{
-                    el.addEventListener('change', async function() {{
+                    el.addEventListener('change', function() {{
                         const item = items.find(x => x.id === this.dataset.itemId);
                         if (!item) return;
                         const oldItem = JSON.parse(JSON.stringify(item));
-                        const changeCountBefore = sessionChanges.length;
                         const newValue = fromInputDate(this.value);
 
                         item.fact = newValue;
-                        sessionChanges.push({{
-                            field: 'fact',
-                            itemId: item.id,
-                            itemName: item.name,
-                            oldValue: oldItem.fact || '',
-                            newValue: newValue || ''
-                        }});
-                        sessionDirty = true;
+                        pushSessionChange(item.id, item.name, 'fact', oldItem.fact || '', newValue || '');
                         debugLog('fact_changed', {{
                             itemId: item.id,
                             itemName: item.name,
@@ -2254,51 +4654,48 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                         }});
 
                         renderAll();
-
-                        try {{
-                            const result = await updateItem(this.dataset.itemId, 'fact', newValue);
-                            replaceItem(result.item);
-                            renderAll();
-                        }} catch (e) {{
-                            sessionChanges.splice(changeCountBefore);
-                            replaceItem(oldItem);
-                            renderAll();
-                            setSaveState('error', 'Save error');
-                        }}
                     }});
                 }});
 
                 document.querySelectorAll('[data-role="add-item"]').forEach(btn => {{
-                    btn.addEventListener('click', async function() {{
+                    btn.addEventListener('click', function() {{
                         const groupId = Number(this.dataset.groupId);
                         const input = document.getElementById('addItemInput_' + groupId);
                         if (!input) return;
                         const name = (input.value || '').trim();
                         if (!name) return;
 
-                        try {{
-                            const result = await addItem(groupId, name);
-                            replaceItem(result.item);
-                            if (result.item) {{
-                                sessionChanges.push({{
-                                    field: 'add-item',
-                                    itemId: result.item.id,
-                                    itemName: result.item.name,
-                                    oldValue: '',
-                                    newValue: result.item.name
-                                }});
-                                sessionDirty = true;
-                                debugLog('item_added', {{
-                                    itemId: result.item.id,
-                                    itemName: result.item.name,
-                                    groupId: groupId
-                                }});
-                            }}
-                            input.value = '';
-                            renderAll();
-                        }} catch (e) {{
-                            setSaveState('error', 'Add item error');
-                        }}
+                        const newItem = createLocalItem(groupId, name, 'id');
+                        items.push(newItem);
+                        pushSessionChange(newItem.id, newItem.name, 'add-item', '', newItem.name);
+                        debugLog('item_added', {{
+                            itemId: newItem.id,
+                            itemName: newItem.name,
+                            groupId: groupId
+                        }});
+                        input.value = '';
+                        renderAll();
+                    }});
+                }});
+
+                document.querySelectorAll('[data-role="concept-add-item"]').forEach(btn => {{
+                    btn.addEventListener('click', function() {{
+                        const groupId = Number(this.dataset.groupId);
+                        const input = document.getElementById('conceptAddItemInput_' + groupId);
+                        if (!input) return;
+                        const name = (input.value || '').trim();
+                        if (!name) return;
+
+                        const newItem = createLocalItem(groupId, name, 'concept');
+                        items.push(newItem);
+                        pushSessionChange(newItem.id, newItem.name, 'add-item', '', newItem.name);
+                        debugLog('item_added', {{
+                            itemId: newItem.id,
+                            itemName: newItem.name,
+                            groupId: groupId
+                        }});
+                        input.value = '';
+                        renderAll();
                     }});
                 }});
 
@@ -2318,19 +4715,21 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                             window.open(absoluteUrl, '_blank', 'noopener,noreferrer');
                         }} catch (e) {{
                             console.log('open document error:', e);
+                            setSaveState('error', 'Ошибка открытия документа');
                         }}
                     }});
                 }});
 
                 document.querySelectorAll('[data-role="file-input"]').forEach(input => {{
                     input.addEventListener('change', async function() {{
+                        const itemId = this.dataset.itemId;
                         const file = this.files && this.files[0];
                         if (!file) return;
-                        const item = items.find(x => x.id === this.dataset.itemId);
+                        const item = items.find(x => x.id === itemId);
                         const oldStatus = item ? normalizeStatus(item.status) : '';
 
                         try {{
-                            const result = await uploadDocument(this.dataset.itemId, file);
+                            const result = await uploadDocument(itemId, file);
                             replaceItem(result.item);
                             if (result.item) {{
                                 sessionChanges.push({{
@@ -2366,94 +4765,375 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                             }}
                             renderAll();
                         }} catch (e) {{
-                            setSaveState('error', 'Upload error');
+                            console.log(e);
+                            setSaveState('error', 'Ошибка загрузки файла');
                         }}
                     }});
                 }});
             }}
+            function resolveOprGroupId(item) {{
+                const itemId = String(item && item.id || '');
+                if (itemId.startsWith('opr_g')) {{
+                    const match = itemId.match(/^opr_g(\\d+)_/);
+                    if (match) {{
+                        const groupId = Number(match[1]);
+                        if (groupId && groupId !== 10) {{
+                            return groupId;
+                        }}
+                    }}
+                }}
+
+                const name = String(item && item.name || '').trim();
+                const byName = groups.find(group => Number(group.id) !== 10 && Array.isArray(items) && items.some(existing =>
+                    existing !== item &&
+                    Number(existing.group) === Number(group.id) &&
+                    String(existing.name || '').trim() === name
+                ));
+                if (byName) {{
+                    return Number(byName.id);
+                }}
+
+                return 1;
+            }}
+            function oprIndicatorClass(item) {{
+                const status = normalizeStatus(item && item.status);
+                if (status === 'Есть') return 'status-indicator green';
+                if (status === 'Нет' || status === 'Не требуется') return 'status-indicator gray';
+                return 'status-indicator';
+            }}
+            function buildOprStatusCell(item) {{
+                return `
+                    <select class="status-select" data-role="opr-status" data-item-id="${{esc(item.id)}}">
+                        <option value="" ${{normalizeStatus(item.status) === '' ? 'selected' : ''}}></option>
+                        <option value="Есть" ${{normalizeStatus(item.status) === 'Есть' ? 'selected' : ''}}>Есть</option>
+                        <option value="Нет" ${{normalizeStatus(item.status) === 'Нет' ? 'selected' : ''}}>Нет</option>
+                        <option value="Не требуется" ${{normalizeStatus(item.status) === 'Не требуется' ? 'selected' : ''}}>Не требуется</option>
+                    </select>
+                `;
+            }}
+            function buildOprExtraCell(item) {{
+                return `<textarea class="concept-extra-textarea" data-role="opr-extra" data-item-id="${{esc(item.id)}}" placeholder="Доп информация">${{esc(item.extraInfo || '')}}</textarea>`;
+            }}
+            function renderOprGroup(group) {{
+                const groupItems = getItemsByGroup(group.id);
+                const allowAdd = Number(group.id) !== 10;
+                const rows = groupItems.map(item => `
+                    <div class="row" style="grid-template-columns: 1.05fr 110px 130px 136px 1.25fr;" data-item-id="${{esc(item.id)}}">
+                        <div class="td">
+                            <div class="cell-name">
+                                <div class="${{oprIndicatorClass(item)}}"></div>
+                                <div class="item-name" style="${{normalizeStatus(item.status) === 'Не требуется' ? 'text-decoration:line-through;color:#98a2b3;' : ''}}">
+                                    ${{esc(item.name)}}
+                                </div>
+                            </div>
+                        </div>
+                        <div class="td">${{buildDocumentCell(item)}}</div>
+                        <div class="td">${{buildOprStatusCell(item)}}</div>
+                        <div class="td"><input class="date-input" type="date" data-role="opr-planned-date" data-item-id="${{esc(item.id)}}" value="${{esc(toInputDate(item.plannedDate || ''))}}"></div>
+                        <div class="td">${{buildOprExtraCell(item)}}</div>
+                    </div>
+                `).join('');
+
+                const addBlock = allowAdd ? `
+                    <div class="add-item-row">
+                        <input class="add-item-input" id="oprAddItemInput_${{group.id}}" type="text" placeholder="Новый пункт">
+                        <button class="add-item-btn" type="button" data-role="opr-add-item" data-group-id="${{group.id}}">Добавить пункт</button>
+                    </div>
+                ` : '';
+
+                return `<div class="group-block"><div class="group-title">${{esc(group.title)}}</div>${{rows}}${{addBlock}}</div>`;
+            }}
+            function buildOprTableHtml(oprGroups) {{
+                return `
+                    <div class="thead">
+                        <div class="thead-top" style="grid-template-columns: 1.05fr 110px 130px 136px 1.25fr;">
+                            <div class="th">Пункт</div>
+                            <div class="th">Документ</div>
+                            <div class="th">Статус</div>
+                            <div class="th">Планируемая дата</div>
+                            <div class="th">Доп информация</div>
+                        </div>
+                    </div>
+                    <div>${{oprGroups.map(renderOprGroup).join('')}}</div>
+                `;
+            }}
+            function renderOprTables() {{
+                if (!leftTableEl || !rightTableEl || !tablesGridEl) {{
+                    throw new Error('opr table containers not found');
+                }}
+
+                tablesGridEl.style.gridTemplateColumns = '1fr 1fr';
+                if (tablePanels[1]) {{
+                    tablePanels[1].style.display = '';
+                }}
+
+                const visibleGroups = groups.filter(group => {{
+                    if (Number(group.id) !== 10) return true;
+                    return items.some(x => Number(x.group) === 10);
+                }});
+
+                const leftGroups = visibleGroups.filter(group => [1, 3, 5, 7, 9].includes(Number(group.id)));
+                const rightGroups = visibleGroups.filter(group => [2, 4, 6, 8, 10].includes(Number(group.id)));
+
+                leftTableEl.innerHTML = buildOprTableHtml(leftGroups);
+                rightTableEl.innerHTML = buildOprTableHtml(rightGroups);
+            }}
+            const baseCreateLocalItem = createLocalItem;
+            createLocalItem = function (groupId, name, checklistKey) {{
+                if (checklistKey === 'opr') {{
+                    const groupItems = getItemsByGroup(groupId);
+                    const nextOrder = groupItems.length + 1;
+                    return {{
+                        id: buildClientItemId('opr_g' + groupId + '_custom'),
+                        group: groupId,
+                        order: nextOrder,
+                        name,
+                        priority: 'white',
+                        status: '',
+                        plannedDate: '',
+                        extraInfo: '',
+                        documentUrl: '',
+                        documentName: '',
+                        isCustom: true
+                    }};
+                }}
+                return baseCreateLocalItem(groupId, name, checklistKey);
+            }};
+            const baseCalculateProgress = calculateProgress;
+            calculateProgress = function () {{
+                if (currentChecklistKey === 'opr') {{
+                    if (!progressValueEl || !progressBarEl) {{
+                        return;
+                    }}
+                    const activeItems = items.filter(x => normalizeStatus(x.status) !== 'Не требуется');
+                    const completedItems = activeItems.filter(x => normalizeStatus(x.status) === 'Есть');
+                    const activeCount = activeItems.length;
+                    const completedCount = completedItems.length;
+                    const percent = activeCount ? Math.round((completedCount / activeCount) * 100) : 0;
+                    progressValueEl.textContent = percent + '%';
+                    progressBarEl.style.width = percent + '%';
+                    return;
+                }}
+                return baseCalculateProgress();
+            }};
+            const baseRenderTables = renderTables;
+            renderTables = function () {{
+                if (currentChecklistKey === 'opr') {{
+                    renderOprTables();
+                    return;
+                }}
+                return baseRenderTables();
+            }};
+            const baseBindEvents = bindEvents;
+            bindEvents = function () {{
+                baseBindEvents();
+
+                document.querySelectorAll('[data-role="opr-status"]').forEach(el => {{
+                    el.addEventListener('change', function() {{
+                        const item = items.find(x => x.id === this.dataset.itemId);
+                        if (!item) return;
+
+                        const oldValue = item.status || '';
+                        const newValue = this.value;
+                        item.status = newValue;
+
+                        if (newValue === 'Не требуется') {{
+                            item.group = 10;
+                        }} else if (Number(item.group) === 10) {{
+                            item.group = resolveOprGroupId(item);
+                        }}
+
+                        pushSessionChange(item.id, item.name, 'status', oldValue, newValue);
+                        debugLog('opr_status_changed', {{
+                            itemId: item.id,
+                            itemName: item.name,
+                            oldValue: oldValue || '',
+                            newValue: newValue || ''
+                        }});
+                        renderAll();
+                    }});
+                }});
+
+                document.querySelectorAll('[data-role="opr-planned-date"]').forEach(el => {{
+                    el.addEventListener('change', function() {{
+                        const item = items.find(x => x.id === this.dataset.itemId);
+                        if (!item) return;
+
+                        const oldValue = item.plannedDate || '';
+                        const newValue = fromInputDate(this.value);
+                        item.plannedDate = newValue;
+                        pushSessionChange(item.id, item.name, 'plannedDate', oldValue, newValue);
+                        debugLog('opr_planned_date_changed', {{
+                            itemId: item.id,
+                            itemName: item.name,
+                            oldValue: oldValue || '',
+                            newValue: newValue || ''
+                        }});
+                        renderAll();
+                    }});
+                }});
+
+                document.querySelectorAll('[data-role="opr-extra"]').forEach(el => {{
+                    el.dataset.initialValue = String(el.value || '');
+                    el.dataset.baseHeight = '32';
+                    el.style.height = '32px';
+                    el.addEventListener('input', function () {{
+                        autoGrowTextarea(this);
+                    }});
+
+                    const handler = function () {{
+                        const item = items.find(x => x.id === this.dataset.itemId);
+                        if (!item) return;
+
+                        const oldValue = item.extraInfo || '';
+                        const newValue = this.value;
+                        item.extraInfo = newValue;
+                        pushSessionChange(item.id, item.name, 'extraInfo', oldValue, newValue);
+                        debugLog('opr_extra_changed', {{
+                            itemId: item.id,
+                            itemName: item.name
+                        }});
+                        renderAll();
+                    }};
+
+                    el.addEventListener('change', handler);
+                    el.addEventListener('blur', handler);
+                }});
+
+                document.querySelectorAll('[data-role="opr-add-item"]').forEach(btn => {{
+                    btn.addEventListener('click', function() {{
+                        const groupId = Number(this.dataset.groupId);
+                        const input = document.getElementById('oprAddItemInput_' + groupId);
+                        if (!input) return;
+                        const name = (input.value || '').trim();
+                        if (!name) return;
+
+                        const newItem = createLocalItem(groupId, name, 'opr');
+                        items.push(newItem);
+                        pushSessionChange(newItem.id, newItem.name, 'add-item', '', newItem.name);
+                        debugLog('opr_item_added', {{
+                            itemId: newItem.id,
+                            itemName: newItem.name,
+                            groupId: groupId
+                        }});
+                        input.value = '';
+                        renderAll();
+                    }});
+                }});
+            }};
+            const baseLoadChecklistByKey = loadChecklistByKey;
+            loadChecklistByKey = async function (checklistKey) {{
+                const targetKey = String(checklistKey || '').trim() || 'id';
+                if (targetKey !== 'opr') {{
+                    return baseLoadChecklistByKey(targetKey);
+                }}
+                if (targetKey === currentChecklistKey) {{
+                    return;
+                }}
+
+                await flushCurrentChecklistSummary();
+                setSaveState('saving', 'Загружаем...');
+
+                try {{
+                    const cachedData = checklistCache[targetKey];
+                    if (cachedData) {{
+                        applyChecklistData(deepClone(cachedData));
+                        renderAll();
+                        debugLog('checklist_switched_cached', {{
+                            checklistKey: targetKey
+                        }});
+                        setSaveState('', 'Сохранено');
+                        return;
+                    }}
+
+                    const response = await fetch(
+                        '/api/checklist?dialogId=' + encodeURIComponent(dialogId) +
+                        '&checklistKey=' + encodeURIComponent(targetKey)
+                    );
+                    const result = await response.json();
+
+                    if (!response.ok) {{
+                        throw new Error(result.error || 'load checklist failed');
+                    }}
+
+                    applyChecklistData(result);
+                    renderAll();
+                    debugLog('checklist_switched', {{
+                        checklistKey: targetKey
+                    }});
+                    setSaveState('', 'Сохранено');
+                }} catch (e) {{
+                    console.log('loadChecklistByKey error:', e);
+                    setSaveState('error', 'Ошибка загрузки чек-листа');
+                }}
+            }};
+            {popup_session_enhancements_js}
+
             function safeInitBx24ForPopup() {{
+                function applyPopupWindowSize() {{
+                    try {{
+                        if (typeof window.BX24.resizeWindow === 'function') {{
+                            window.BX24.resizeWindow(1180, 680);
+                        }}
+                        if (typeof window.BX24.fitWindow === 'function') {{
+                            window.BX24.fitWindow();
+                        }}
+                    }} catch (e) {{
+                        console.log('BX24 popup sizing error:', e);
+                    }}
+                }}
+
                 try {{
                     if (window.BX24 && typeof window.BX24.init === 'function') {{
                         window.BX24.init(function () {{
-                            try {{
-                                if (typeof window.BX24.resizeWindow === 'function') {{
-                                    window.BX24.resizeWindow(1180, 680);
-                                }}
-                            }} catch (e) {{
-                                console.log('BX24.resizeWindow error:', e);
-                            }}
+                            applyPopupWindowSize();
+                            setTimeout(applyPopupWindowSize, 80);
+                            setTimeout(applyPopupWindowSize, 220);
                         }});
                     }}
                 }} catch (e) {{
                     console.log('BX24.init skipped:', e);
                 }}
             }}
-            renderAll();
-            debugLog('popup_loaded', {{
-                href: window.location.href,
-                hasDialogId: !!dialogId
-            }});
-            fetchChatTitleIfMissing();
-            fetchCurrentUserIfPossible();
-            safeInitBx24ForPopup();
+            try {{
+                logRenderState('before_renderAll');
+                renderAll();
+                logRenderState('after_renderAll');
+
+                debugLog('popup_loaded', {{
+                    href: window.location.href,
+                    hasDialogId: !!dialogId
+                }});
+            }} catch (e) {{
+                logRenderError('renderAll', e);
+            }}
+
+            try {{
+                fetchChatTitleIfMissing();
+            }} catch (e) {{
+                logRenderError('fetchChatTitleIfMissing', e);
+            }}
+
+            try {{
+                fetchCurrentUserIfPossible();
+            }} catch (e) {{
+                logRenderError('fetchCurrentUserIfPossible', e);
+            }}
+
+            try {{
+                safeInitBx24ForPopup();
+            }} catch (e) {{
+                logRenderError('safeInitBx24ForPopup', e);
+            }}
         </script>
     </body>
     </html>
     """
 
-
-@app.get("/view", response_class=HTMLResponse)
-def view_get(dialogId: str = ""):
-    dialog_id = normalize_dialog_id(dialogId)
-    data = get_checklist(dialog_id)
-
-    items_html = ""
-    for item in data.get("items", []):
-        items_html += f"""
-        <div style="border-top:1px solid #eee;padding:12px 0;">
-            <div style="font-weight:700;margin-bottom:4px;">{html.escape(item.get('name', ''))}</div>
-            <div style="font-size:13px;color:#444;">Статус: {html.escape(item.get('status', '—'))}</div>
-            <div style="font-size:13px;color:#666;">План: {html.escape(item.get('plan', '—'))}</div>
-            <div style="font-size:13px;color:#666;">Факт: {html.escape(item.get('fact', '—'))}</div>
-        </div>
-        """
-
-    if not items_html:
-        items_html = '<div style="color:#666;">Нет пунктов чек-листа</div>'
-
-    notice_html = ""
-    if data.get("notice"):
-        notice_html = f"""
-        <div style="background:#fff8e1;border:1px solid #f3d37a;border-radius:10px;padding:12px;margin-bottom:16px;">
-            {html.escape(data.get("notice", ""))}
-        </div>
-        """
-
-    return f"""
-    <html>
-    <head>
-        <meta charset="utf-8">
-        <title>{html.escape(data.get("title", "Чек-лист ИД"))}</title>
-    </head>
-    <body style="font-family:Arial,sans-serif;padding:24px;max-width:900px;margin:0 auto;">
-        <h1 style="margin-bottom:8px;">{html.escape(data.get("title", "Чек-лист ИД"))}</h1>
-        <div style="color:#666;margin-bottom:6px;">dialogId: {html.escape(dialog_id or 'не передан')}</div>
-        <div style="color:#666;margin-bottom:6px;">Срок по договору: {html.escape(data.get("contractDeadline", "—"))}</div>
-        <div style="color:#666;margin-bottom:20px;">Начало работ: {html.escape(data.get("startDate", "—"))}</div>
-
-        {notice_html}
-
-        <div style="border:1px solid #e5e7eb;border-radius:12px;padding:16px;">
-            {items_html}
-        </div>
-    </body>
-    </html>
-    """
-
-
 @app.get("/api/checklist")
 def api_checklist(dialogId: str = "", checklistKey: str = "id"):
     dialogId = normalize_dialog_id(dialogId)
+    checklistKey = normalize_checklist_key(checklistKey)
     return JSONResponse(get_checklist(dialogId, checklistKey))
 
 
@@ -2462,7 +5142,7 @@ async def api_checklist_update_item(request: Request):
     payload = await request.json()
 
     dialog_id = normalize_dialog_id(payload.get("dialogId"))
-    checklist_key = str(payload.get("checklistKey") or "id").strip() or "id"
+    checklist_key = normalize_checklist_key(payload.get("checklistKey"))
     item_id = str(payload.get("itemId") or "").strip()
     field = str(payload.get("field") or "").strip()
     value = payload.get("value")
@@ -2473,7 +5153,7 @@ async def api_checklist_update_item(request: Request):
     if not item_id:
         return JSONResponse({"ok": False, "error": "itemId is required"}, status_code=400)
 
-    allowed_fields = {"priority", "status", "plan", "fact", "extraInfo"}
+    allowed_fields = {"priority", "status", "plan", "fact", "extraInfo", "plannedDate"}
     if field not in allowed_fields:
         return JSONResponse({"ok": False, "error": "invalid field"}, status_code=400)
 
@@ -2515,6 +5195,15 @@ async def api_checklist_update_item(request: Request):
                         target_item["priority"] = "white"
                 else:
                     target_item["priority"] = "green" if new_value else "white"
+        elif checklist_key == "opr":
+            new_status = normalize_status(value)
+            target_item["status"] = new_status
+            target_item["priority"] = derive_indicator_from_status(new_status)
+
+            if new_status == "Не требуется":
+                target_item["group"] = 10
+            elif int(target_item.get("group") or 0) == 10:
+                target_item["group"] = resolve_opr_group_id_by_item_id_or_name(target_item)
         else:
             new_status = normalize_status(value)
             target_item["status"] = new_status
@@ -2528,6 +5217,8 @@ async def api_checklist_update_item(request: Request):
         target_item["plan"] = normalize_date_string(value)
     elif field == "fact":
         target_item["fact"] = normalize_date_string(value)
+    elif field == "plannedDate":
+        target_item["plannedDate"] = normalize_date_string(value)
     elif field == "extraInfo":
         target_item["extraInfo"] = clean_cell_value(value)
 
@@ -2554,7 +5245,7 @@ async def api_checklist_update_meta(request: Request):
     payload = await request.json()
 
     dialog_id = normalize_dialog_id(payload.get("dialogId"))
-    checklist_key = str(payload.get("checklistKey") or "id").strip() or "id"
+    checklist_key = normalize_checklist_key(payload.get("checklistKey"))
     field = str(payload.get("field") or "").strip()
     value = payload.get("value")
 
@@ -2584,17 +5275,20 @@ async def api_checklist_add_item(request: Request):
     payload = await request.json()
 
     dialog_id = normalize_dialog_id(payload.get("dialogId"))
-    checklist_key = str(payload.get("checklistKey") or "id").strip() or "id"
+    checklist_key = normalize_checklist_key(payload.get("checklistKey"))
     group_id = int(payload.get("groupId") or 0)
     name = clean_cell_value(payload.get("name"))
 
     if not dialog_id:
         return JSONResponse({"ok": False, "error": "dialogId is required"}, status_code=400)
 
-    if checklist_key != "id":
-        return JSONResponse({"ok": False, "error": "add-item is only supported for id"}, status_code=400)
+    if checklist_key == "id" and group_id not in [1, 2, 3]:
+        return JSONResponse({"ok": False, "error": "invalid groupId"}, status_code=400)
 
-    if group_id not in [1, 2, 3]:
+    if checklist_key == "concept" and group_id not in [group["id"] for group in CONCEPT_GROUPS if group["id"] != 10]:
+        return JSONResponse({"ok": False, "error": "invalid groupId"}, status_code=400)
+
+    if checklist_key == "opr" and group_id not in [group["id"] for group in OPR_GROUPS if group["id"] != 10]:
         return JSONResponse({"ok": False, "error": "invalid groupId"}, status_code=400)
 
     if not name:
@@ -2606,19 +5300,52 @@ async def api_checklist_add_item(request: Request):
     group_items = [x for x in items if x.get("group") == group_id]
     next_order = len(group_items) + 1
 
-    new_item = {
-        "id": build_item_id(group_id, next_order) + "_custom",
-        "group": group_id,
-        "order": next_order,
-        "name": name,
-        "priority": "white",
-        "status": "",
-        "plan": "",
-        "fact": "",
-        "documentUrl": "",
-        "documentName": "",
-        "isCustom": True,
-    }
+    if checklist_key == "concept":
+        new_item = {
+            "id": f"concept_g{group_id}_custom_{uuid.uuid4().hex[:8]}",
+            "group": group_id,
+            "order": next_order,
+            "name": name,
+            "source": "",
+            "statusKind": "text",
+            "statusOptions": [],
+            "statusPlaceholder": "",
+            "status": "",
+            "extraInfo": "",
+            "extraInfoPlaceholder": "",
+            "documentUrl": "",
+            "documentName": "",
+            "isCustom": True,
+            "priority": "white",
+        }
+    elif checklist_key == "opr":
+        new_item = {
+            "id": f"opr_g{group_id}_custom_{uuid.uuid4().hex[:8]}",
+            "group": group_id,
+            "order": next_order,
+            "name": name,
+            "priority": "white",
+            "status": "",
+            "plannedDate": "",
+            "extraInfo": "",
+            "documentUrl": "",
+            "documentName": "",
+            "isCustom": True,
+        }
+    else:
+        new_item = {
+            "id": build_item_id(group_id, next_order) + "_custom",
+            "group": group_id,
+            "order": next_order,
+            "name": name,
+            "priority": "white",
+            "status": "",
+            "plan": "",
+            "fact": "",
+            "documentUrl": "",
+            "documentName": "",
+            "isCustom": True,
+        }
 
     items.append(new_item)
     data["items"] = items
@@ -2643,31 +5370,19 @@ async def api_checklist_upload_document(
     dialogId: str = Form(...),
     itemId: str = Form(...),
     file: UploadFile = File(...),
-    checklistKey: str = Form("id")
+    checklistKey: str = Form("id"),
+    itemGroup: str = Form("")
 ):
     dialog_id = normalize_dialog_id(dialogId)
-    checklist_key = str(checklistKey or "id").strip() or "id"
+    checklist_key = normalize_checklist_key(checklistKey)
     item_id = str(itemId or "").strip()
+    item_group = int(str(itemGroup or "0").strip() or 0)
 
     if not dialog_id:
         return JSONResponse({"ok": False, "error": "dialogId is required"}, status_code=400)
 
     if not item_id:
         return JSONResponse({"ok": False, "error": "itemId is required"}, status_code=400)
-
-    data = get_checklist(dialog_id, checklist_key)
-    items = data.get("items", [])
-
-    target_item = None
-    for item in items:
-        if str(item.get("id")) == item_id:
-            target_item = item
-            break
-
-    if not target_item:
-        return JSONResponse({"ok": False, "error": "item not found"}, status_code=404)
-
-    remove_item_document_file(target_item)
 
     rel_path = build_upload_rel_path(dialog_id, item_id, file.filename or "file.bin")
     abs_path = UPLOAD_ROOT / rel_path
@@ -2677,28 +5392,22 @@ async def api_checklist_upload_document(
     with open(abs_path, "wb") as f:
         f.write(file_bytes)
 
-    target_item["documentUrl"] = "/uploads/" + rel_path.replace("\\", "/")
-    target_item["documentName"] = Path(file.filename or "file.bin").name
+    updated_item = {
+        "id": item_id,
+        "documentUrl": "/uploads/" + rel_path.replace("\\", "/"),
+        "documentName": Path(file.filename or "file.bin").name,
+    }
 
-    if checklist_key == "id" and int(target_item.get("group") or 0) != 4:
-        target_item["status"] = "Есть"
-        target_item["priority"] = derive_indicator_from_status("Есть")
-
-    data["items"] = items
-    data = normalize_checklist_data(data, checklist_key)
-    save_checklist(dialog_id, data, checklist_key)
-
-    updated_item = None
-    for item in data.get("items", []):
-        if str(item.get("id")) == item_id:
-            updated_item = item
-            break
+    if checklist_key == "id" and item_group != 4:
+        updated_item["status"] = "Есть"
+        updated_item["priority"] = derive_indicator_from_status("Есть")
 
     return JSONResponse({
         "ok": True,
         "dialogId": dialog_id,
+        "checklistKey": checklist_key,
         "item": updated_item,
-        "progressPercent": data.get("progressPercent", 0),
+        "progressPercent": 0,
     })
 
 
@@ -2707,8 +5416,9 @@ async def api_checklist_remove_document(request: Request):
     payload = await request.json()
 
     dialog_id = normalize_dialog_id(payload.get("dialogId"))
-    checklist_key = str(payload.get("checklistKey") or "id").strip() or "id"
+    checklist_key = normalize_checklist_key(payload.get("checklistKey"))
     item_id = str(payload.get("itemId") or "").strip()
+    document_url = clean_cell_value(payload.get("documentUrl"))
 
     if not dialog_id:
         return JSONResponse({"ok": False, "error": "dialogId is required"}, status_code=400)
@@ -2716,37 +5426,30 @@ async def api_checklist_remove_document(request: Request):
     if not item_id:
         return JSONResponse({"ok": False, "error": "itemId is required"}, status_code=400)
 
-    data = get_checklist(dialog_id, checklist_key)
-    items = data.get("items", [])
+    if document_url:
+        remove_item_document_file({"documentUrl": document_url})
+    else:
+        data = get_checklist(dialog_id, checklist_key)
+        target_item = None
+        for item in data.get("items", []):
+            if str(item.get("id")) == item_id:
+                target_item = item
+                break
+        if target_item:
+            remove_item_document_file(target_item)
 
-    target_item = None
-    for item in items:
-        if str(item.get("id")) == item_id:
-            target_item = item
-            break
-
-    if not target_item:
-        return JSONResponse({"ok": False, "error": "item not found"}, status_code=404)
-
-    remove_item_document_file(target_item)
-    target_item["documentUrl"] = ""
-    target_item["documentName"] = ""
-
-    data["items"] = items
-    data = normalize_checklist_data(data, checklist_key)
-    save_checklist(dialog_id, data, checklist_key)
-
-    updated_item = None
-    for item in data.get("items", []):
-        if str(item.get("id")) == item_id:
-            updated_item = item
-            break
+    updated_item = {
+        "id": item_id,
+        "documentUrl": "",
+        "documentName": "",
+    }
 
     return JSONResponse({
         "ok": True,
         "dialogId": dialog_id,
+        "checklistKey": checklist_key,
         "item": updated_item,
-        "progressPercent": data.get("progressPercent", 0),
+        "progressPercent": 0,
     })
 
 
@@ -2767,6 +5470,63 @@ async def api_debug_event(request: Request):
     return JSONResponse({"ok": True})
 
 
+@app.post("/api/checklist/lock/acquire")
+async def api_checklist_lock_acquire(request: Request):
+    payload = await request.json()
+    dialog_id = normalize_dialog_id(payload.get("dialogId"))
+    checklist_key = normalize_checklist_key(payload.get("checklistKey"))
+    user_id = str(payload.get("userId") or "").strip()
+    user_name = str(payload.get("userName") or "").strip()
+    lock_id = str(payload.get("lockId") or "").strip()
+
+    if not dialog_id:
+        return JSONResponse({"ok": False, "error": "dialogId is required"}, status_code=400)
+
+    result = acquire_checklist_lock(dialog_id, checklist_key, user_id, user_name, lock_id)
+    write_debug_log("lock_acquire", result)
+    return JSONResponse(result)
+
+
+@app.post("/api/checklist/lock/heartbeat")
+async def api_checklist_lock_heartbeat(request: Request):
+    payload = await request.json()
+    dialog_id = normalize_dialog_id(payload.get("dialogId"))
+    checklist_key = normalize_checklist_key(payload.get("checklistKey"))
+    user_id = str(payload.get("userId") or "").strip()
+    user_name = str(payload.get("userName") or "").strip()
+    lock_id = str(payload.get("lockId") or "").strip()
+
+    if not dialog_id:
+        return JSONResponse({"ok": False, "error": "dialogId is required"}, status_code=400)
+
+    result = heartbeat_checklist_lock(dialog_id, checklist_key, user_id, user_name, lock_id)
+    return JSONResponse(result)
+
+
+@app.post("/api/checklist/lock/release")
+async def api_checklist_lock_release(request: Request):
+    try:
+        payload = await request.json()
+    except Exception:
+        raw = await request.body()
+        try:
+            payload = json.loads(raw.decode("utf-8") or "{}")
+        except Exception:
+            payload = {"raw": raw.decode("utf-8", errors="ignore")}
+
+    dialog_id = normalize_dialog_id(payload.get("dialogId"))
+    checklist_key = normalize_checklist_key(payload.get("checklistKey"))
+    lock_id = str(payload.get("lockId") or "").strip()
+    user_id = str(payload.get("userId") or "").strip()
+
+    if not dialog_id:
+        return JSONResponse({"ok": False, "error": "dialogId is required"}, status_code=400)
+
+    result = release_checklist_lock(dialog_id, checklist_key, lock_id, user_id)
+    write_debug_log("lock_release", result)
+    return JSONResponse(result)
+
+
 @app.post("/api/checklist/close-session")
 async def api_checklist_close_session(request: Request):
     try:
@@ -2781,8 +5541,122 @@ async def api_checklist_close_session(request: Request):
     write_debug_log("close_session_received", payload)
 
     dialog_id = normalize_dialog_id(payload.get("dialogId"))
-    changes = payload.get("changes") or []
     editor = payload.get("editor") or {}
+    raw_sessions = payload.get("sessions") or []
+
+    def build_message_failure_response(base_dialog_id: str, extra: dict | None = None):
+        response = {
+            "ok": True,
+            "saved": True,
+            "messageOk": False,
+            "dialogId": base_dialog_id,
+        }
+        if extra:
+            response.update(extra)
+        return JSONResponse(response)
+
+    if raw_sessions:
+        sessions = []
+        for raw_session in raw_sessions:
+            checklist_key = normalize_checklist_key(raw_session.get("checklistKey"))
+            session_dialog_id = normalize_dialog_id(raw_session.get("dialogId") or dialog_id)
+            changes = raw_session.get("changes") or []
+            session_data = raw_session.get("data") or {}
+
+            if not session_dialog_id:
+                continue
+
+            if changes and session_data:
+                session_data = dict(session_data)
+                session_data["checklistKey"] = checklist_key
+                session_data["resolvedDialogId"] = session_dialog_id
+                data = normalize_checklist_data(session_data, checklist_key)
+                data["resolvedDialogId"] = session_dialog_id
+                save_checklist(session_dialog_id, data, checklist_key)
+            else:
+                data = get_checklist(session_dialog_id, checklist_key)
+
+            sessions.append({
+                "dialogId": session_dialog_id,
+                "checklistKey": checklist_key,
+                "changes": changes,
+                "data": data,
+            })
+
+        if not sessions:
+            write_debug_log("close_session_skipped", {
+                "dialogId": dialog_id,
+                "reason": "no sessions"
+            })
+            return JSONResponse({"ok": True, "skipped": True, "reason": "no sessions"})
+
+        visible_sessions = [session for session in sessions if build_recent_changes_sections(session["changes"], session["checklistKey"])]
+        if not visible_sessions:
+            write_debug_log("close_session_message_skipped", {
+                "dialogId": dialog_id or sessions[0]["dialogId"],
+                "reason": "no visible message changes",
+                "sessions": [
+                    {
+                        "checklistKey": session["checklistKey"],
+                        "changesCount": len(session["changes"]),
+                    }
+                    for session in sessions
+                ]
+            })
+            return JSONResponse({
+                "ok": True,
+                "dialogId": dialog_id or sessions[0]["dialogId"],
+                "saved": True,
+                "messageSkipped": True,
+            })
+
+        target_dialog_id = dialog_id or sessions[0]["dialogId"]
+
+        try:
+            message = build_multi_checklist_chat_message(visible_sessions, editor)
+            result = bitrix_webhook_call("im.message.add", {
+                "DIALOG_ID": target_dialog_id,
+                "MESSAGE": message,
+            })
+        except Exception as exc:
+            write_debug_log("close_session_message_exception", {
+                "dialogId": target_dialog_id,
+                "editor": editor,
+                "checklistKeys": [session["checklistKey"] for session in visible_sessions],
+                "error": str(exc),
+            })
+            return build_message_failure_response(target_dialog_id, {
+                "checklistKeys": [session["checklistKey"] for session in sessions],
+                "messageError": str(exc),
+            })
+
+        write_debug_log("close_session_im_message_add_result", {
+            "dialogId": target_dialog_id,
+            "changesCount": sum(len(session["changes"]) for session in visible_sessions),
+            "editor": editor,
+            "result": result,
+            "checklistKeys": [session["checklistKey"] for session in visible_sessions],
+        })
+
+        if "error" in result:
+            return build_message_failure_response(target_dialog_id, {
+                "checklistKeys": [session["checklistKey"] for session in sessions],
+                "messageError": result.get("error_description") or result.get("error") or "message send failed",
+                "result": result,
+            })
+
+        return JSONResponse({
+            "ok": True,
+            "saved": True,
+            "messageOk": True,
+            "dialogId": target_dialog_id,
+            "result": result,
+            "checklistKeys": [session["checklistKey"] for session in sessions],
+        })
+
+    checklist_key = normalize_checklist_key(payload.get("checklistKey"))
+    changes = payload.get("changes") or []
+    session_data = payload.get("data") or {}
 
     if not dialog_id:
         write_debug_log("close_session_invalid", {
@@ -2794,28 +5668,75 @@ async def api_checklist_close_session(request: Request):
     if not changes:
         write_debug_log("close_session_skipped", {
             "dialogId": dialog_id,
+            "checklistKey": checklist_key,
             "reason": "no changes"
         })
         return JSONResponse({"ok": True, "skipped": True, "reason": "no changes"})
 
-    data = get_checklist(dialog_id)
-    message = build_checklist_chat_message(data, changes, editor)
+    if session_data:
+        session_data = dict(session_data)
+        session_data["checklistKey"] = checklist_key
+        session_data["resolvedDialogId"] = dialog_id
+        data = normalize_checklist_data(session_data, checklist_key)
+        data["resolvedDialogId"] = dialog_id
+        save_checklist(dialog_id, data, checklist_key)
+    else:
+        data = get_checklist(dialog_id, checklist_key)
 
-    result = bitrix_webhook_call("im.message.add", {
-        "DIALOG_ID": dialog_id,
-        "MESSAGE": message,
-    })
+    if not build_recent_changes_sections(changes, checklist_key):
+        write_debug_log("close_session_message_skipped", {
+            "dialogId": dialog_id,
+            "checklistKey": checklist_key,
+            "reason": "no visible message changes",
+            "changesCount": len(changes),
+        })
+        return JSONResponse({
+            "ok": True,
+            "dialogId": dialog_id,
+            "checklistKey": checklist_key,
+            "saved": True,
+            "messageSkipped": True,
+        })
+
+    try:
+        message = build_checklist_chat_message(data, changes, editor)
+        result = bitrix_webhook_call("im.message.add", {
+            "DIALOG_ID": dialog_id,
+            "MESSAGE": message,
+        })
+    except Exception as exc:
+        write_debug_log("close_session_message_exception", {
+            "dialogId": dialog_id,
+            "checklistKey": checklist_key,
+            "editor": editor,
+            "error": str(exc)
+        })
+        return build_message_failure_response(dialog_id, {
+            "checklistKey": checklist_key,
+            "messageError": str(exc),
+        })
 
     write_debug_log("close_session_im_message_add_result", {
         "dialogId": dialog_id,
+        "checklistKey": checklist_key,
         "changesCount": len(changes),
         "editor": editor,
         "result": result
     })
 
+    if "error" in result:
+        return build_message_failure_response(dialog_id, {
+            "checklistKey": checklist_key,
+            "messageError": result.get("error_description") or result.get("error") or "message send failed",
+            "result": result,
+        })
+
     return JSONResponse({
-        "ok": "error" not in result,
+        "ok": True,
+        "saved": True,
+        "messageOk": True,
         "dialogId": dialog_id,
+        "checklistKey": checklist_key,
         "result": result,
     })
 
@@ -2906,11 +5827,3 @@ async def admin_upload(dialog_id: str = Form(...), file: UploadFile = File(...))
     </body>
     </html>
     """
-
-
-@app.get("/api/test")
-def api_test():
-    return JSONResponse({
-        "ok": True,
-        "message": "API проекта работает"
-    })
