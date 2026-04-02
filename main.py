@@ -5,7 +5,7 @@ from collections import defaultdict
 from pathlib import Path
 from fastapi import FastAPI, Request, UploadFile, File, Form
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 import requests
 import json
 import html
@@ -19,6 +19,7 @@ import openpyxl
 app = FastAPI()
 
 BASE_DIR = Path(__file__).resolve().parent
+APP_VERSION = "2026-04-02-launch-refactor-v1"
 
 DB_DIR = BASE_DIR / "db"
 DB_DIR.mkdir(parents=True, exist_ok=True)
@@ -39,6 +40,7 @@ DEBUG_DIR = BASE_DIR / "debug"
 DEBUG_DIR.mkdir(parents=True, exist_ok=True)
 
 DEBUG_LOG_PATH = DEBUG_DIR / "close_popup.log"
+LAUNCHER_ROUTE = "/launch"
 EDIT_LOCK_TTL_SECONDS = 45
 EDIT_LOCK_HEARTBEAT_SECONDS = 15
 ACTIVE_CHECKLIST_LOCKS = {}
@@ -871,6 +873,12 @@ init_db()
 @app.on_event("startup")
 def startup_event():
     init_db()
+    startup_payload = build_version_payload()
+    print(f"APP_VERSION={APP_VERSION}")
+    print(f"Launcher route enabled: {LAUNCHER_ROUTE}")
+    print(f"APP_PORTAL_PATH={APP_PORTAL_PATH}")
+    print(f"DB_PATH={DB_PATH}")
+    write_debug_log("startup", startup_payload)
 
 
 def normalize_domain(value: str) -> str:
@@ -925,6 +933,18 @@ def write_debug_log(event: str, payload: dict):
 
     with open(DEBUG_LOG_PATH, "a", encoding="utf-8") as f:
         f.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+
+def build_version_payload() -> dict:
+    return {
+        "version": APP_VERSION,
+        "appPortalPath": APP_PORTAL_PATH,
+        "launcherRoute": LAUNCHER_ROUTE,
+        "time": datetime.now().isoformat(),
+        "dbPath": DB_PATH,
+        "uploadRoot": str(UPLOAD_ROOT),
+        "debugLogPath": str(DEBUG_LOG_PATH),
+    }
 
 
 def make_checklist_lock_key(dialog_id: str, checklist_key: str) -> str:
@@ -1577,6 +1597,13 @@ def get_checklist_link_caption(checklist_key: str) -> str:
     return mapping.get(normalize_checklist_key(checklist_key), "ЧЕК-ЛИСТ")
 
 
+def build_relative_launch_path(dialog_id: str, checklist_key: str = "id") -> str:
+    dialog_id = normalize_dialog_id(dialog_id)
+    checklist_key = normalize_checklist_key(checklist_key)
+    query = f"dialogId={quote(dialog_id)}&checklistKey={quote(checklist_key)}"
+    return f"{LAUNCHER_ROUTE}?{query}"
+
+
 def build_checklist_message_link(dialog_id: str, checklist_key: str) -> str:
     dialog_id = normalize_dialog_id(dialog_id)
     checklist_key = normalize_checklist_key(checklist_key)
@@ -1591,7 +1618,7 @@ def build_checklist_message_link(dialog_id: str, checklist_key: str) -> str:
     base_url = f"{parsed.scheme}://{parsed.netloc}"
     app_path = APP_PORTAL_PATH if APP_PORTAL_PATH.endswith("/") else APP_PORTAL_PATH + "/"
     query = f"dialogId={quote(dialog_id)}&checklistKey={quote(checklist_key)}"
-    return f"{base_url}{app_path}?{query}#{query}"
+    return f"{base_url}{app_path}launch?{query}"
 
 
 def build_editor_text(editor: dict) -> str:
@@ -2081,96 +2108,10 @@ def app_home_html():
     <head>
         <meta charset="utf-8">
         <title>Чек-листы проекта</title>
-        <script>
-            (function () {
-                function pickValue(searchParams, hashParams, key, fallback) {
-                    return (searchParams.get(key) || hashParams.get(key) || fallback || '').trim();
-                }
-
-                function redirectToPopup(dialogId, checklistKey) {
-                    const popupUrl =
-                        '/popup?dialogId=' + encodeURIComponent(dialogId) +
-                        '&checklistKey=' + encodeURIComponent(checklistKey || 'id');
-
-                    const go = function () {
-                        window.location.replace(popupUrl);
-                    };
-
-                    try {
-                        if (window.BX24 && typeof window.BX24.init === 'function') {
-                            window.BX24.init(function () {
-                                try {
-                                    if (typeof window.BX24.resizeWindow === 'function') {
-                                        window.BX24.resizeWindow(1180, 680);
-                                    }
-                                    if (typeof window.BX24.fitWindow === 'function') {
-                                        window.BX24.fitWindow();
-                                    }
-                                } catch (e) {
-                                    console.log('bridge resize skipped:', e);
-                                }
-                                go();
-                            });
-                            return;
-                        }
-                    } catch (e) {
-                        console.log('bridge BX24 init skipped:', e);
-                    }
-
-                    go();
-                }
-
-                try {
-                    const searchParams = new URLSearchParams(window.location.search || '');
-                    const hashRaw = String(window.location.hash || '').replace(/^#/, '');
-                    const hashParams = new URLSearchParams(hashRaw);
-                    const raw = localStorage.getItem('checklist_pending_dialog');
-                    let localPayload = null;
-
-                    if (raw) {
-                        try {
-                            localPayload = JSON.parse(raw);
-                        } catch (e) {
-                            console.log('pending dialog parse skipped:', e);
-                        }
-                    }
-
-                    const dialogId = pickValue(searchParams, hashParams, 'dialogId', localPayload && localPayload.dialogId);
-                    const checklistKey = pickValue(searchParams, hashParams, 'checklistKey', localPayload && localPayload.checklistKey) || 'id';
-                    const ts = Number((localPayload && localPayload.ts) || 0);
-                    const age = ts ? (Date.now() - ts) : 0;
-
-                    if (dialogId) {
-                        try {
-                            localStorage.setItem('checklist_pending_dialog', JSON.stringify({
-                                dialogId: dialogId,
-                                checklistKey: checklistKey,
-                                ts: Date.now()
-                            }));
-                        } catch (e) {
-                            console.log('pending dialog save skipped:', e);
-                        }
-
-                        redirectToPopup(dialogId, checklistKey);
-                        return;
-                    }
-
-                    if (localPayload && localPayload.dialogId && age < 60000) {
-                        redirectToPopup(
-                            localPayload.dialogId,
-                            (localPayload.checklistKey || 'id').trim() || 'id'
-                        );
-                        return;
-                    }
-                } catch (e) {
-                    console.log('launcher redirect skipped:', e);
-                }
-            })();
-        </script>
     </head>
     <body style="margin:0;font-family:Arial,sans-serif;background:#f8fafc;color:#344054;display:flex;align-items:center;justify-content:center;min-height:100vh;">
-        <div style="padding:24px 28px;border:1px solid #e5e7eb;border-radius:14px;background:#fff;box-shadow:0 12px 30px rgba(15,23,42,0.08);font-size:14px;">
-            Открываем нужный чек-лист...
+        <div style="padding:24px 28px;border:1px solid #e5e7eb;border-radius:14px;background:#fff;box-shadow:0 12px 30px rgba(15,23,42,0.08);font-size:14px;max-width:460px;text-align:center;">
+            Это служебная страница приложения. Для прямого открытия используйте route /launch с dialogId и checklistKey.
         </div>
     </body>
     </html>
@@ -2277,6 +2218,10 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
                     return;
                 }}
 
+                const launchUrl =
+                    '/launch?dialogId=' + encodeURIComponent(dialogId) +
+                    '&checklistKey=' + encodeURIComponent(checklistKey || 'id');
+
                 try {{
                     localStorage.setItem('checklist_pending_dialog', JSON.stringify({{
                         dialogId: dialogId,
@@ -2291,7 +2236,7 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
                     if (window.BX24 && typeof window.BX24.openApplication === 'function') {{
                         BX24.openApplication();
                         autoOpened = true;
-                        setMeta('Открываем popup для ' + dialogId);
+                        setMeta('Открываем чек-лист для ' + dialogId);
                         return;
                     }}
                 }} catch (e) {{
@@ -2299,8 +2244,7 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
                 }}
 
                 window.open(
-                    '/popup?dialogId=' + encodeURIComponent(dialogId) +
-                    '&checklistKey=' + encodeURIComponent(checklistKey),
+                    launchUrl,
                     '_blank'
                 );
             }}
@@ -2375,12 +2319,53 @@ def health():
 
 @app.get("/", response_class=HTMLResponse)
 def home_get(dialogId: str = "", checklistKey: str = "id", mode: str = ""):
+    dialog_id = normalize_dialog_id(dialogId)
+    checklist_key = normalize_checklist_key(checklistKey)
+    write_debug_log("home_get", {
+        "version": APP_VERSION,
+        "dialogId": dialog_id,
+        "checklistKey": checklist_key,
+        "mode": mode,
+        "action": "redirect_launch" if dialog_id else "fallback_home",
+    })
+    if dialog_id:
+        return RedirectResponse(url=build_relative_launch_path(dialog_id, checklist_key), status_code=302)
     return app_home_html()
 
 
 @app.post("/", response_class=HTMLResponse)
 async def home_post(request: Request):
+    write_debug_log("home_post", {
+        "version": APP_VERSION,
+        "action": "fallback_home",
+    })
     return app_home_html()
+
+
+@app.get(LAUNCHER_ROUTE, response_class=HTMLResponse)
+def launch_get(dialogId: str = "", checklistKey: str = "id"):
+    dialog_id = normalize_dialog_id(dialogId)
+    checklist_key = normalize_checklist_key(checklistKey)
+    popup_url = f"/popup?dialogId={quote(dialog_id)}&checklistKey={quote(checklist_key)}" if dialog_id else ""
+
+    write_debug_log("launch_get", {
+        "version": APP_VERSION,
+        "dialogId": dialog_id,
+        "checklistKey": checklist_key,
+        "popupUrl": popup_url,
+        "action": "redirect_popup" if dialog_id else "fallback_home",
+    })
+
+    if not dialog_id:
+        return app_home_html()
+
+    return RedirectResponse(url=popup_url, status_code=302)
+
+
+@app.get("/version")
+@app.get("/debug/version")
+def debug_version():
+    return JSONResponse(build_version_payload())
 
 
 @app.get("/install", response_class=HTMLResponse)
