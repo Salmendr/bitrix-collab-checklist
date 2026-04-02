@@ -35,7 +35,8 @@ DB_DIR.mkdir(parents=True, exist_ok=True)
 DB_PATH = str(DB_DIR / "app.db")
 
 APP_PORTAL_PATH = "/marketplace/app/84/"
-APP_BASE_PATH = normalize_app_base_path(os.getenv("APP_BASE_PATH", "").strip())
+PUBLIC_APP_BASE_PATH = normalize_app_base_path(os.getenv("APP_BASE_PATH", "").strip())
+APP_BASE_PATH = PUBLIC_APP_BASE_PATH
 PUBLIC_APP_BASE_URL = os.getenv("PUBLIC_APP_BASE_URL", "").strip().rstrip("/")
 TECH_USER_ID = 138
 BITRIX_TECH_WEBHOOK_URL = os.getenv("BITRIX_TECH_WEBHOOK_URL", "").strip()
@@ -51,6 +52,7 @@ DEBUG_DIR.mkdir(parents=True, exist_ok=True)
 
 DEBUG_LOG_PATH = DEBUG_DIR / "close_popup.log"
 LAUNCHER_ROUTE = "/launch"
+POPUP_ROUTE = "/popup"
 EDIT_LOCK_TTL_SECONDS = 45
 EDIT_LOCK_HEARTBEAT_SECONDS = 15
 ACTIVE_CHECKLIST_LOCKS = {}
@@ -494,7 +496,7 @@ def extract_upload_rel_path_from_url(document_url: str) -> str:
         return ""
 
     prefixes = []
-    uploads_path = build_app_path("/uploads/")
+    uploads_path = build_public_app_path("/uploads/")
     if uploads_path.endswith("/"):
         prefixes.append(uploads_path)
     else:
@@ -514,8 +516,8 @@ def normalize_document_url(document_url: str) -> str:
         return ""
     if raw.startswith("http://") or raw.startswith("https://"):
         return raw
-    if raw.startswith(build_app_path("/uploads/")) or raw.startswith("/uploads/"):
-        return build_app_path("/uploads/" + extract_upload_rel_path_from_url(raw))
+    if raw.startswith(build_public_app_path("/uploads/")) or raw.startswith("/uploads/"):
+        return build_public_app_path("/uploads/" + extract_upload_rel_path_from_url(raw))
     return raw
 
 
@@ -915,9 +917,10 @@ def startup_event():
     init_db()
     startup_payload = build_version_payload()
     print(f"APP_VERSION={APP_VERSION}")
-    print(f"APP_BASE_PATH={APP_BASE_PATH or '/'}")
-    print(f"Launcher route enabled: {build_app_path(LAUNCHER_ROUTE)}")
-    print(f"Popup route: {build_app_path('/popup')}")
+    print(f"PUBLIC_APP_BASE_PATH={PUBLIC_APP_BASE_PATH or '/'}")
+    print("INTERNAL_ROUTE_MODE=plain-fastapi-routes-with-public-base-path-url-generation")
+    print(f"Launch route enabled: {build_public_app_path(LAUNCHER_ROUTE)}")
+    print(f"Popup route enabled: {build_public_app_path(POPUP_ROUTE)}")
     print("Root route mode: redirect to launch when dialogId exists, fallback page otherwise")
     print(f"APP_PORTAL_PATH={APP_PORTAL_PATH}")
     print(f"DB_PATH={DB_PATH}")
@@ -978,45 +981,43 @@ def write_debug_log(event: str, payload: dict):
         f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
 
-def build_app_path(path: str = "/") -> str:
+def build_internal_route_path(path: str = "/") -> str:
     raw = str(path or "").strip() or "/"
     if not raw.startswith("/"):
         raw = "/" + raw
-    return f"{APP_BASE_PATH}{raw}" if APP_BASE_PATH else raw
+    return raw
 
 
-def get_request_app_base_path(request: Request | None = None) -> str:
+def get_public_app_base_path(request: Request | None = None) -> str:
     if request is None:
-        return APP_BASE_PATH
+        return PUBLIC_APP_BASE_PATH
 
     forwarded_prefix = (
-        request.headers.get("x-forwarded-prefix")
+        PUBLIC_APP_BASE_PATH
+        or request.headers.get("x-forwarded-prefix")
         or request.headers.get("x-script-name")
         or request.scope.get("root_path")
-        or APP_BASE_PATH
+        or ""
     )
     return normalize_app_base_path(forwarded_prefix)
 
 
+def build_public_app_path(path: str = "/", request: Request | None = None) -> str:
+    public_base_path = get_public_app_base_path(request)
+    raw = build_internal_route_path(path)
+    return f"{public_base_path}{raw}" if public_base_path else raw
+
+
 def build_request_app_url(request: Request, path: str = "/") -> str:
     base_url = str(request.base_url).rstrip("/")
-    app_base_path = get_request_app_base_path(request)
-    raw = str(path or "").strip() or "/"
-    if not raw.startswith("/"):
-        raw = "/" + raw
-    target_path = f"{app_base_path}{raw}" if app_base_path else raw
-    return f"{base_url}{target_path}"
+    return f"{base_url}{build_public_app_path(path, request)}"
 
 
 def build_request_app_path(request: Request, path: str = "/") -> str:
-    app_base_path = get_request_app_base_path(request)
-    raw = str(path or "").strip() or "/"
-    if not raw.startswith("/"):
-        raw = "/" + raw
-    return f"{app_base_path}{raw}" if app_base_path else raw
+    return build_public_app_path(path, request)
 
 
-def build_public_app_url(path: str) -> str:
+def build_public_app_url(path: str, request: Request | None = None) -> str:
     public_base = PUBLIC_APP_BASE_URL
     if not public_base and BITRIX_TECH_WEBHOOK_URL:
         parsed = urlparse(BITRIX_TECH_WEBHOOK_URL)
@@ -1030,24 +1031,27 @@ def build_public_app_url(path: str) -> str:
     if not raw.startswith("/"):
         raw = "/" + raw
 
-    if APP_BASE_PATH and (raw == APP_BASE_PATH or raw.startswith(APP_BASE_PATH + "/")):
-        target_path = raw
+    public_base_path = get_public_app_base_path(request)
+    if public_base_path and (raw == public_base_path or raw.startswith(public_base_path + "/")):
+        public_path = raw
     else:
-        target_path = build_app_path(raw)
+        public_path = build_public_app_path(raw, request)
 
-    return f"{public_base}{target_path}"
+    return f"{public_base}{public_path}"
 
 
 def build_version_payload() -> dict:
     return {
         "version": APP_VERSION,
-        "appBasePath": APP_BASE_PATH,
+        "publicBasePath": PUBLIC_APP_BASE_PATH,
         "appPortalPath": APP_PORTAL_PATH,
         "publicAppBaseUrl": PUBLIC_APP_BASE_URL,
-        "launcherRoute": build_app_path(LAUNCHER_ROUTE),
-        "popupRoute": build_app_path("/popup"),
+        "launchRoute": build_public_app_path(LAUNCHER_ROUTE),
+        "popupRoute": build_public_app_path(POPUP_ROUTE),
+        "internalRouteMode": "plain-fastapi-routes-with-public-base-path-url-generation",
         "rootBehavior": "redirect-to-launch-when-params-exist",
-        "baseUrlExample": build_public_app_url(build_relative_launch_path("chat3122", "id")),
+        "publicLaunchExample": build_public_app_url(build_internal_route_path(LAUNCHER_ROUTE) + "?dialogId=chat3122&checklistKey=id"),
+        "publicPopupExample": build_public_app_url(build_internal_route_path(POPUP_ROUTE) + "?dialogId=chat3122&checklistKey=id"),
         "time": datetime.now().isoformat(),
         "dbPath": DB_PATH,
         "uploadRoot": str(UPLOAD_ROOT),
@@ -1703,14 +1707,14 @@ def build_relative_launch_path(dialog_id: str, checklist_key: str = "id") -> str
     dialog_id = normalize_dialog_id(dialog_id)
     checklist_key = normalize_checklist_key(checklist_key)
     query = f"dialogId={quote(dialog_id)}&checklistKey={quote(checklist_key)}"
-    return f"{build_app_path(LAUNCHER_ROUTE)}?{query}"
+    return f"{build_public_app_path(LAUNCHER_ROUTE)}?{query}"
 
 
 def build_relative_popup_path(dialog_id: str, checklist_key: str = "id") -> str:
     dialog_id = normalize_dialog_id(dialog_id)
     checklist_key = normalize_checklist_key(checklist_key)
     query = f"dialogId={quote(dialog_id)}&checklistKey={quote(checklist_key)}"
-    return f"{build_app_path('/popup')}?{query}"
+    return f"{build_public_app_path(POPUP_ROUTE)}?{query}"
 
 
 def build_checklist_message_link(dialog_id: str, checklist_key: str) -> str:
@@ -2176,7 +2180,7 @@ def app_home_html():
 def app_home_html(initial_dialog_id: str = "", initial_checklist_key: str = "id"):
     initial_dialog_id_json = json.dumps(normalize_dialog_id(initial_dialog_id), ensure_ascii=False)
     initial_checklist_key_json = json.dumps(normalize_checklist_key(initial_checklist_key), ensure_ascii=False)
-    app_base_path_json = json.dumps(APP_BASE_PATH, ensure_ascii=False)
+    public_app_base_path_json = json.dumps(PUBLIC_APP_BASE_PATH, ensure_ascii=False)
 
     return f"""
     <html>
@@ -2184,12 +2188,12 @@ def app_home_html(initial_dialog_id: str = "", initial_checklist_key: str = "id"
         <meta charset="utf-8">
         <title>Чек-листы проекта</title>
         <script>
-            const SERVER_APP_BASE_PATH = {app_base_path_json};
+            const SERVER_PUBLIC_BASE_PATH = {public_app_base_path_json};
             const initialDialogId = {initial_dialog_id_json};
             const initialChecklistKey = {initial_checklist_key_json};
 
-            function detectAppBasePath() {{
-                if (SERVER_APP_BASE_PATH) return SERVER_APP_BASE_PATH;
+            function detectPublicBasePath() {{
+                if (SERVER_PUBLIC_BASE_PATH) return SERVER_PUBLIC_BASE_PATH;
                 const path = String(window.location.pathname || '');
                 const knownSuffixes = ['/launch', '/popup', '/textarea', '/install', '/version', '/debug/version'];
                 for (const suffix of knownSuffixes) {{
@@ -2202,13 +2206,13 @@ def app_home_html(initial_dialog_id: str = "", initial_checklist_key: str = "id"
 
             function buildAppUrl(path) {{
                 if (!path) {{
-                    return detectAppBasePath() || '/';
+                    return detectPublicBasePath() || '/';
                 }}
                 if (/^https?:\\/\\//i.test(path)) {{
                     return path;
                 }}
                 const normalized = String(path).startsWith('/') ? String(path) : '/' + String(path);
-                return (detectAppBasePath() || '') + normalized;
+                return (detectPublicBasePath() || '') + normalized;
             }}
 
             function resolveLaunchContext() {{
@@ -2260,7 +2264,7 @@ def app_home_html(initial_dialog_id: str = "", initial_checklist_key: str = "id"
 def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
     initial_dialog_id_json = json.dumps(initial_dialog_id or "", ensure_ascii=False)
     initial_context_text_json = json.dumps(initial_context_text or "", ensure_ascii=False)
-    app_base_path_json = json.dumps(APP_BASE_PATH, ensure_ascii=False)
+    public_app_base_path_json = json.dumps(PUBLIC_APP_BASE_PATH, ensure_ascii=False)
 
 
     return f"""
@@ -2343,11 +2347,11 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
         <script>
             var initialDialogId = {initial_dialog_id_json};
             var initialContextText = {initial_context_text_json};
-            var serverAppBasePath = {app_base_path_json};
+            var serverPublicBasePath = {public_app_base_path_json};
             var autoOpened = false;
 
-            function detectAppBasePath() {{
-                if (serverAppBasePath) return serverAppBasePath;
+            function detectPublicBasePath() {{
+                if (serverPublicBasePath) return serverPublicBasePath;
                 var path = String(window.location.pathname || '');
                 var knownSuffixes = ['/textarea', '/launch', '/popup', '/install', '/version', '/debug/version'];
                 for (var i = 0; i < knownSuffixes.length; i += 1) {{
@@ -2361,13 +2365,13 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
 
             function buildAppUrl(path) {{
                 if (!path) {{
-                    return detectAppBasePath() || '/';
+                    return detectPublicBasePath() || '/';
                 }}
                 if (/^https?:\\/\\//i.test(path)) {{
                     return path;
                 }}
                 var normalized = path.charAt(0) === '/' ? path : '/' + path;
-                var basePath = detectAppBasePath();
+                var basePath = detectPublicBasePath();
                 return (basePath || '') + normalized;
             }}
 
@@ -2516,7 +2520,7 @@ def home_get(request: Request, dialogId: str = "", checklistKey: str = "id", mod
     launch_path = build_request_app_path(request, LAUNCHER_ROUTE)
     write_debug_log("home_get", {
         "version": APP_VERSION,
-        "appBasePath": get_request_app_base_path(request),
+        "publicBasePath": get_public_app_base_path(request),
         "dialogId": dialog_id,
         "checklistKey": checklist_key,
         "mode": mode,
@@ -2539,7 +2543,7 @@ async def home_post(request: Request):
     launch_path = build_request_app_path(request, LAUNCHER_ROUTE)
     write_debug_log("home_post", {
         "version": APP_VERSION,
-        "appBasePath": get_request_app_base_path(request),
+        "publicBasePath": get_public_app_base_path(request),
         "dialogId": dialog_id,
         "checklistKey": checklist_key,
         "launchPath": launch_path,
@@ -2557,12 +2561,12 @@ async def home_post(request: Request):
 def launch_get(request: Request, dialogId: str = "", checklistKey: str = "id"):
     dialog_id = normalize_dialog_id(dialogId)
     checklist_key = normalize_checklist_key(checklistKey)
-    popup_path = build_request_app_path(request, "/popup")
+    popup_path = build_request_app_path(request, POPUP_ROUTE)
     popup_url = f"{popup_path}?dialogId={quote(dialog_id)}&checklistKey={quote(checklist_key)}" if dialog_id else ""
 
     write_debug_log("launch_get", {
         "version": APP_VERSION,
-        "appBasePath": get_request_app_base_path(request),
+        "publicBasePath": get_public_app_base_path(request),
         "dialogId": dialog_id,
         "checklistKey": checklist_key,
         "popupUrl": popup_url,
@@ -2579,12 +2583,13 @@ def launch_get(request: Request, dialogId: str = "", checklistKey: str = "id"):
 @app.get("/debug/version")
 def debug_version(request: Request):
     payload = build_version_payload()
-    request_base_path = get_request_app_base_path(request)
+    request_base_path = get_public_app_base_path(request)
     payload.update({
-        "requestAppBasePath": request_base_path,
+        "requestPublicBasePath": request_base_path,
         "requestLaunchRoute": build_request_app_path(request, LAUNCHER_ROUTE),
-        "requestPopupRoute": build_request_app_path(request, "/popup"),
-        "requestBaseUrlExample": build_request_app_url(request, LAUNCHER_ROUTE) + "?dialogId=chat3122&checklistKey=id",
+        "requestPopupRoute": build_request_app_path(request, POPUP_ROUTE),
+        "requestPublicLaunchExample": build_request_app_url(request, LAUNCHER_ROUTE) + "?dialogId=chat3122&checklistKey=id",
+        "requestPublicPopupExample": build_request_app_url(request, POPUP_ROUTE) + "?dialogId=chat3122&checklistKey=id",
     })
     return JSONResponse(payload)
 
@@ -2662,7 +2667,7 @@ def textarea_get(request: Request, dialogId: str = ""):
     launch_path = build_request_app_path(request, LAUNCHER_ROUTE)
     write_debug_log("textarea_get", {
         "version": APP_VERSION,
-        "appBasePath": get_request_app_base_path(request),
+        "publicBasePath": get_public_app_base_path(request),
         "dialogId": dialog_id,
         "checklistKey": "id",
         "launchPath": launch_path,
@@ -2680,7 +2685,7 @@ async def textarea_post(request: Request):
     launch_path = build_request_app_path(request, LAUNCHER_ROUTE)
     write_debug_log("textarea_post", {
         "version": APP_VERSION,
-        "appBasePath": get_request_app_base_path(request),
+        "publicBasePath": get_public_app_base_path(request),
         "dialogId": dialog_id,
         "checklistKey": checklist_key,
         "launchPath": f"{launch_path}?dialogId={quote(dialog_id)}&checklistKey={quote(checklist_key)}" if dialog_id else "",
@@ -2710,7 +2715,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
     collab_title_json = json.dumps(collab_title_raw, ensure_ascii=False)
     checklist_key_json = json.dumps(checklist_key, ensure_ascii=False)
     checklist_title_json = json.dumps(title_raw, ensure_ascii=False)
-    app_base_path_json = json.dumps(APP_BASE_PATH, ensure_ascii=False)
+    public_app_base_path_json = json.dumps(PUBLIC_APP_BASE_PATH, ensure_ascii=False)
 
     popup_session_enhancements_js = """
             const clientSessionId = 'popup_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
@@ -3968,9 +3973,9 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
             const idLeftTableHtml = leftTableEl ? leftTableEl.innerHTML : '';
             const idRightTableHtml = rightTableEl ? rightTableEl.innerHTML : '';
             const debugLastEventEl = document.getElementById('debugLastEvent');
-            const SERVER_APP_BASE_PATH = {app_base_path_json};
-            function detectAppBasePath() {{
-                if (SERVER_APP_BASE_PATH) return SERVER_APP_BASE_PATH;
+            const SERVER_PUBLIC_BASE_PATH = {public_app_base_path_json};
+            function detectPublicBasePath() {{
+                if (SERVER_PUBLIC_BASE_PATH) return SERVER_PUBLIC_BASE_PATH;
                 const path = String(window.location.pathname || '');
                 const knownSuffixes = ['/popup', '/launch', '/textarea', '/install', '/version', '/debug/version'];
                 for (const suffix of knownSuffixes) {{
@@ -3980,16 +3985,16 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                 }}
                 return '';
             }}
-            const APP_BASE_PATH = detectAppBasePath();
+            const PUBLIC_APP_BASE_PATH = detectPublicBasePath();
             function buildAppUrl(path) {{
                 if (!path) {{
-                    return APP_BASE_PATH || '/';
+                    return PUBLIC_APP_BASE_PATH || '/';
                 }}
                 if (/^https?:\\/\\//i.test(path)) {{
                     return path;
                 }}
                 const normalized = String(path).startsWith('/') ? String(path) : '/' + String(path);
-                return (APP_BASE_PATH || '') + normalized;
+                return (PUBLIC_APP_BASE_PATH || '') + normalized;
             }}
             let closeSummarySent = false;
             let sessionDirty = false;
@@ -5639,7 +5644,7 @@ async def api_checklist_upload_document(
 
     updated_item = {
         "id": item_id,
-        "documentUrl": build_app_path("/uploads/" + rel_path.replace("\\", "/")),
+        "documentUrl": build_public_app_path("/uploads/" + rel_path.replace("\\", "/")),
         "documentName": Path(file.filename or "file.bin").name,
     }
 
