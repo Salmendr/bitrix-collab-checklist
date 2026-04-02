@@ -2024,6 +2024,39 @@ def app_home_html():
                     return (searchParams.get(key) || hashParams.get(key) || fallback || '').trim();
                 }
 
+                function redirectToPopup(dialogId, checklistKey) {
+                    const popupUrl =
+                        '/popup?dialogId=' + encodeURIComponent(dialogId) +
+                        '&checklistKey=' + encodeURIComponent(checklistKey || 'id');
+
+                    const go = function () {
+                        window.location.replace(popupUrl);
+                    };
+
+                    try {
+                        if (window.BX24 && typeof window.BX24.init === 'function') {
+                            window.BX24.init(function () {
+                                try {
+                                    if (typeof window.BX24.resizeWindow === 'function') {
+                                        window.BX24.resizeWindow(1180, 680);
+                                    }
+                                    if (typeof window.BX24.fitWindow === 'function') {
+                                        window.BX24.fitWindow();
+                                    }
+                                } catch (e) {
+                                    console.log('bridge resize skipped:', e);
+                                }
+                                go();
+                            });
+                            return;
+                        }
+                    } catch (e) {
+                        console.log('bridge BX24 init skipped:', e);
+                    }
+
+                    go();
+                }
+
                 try {
                     const searchParams = new URLSearchParams(window.location.search || '');
                     const hashRaw = String(window.location.hash || '').replace(/^#/, '');
@@ -2055,17 +2088,14 @@ def app_home_html():
                             console.log('pending dialog save skipped:', e);
                         }
 
-                        window.location.replace(
-                            '/popup?dialogId=' + encodeURIComponent(dialogId) +
-                            '&checklistKey=' + encodeURIComponent(checklistKey)
-                        );
+                        redirectToPopup(dialogId, checklistKey);
                         return;
                     }
 
                     if (localPayload && localPayload.dialogId && age < 60000) {
-                        window.location.replace(
-                            '/popup?dialogId=' + encodeURIComponent(localPayload.dialogId) +
-                            '&checklistKey=' + encodeURIComponent((localPayload.checklistKey || 'id').trim() || 'id')
+                        redirectToPopup(
+                            localPayload.dialogId,
+                            (localPayload.checklistKey || 'id').trim() || 'id'
                         );
                         return;
                     }
@@ -2282,11 +2312,6 @@ def health():
 
 @app.get("/", response_class=HTMLResponse)
 def home_get(dialogId: str = "", checklistKey: str = "id", mode: str = ""):
-    dialog_id = normalize_dialog_id(dialogId)
-
-    if dialog_id:
-        return popup_get(dialog_id, checklistKey)
-
     return app_home_html()
 
 
@@ -2610,7 +2635,12 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
             async function persistDirtyChecklists(closeEvent, useBeacon = false) {
                 const dirtyKeys = getDirtyChecklistKeys();
                 if (!dirtyKeys.length) {
-                    return 0;
+                    return {
+                        savedCount: 0,
+                        messageOk: true,
+                        messageSkipped: true,
+                        result: {}
+                    };
                 }
 
                 const payload = buildCloseBatchPayload(closeEvent);
@@ -2619,7 +2649,12 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                     const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' });
                     navigator.sendBeacon(APP_BASE_URL + '/api/checklist/close-session', blob);
                     dirtyKeys.forEach(clearChecklistSessionState);
-                    return dirtyKeys.length;
+                    return {
+                        savedCount: dirtyKeys.length,
+                        messageOk: true,
+                        messageSkipped: false,
+                        result: {}
+                    };
                 }
 
                 const response = await fetch('/api/checklist/close-session', {
@@ -2630,13 +2665,34 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                     body: JSON.stringify(payload),
                     keepalive: true
                 });
+                const result = await response.json().catch(() => ({}));
                 if (!response.ok) {
-                    const result = await response.json().catch(() => ({}));
                     throw new Error(result.error || 'close-session failed');
                 }
 
+                if (result && result.messageOk === false) {
+                    debugLog('close_session_message_warning', {
+                        closeEvent,
+                        dialogId,
+                        checklistKeys: dirtyKeys,
+                        result
+                    });
+                } else {
+                    debugLog('close_session_completed', {
+                        closeEvent,
+                        dialogId,
+                        checklistKeys: dirtyKeys,
+                        result
+                    });
+                }
+
                 dirtyKeys.forEach(clearChecklistSessionState);
-                return dirtyKeys.length;
+                return {
+                    savedCount: dirtyKeys.length,
+                    messageOk: result.messageOk !== false,
+                    messageSkipped: !!result.messageSkipped,
+                    result
+                };
             }
 
             function stopLockHeartbeat() {
@@ -2833,14 +2889,29 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                 closeSummarySent = true;
                 syncChecklistCache();
 
+                let persistResult = {
+                    savedCount: 0,
+                    messageOk: true,
+                    messageSkipped: true,
+                    result: {}
+                };
+
                 try {
                     if (saveChanges) {
-                        await persistDirtyChecklists('save_and_close', false);
+                        persistResult = await persistDirtyChecklists('save_and_close', false);
                     }
                 } catch (e) {
                     console.log('finalizePopupSession error:', e);
                     setSaveState('error', saveChanges ? 'Ошибка сохранения' : 'Ошибка отмены');
                     return;
+                }
+
+                if (saveChanges) {
+                    if (persistResult.messageOk === false) {
+                        setSaveState('saving', 'Сохранено, сообщение не отправлено');
+                    } else if (persistResult.savedCount > 0) {
+                        setSaveState('', 'Сохранено');
+                    }
                 }
 
                 await releaseChecklistLock(currentChecklistKey, false);
@@ -4983,16 +5054,25 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
             {popup_session_enhancements_js}
 
             function safeInitBx24ForPopup() {{
+                function applyPopupWindowSize() {{
+                    try {{
+                        if (typeof window.BX24.resizeWindow === 'function') {{
+                            window.BX24.resizeWindow(1180, 680);
+                        }}
+                        if (typeof window.BX24.fitWindow === 'function') {{
+                            window.BX24.fitWindow();
+                        }}
+                    }} catch (e) {{
+                        console.log('BX24 popup sizing error:', e);
+                    }}
+                }}
+
                 try {{
                     if (window.BX24 && typeof window.BX24.init === 'function') {{
                         window.BX24.init(function () {{
-                            try {{
-                                if (typeof window.BX24.resizeWindow === 'function') {{
-                                    window.BX24.resizeWindow(1180, 680);
-                                }}
-                            }} catch (e) {{
-                                console.log('BX24.resizeWindow error:', e);
-                            }}
+                            applyPopupWindowSize();
+                            setTimeout(applyPopupWindowSize, 80);
+                            setTimeout(applyPopupWindowSize, 220);
                         }});
                     }}
                 }} catch (e) {{
@@ -5498,6 +5578,17 @@ async def api_checklist_close_session(request: Request):
     editor = payload.get("editor") or {}
     raw_sessions = payload.get("sessions") or []
 
+    def build_message_failure_response(base_dialog_id: str, extra: dict | None = None):
+        response = {
+            "ok": True,
+            "saved": True,
+            "messageOk": False,
+            "dialogId": base_dialog_id,
+        }
+        if extra:
+            response.update(extra)
+        return JSONResponse(response)
+
     if raw_sessions:
         sessions = []
         for raw_session in raw_sessions:
@@ -5553,23 +5644,46 @@ async def api_checklist_close_session(request: Request):
                 "messageSkipped": True,
             })
 
-        message = build_multi_checklist_chat_message(visible_sessions, editor)
-        result = bitrix_webhook_call("im.message.add", {
-            "DIALOG_ID": dialog_id or sessions[0]["dialogId"],
-            "MESSAGE": message,
-        })
+        target_dialog_id = dialog_id or sessions[0]["dialogId"]
+
+        try:
+            message = build_multi_checklist_chat_message(visible_sessions, editor)
+            result = bitrix_webhook_call("im.message.add", {
+                "DIALOG_ID": target_dialog_id,
+                "MESSAGE": message,
+            })
+        except Exception as exc:
+            write_debug_log("close_session_message_exception", {
+                "dialogId": target_dialog_id,
+                "editor": editor,
+                "checklistKeys": [session["checklistKey"] for session in visible_sessions],
+                "error": str(exc),
+            })
+            return build_message_failure_response(target_dialog_id, {
+                "checklistKeys": [session["checklistKey"] for session in sessions],
+                "messageError": str(exc),
+            })
 
         write_debug_log("close_session_im_message_add_result", {
-            "dialogId": dialog_id or sessions[0]["dialogId"],
+            "dialogId": target_dialog_id,
             "changesCount": sum(len(session["changes"]) for session in visible_sessions),
             "editor": editor,
             "result": result,
             "checklistKeys": [session["checklistKey"] for session in visible_sessions],
         })
 
+        if "error" in result:
+            return build_message_failure_response(target_dialog_id, {
+                "checklistKeys": [session["checklistKey"] for session in sessions],
+                "messageError": result.get("error_description") or result.get("error") or "message send failed",
+                "result": result,
+            })
+
         return JSONResponse({
-            "ok": "error" not in result,
-            "dialogId": dialog_id or sessions[0]["dialogId"],
+            "ok": True,
+            "saved": True,
+            "messageOk": True,
+            "dialogId": target_dialog_id,
             "result": result,
             "checklistKeys": [session["checklistKey"] for session in sessions],
         })
@@ -5618,11 +5732,23 @@ async def api_checklist_close_session(request: Request):
             "messageSkipped": True,
         })
 
-    message = build_checklist_chat_message(data, changes, editor)
-    result = bitrix_webhook_call("im.message.add", {
-        "DIALOG_ID": dialog_id,
-        "MESSAGE": message,
-    })
+    try:
+        message = build_checklist_chat_message(data, changes, editor)
+        result = bitrix_webhook_call("im.message.add", {
+            "DIALOG_ID": dialog_id,
+            "MESSAGE": message,
+        })
+    except Exception as exc:
+        write_debug_log("close_session_message_exception", {
+            "dialogId": dialog_id,
+            "checklistKey": checklist_key,
+            "editor": editor,
+            "error": str(exc)
+        })
+        return build_message_failure_response(dialog_id, {
+            "checklistKey": checklist_key,
+            "messageError": str(exc),
+        })
 
     write_debug_log("close_session_im_message_add_result", {
         "dialogId": dialog_id,
@@ -5632,8 +5758,17 @@ async def api_checklist_close_session(request: Request):
         "result": result
     })
 
+    if "error" in result:
+        return build_message_failure_response(dialog_id, {
+            "checklistKey": checklist_key,
+            "messageError": result.get("error_description") or result.get("error") or "message send failed",
+            "result": result,
+        })
+
     return JSONResponse({
-        "ok": "error" not in result,
+        "ok": True,
+        "saved": True,
+        "messageOk": True,
         "dialogId": dialog_id,
         "checklistKey": checklist_key,
         "result": result,
