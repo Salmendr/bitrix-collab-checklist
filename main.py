@@ -1458,25 +1458,251 @@ def build_checklist_chat_message(data: dict, changes: list, editor: dict) -> str
 
 
 def status_emoji(status: str) -> str:
-    status = clean_cell_value(status)
-    if not status:
-        return "⚪️"
+    status = display_status_text(status)
 
-    normalized = normalize_status(status)
-    lowered = status.strip().lower()
-
-    if normalized == "Есть" or lowered == "да":
+    if status in {"Есть", "Да"}:
         return "🟢"
-    if normalized == "Нет" or lowered == "нет":
+    if status == "Нет":
         return "🔴"
-    if normalized == "Не требуется" or lowered == "не требуется":
+    if status == "Не требуется":
         return "🚫"
-    return "🟢"
+    return "🟢" if status else "⚪️"
+
+
+MESSAGE_FIGURE_SPACE = " "
+MESSAGE_CHECKLIST_ORDER = ["concept", "id", "opr"]
+MESSAGE_CHECKLIST_TITLES = {
+    "id": "Чек-лист ИД",
+    "concept": "Чек-лист Концепция",
+    "opr": "Чек-лист ОПР",
+}
+MESSAGE_SECTION_LABELS = {
+    "status": "Статусы",
+    "date": "Даты",
+    "extraInfo": "Доп информация",
+    "source": "Нормативы",
+    "name": "Пункты",
+    "document": "Документы",
+    "add-item": "Пункты",
+}
+
+
+def display_status_text(status: str) -> str:
+    status = clean_cell_value(status)
+    normalized = normalize_status(status)
+    return normalized or status
 
 
 def build_progress_text(data: dict) -> str:
-    progress_percent = int(data.get("progressPercent") or 0)
-    return f"📊Прогресс: {progress_percent}%"
+    checklist_key = normalize_checklist_key(data.get("checklistKey") or "id")
+    items = data.get("items") or []
+
+    if checklist_key == "concept":
+        active_items = [item for item in items if clean_cell_value(item.get("status")) != "Не требуется"]
+        completed_items = []
+        for item in active_items:
+            status = clean_cell_value(item.get("status"))
+            status_kind = clean_cell_value(item.get("statusKind")) or "bool"
+            if status_kind == "bool":
+                if status == "Да":
+                    completed_items.append(item)
+            elif status:
+                completed_items.append(item)
+    else:
+        active_items = [item for item in items if display_status_text(item.get("status")) != "Не требуется"]
+        completed_items = [item for item in active_items if display_status_text(item.get("status")) == "Есть"]
+
+    percent = round((len(completed_items) / len(active_items)) * 100) if active_items else 0
+    return f"📊Прогресс: {percent}%"
+
+
+def split_changes(changes: list) -> dict:
+    groups = {
+        "status": [],
+        "date": [],
+        "extraInfo": [],
+        "source": [],
+        "name": [],
+        "document": [],
+        "add-item": [],
+    }
+
+    for change in changes or []:
+        field = str(change.get("field") or "").strip()
+        if field == "status":
+            groups["status"].append(change)
+        elif field in {"plan", "plannedDate"}:
+            groups["date"].append(change)
+        elif field == "extraInfo":
+            groups["extraInfo"].append(change)
+        elif field == "source":
+            groups["source"].append(change)
+        elif field == "name":
+            groups["name"].append(change)
+        elif field == "document":
+            groups["document"].append(change)
+        elif field == "add-item":
+            groups["add-item"].append(change)
+
+    return groups
+
+
+def strip_message_markup(value: str) -> str:
+    return re.sub(r"\[[^\]]+\]", "", str(value or ""))
+
+
+def message_visible_length(value: str) -> int:
+    return len(strip_message_markup(value))
+
+
+def pad_message_left(value: str, target_width: int) -> str:
+    padding = max(target_width - message_visible_length(value), 0)
+    return value + (MESSAGE_FIGURE_SPACE * padding)
+
+
+def get_checklist_message_title(checklist_key: str, checklist_title: str = "") -> str:
+    normalized_key = normalize_checklist_key(checklist_key)
+    cleaned_title = clean_cell_value(checklist_title)
+    return cleaned_title or MESSAGE_CHECKLIST_TITLES.get(normalized_key, "Чек-лист ИД")
+
+
+def get_checklist_link_caption(checklist_key: str) -> str:
+    mapping = {
+        "id": "ИД",
+        "concept": "КОНЦЕПЦИЯ",
+        "opr": "ОПР",
+    }
+    return mapping.get(normalize_checklist_key(checklist_key), "ЧЕК-ЛИСТ")
+
+
+def build_checklist_message_link(dialog_id: str, checklist_key: str) -> str:
+    dialog_id = normalize_dialog_id(dialog_id)
+    checklist_key = normalize_checklist_key(checklist_key)
+
+    if not dialog_id or not BITRIX_TECH_WEBHOOK_URL:
+        return ""
+
+    parsed = urlparse(BITRIX_TECH_WEBHOOK_URL)
+    if not parsed.scheme or not parsed.netloc:
+        return ""
+
+    base_url = f"{parsed.scheme}://{parsed.netloc}"
+    app_path = APP_PORTAL_PATH if APP_PORTAL_PATH.endswith("/") else APP_PORTAL_PATH + "/"
+    query = f"dialogId={quote(dialog_id)}&checklistKey={quote(checklist_key)}"
+    return f"{base_url}{app_path}?{query}#{query}"
+
+
+def build_editor_text(editor: dict) -> str:
+    editor_name = str(editor.get("name") or "").strip()
+    editor_id = str(editor.get("id") or "").strip()
+
+    if editor_name and editor_id:
+        return f"👤Кем изменено: {editor_name} (ID {editor_id})"
+    if editor_name:
+        return f"👤Кем изменено: {editor_name}"
+    if editor_id:
+        return f"👤Кем изменено: ID {editor_id}"
+    return "👤Кем изменено: неизвестно"
+
+
+def normalize_message_value(field: str, value, checklist_key: str) -> str:
+    raw = clean_cell_value(value)
+    if field == "status":
+        return display_status_text(raw)
+    return raw
+
+
+def build_change_left_label(field: str, checklist_key: str) -> str:
+    if field == "status":
+        return "Статус"
+    if field == "date":
+        return "Планируемая дата" if normalize_checklist_key(checklist_key) == "opr" else "План"
+    if field == "extraInfo":
+        return "Доп информация"
+    if field == "source":
+        return "Нормативы"
+    if field == "name":
+        return "Пункт"
+    if field == "document":
+        return "Документ"
+    if field == "add-item":
+        return "Пункт"
+    return field
+
+
+def build_change_emoji(field: str, new_value: str, checklist_key: str) -> str:
+    if field == "status":
+        return status_emoji(new_value)
+    if field == "date":
+        return "📆"
+    if field == "extraInfo":
+        return "📝"
+    if field == "source":
+        return "📚"
+    if field == "name":
+        return "✏️"
+    if field == "document":
+        return "📎"
+    if field == "add-item":
+        return "➕"
+    return "✏️"
+
+
+def should_show_empty_old_value(field: str) -> bool:
+    return field in {"extraInfo", "source", "name"}
+
+
+def build_change_row(change: dict, field: str, checklist_key: str) -> tuple[str, str]:
+    item_name = clean_cell_value(change.get("itemName")) or "Без названия"
+    old_value = normalize_message_value(field, change.get("oldValue"), checklist_key)
+    new_value = normalize_message_value(field, change.get("newValue"), checklist_key) or "—"
+    label = build_change_left_label(field, checklist_key)
+    prefix = build_change_emoji(field, new_value, checklist_key)
+
+    if field == "add-item":
+        return f"{prefix}{item_name} / {label}: →", "добавлен"
+
+    if old_value:
+        left = f"{prefix}{item_name} / {label}: {old_value} →"
+    elif should_show_empty_old_value(field):
+        left = f"{prefix}{item_name} / {label}: — →"
+    else:
+        left = f"{prefix}{item_name} / {label}: →"
+
+    return left, new_value
+
+
+def build_aligned_section_lines(section_title: str, rows: list[tuple[str, str]]) -> list[str]:
+    if not rows:
+        return []
+
+    width = max(message_visible_length(left) for left, _ in rows)
+    lines = [f"[b]{section_title}:[/b]", ""]
+    for left, right in rows:
+        lines.append(f"{pad_message_left(left, width)} |[b]{right}[/b]")
+    lines.append("")
+    return lines
+
+
+def build_recent_changes_sections(changes: list, checklist_key: str) -> list[tuple[str, list[tuple[str, str]]]]:
+    grouped = split_changes(changes)
+    key = normalize_checklist_key(checklist_key)
+    section_order = ["status", "date"]
+    if key == "concept":
+        section_order.extend(["source", "extraInfo", "name", "add-item"])
+    elif key == "id":
+        section_order.extend(["document", "add-item"])
+    elif key == "opr":
+        section_order.extend(["add-item"])
+
+    sections = []
+    for field in section_order:
+        field_changes = grouped.get(field) or []
+        if not field_changes:
+            continue
+        rows = [build_change_row(change, field, key) for change in field_changes]
+        sections.append((MESSAGE_SECTION_LABELS.get(field, field), rows))
+    return sections
 
 
 def build_recent_changes_text(
@@ -1484,83 +1710,88 @@ def build_recent_changes_text(
     checklist_title: str = "Чек-лист ИД",
     checklist_key: str = "id"
 ) -> str:
-    status_changes, date_changes, document_changes, add_item_changes, extra_info_changes = split_changes(changes)
-    checklist_title = clean_cell_value(checklist_title) or "Чек-лист ИД"
-    checklist_key = normalize_checklist_key(checklist_key)
+    title = get_checklist_message_title(checklist_key, checklist_title).upper()
+    sections = build_recent_changes_sections(changes, checklist_key)
+    lines = [f"✏️[b]ИЗМЕНЕНИЯ В {title}[/b]", ""]
 
-    lines = [
-        f"[B]✏️ИЗМЕНЕНИЯ В {checklist_title.upper()}[/B]",
-        "",
-    ]
-
-    if status_changes:
-        lines.append("[B]Статусы:[/B]")
-        lines.append("")
-        for change in status_changes:
-            lines.append(format_status_change_line(change))
-        lines.append("")
-
-    if date_changes:
-        lines.append("[B]Даты:[/B]")
-        lines.append("")
-        for change in date_changes:
-            lines.append(format_plan_change_line(change))
-        lines.append("")
-
-    if checklist_key != "opr" and document_changes:
-        lines.append("[B]Документы:[/B]")
-        lines.append("")
-        for change in document_changes:
-            lines.append(format_document_change_line(change))
-        lines.append("")
-
-    if checklist_key != "opr" and add_item_changes:
-        lines.append("[B]Пункты:[/B]")
-        lines.append("")
-        for change in add_item_changes:
-            lines.append(format_add_item_change_line(change))
-        lines.append("")
-
-    if checklist_key != "opr" and extra_info_changes:
-        lines.append("[B]Доп информация:[/B]")
-        lines.append("")
-        for change in extra_info_changes:
-            lines.append(format_extra_info_change_line(change))
-        lines.append("")
-
-    has_visible_changes = bool(status_changes or date_changes)
-    if checklist_key != "opr":
-        has_visible_changes = has_visible_changes or bool(document_changes or add_item_changes or extra_info_changes)
-
-    if not has_visible_changes:
-        lines.append("Изменений нет")
-        lines.append("")
+    if sections:
+        for section_title, rows in sections:
+            lines.extend(build_aligned_section_lines(section_title, rows))
+    else:
+        lines.extend(["Изменений нет", ""])
 
     return "\n".join(lines).strip()
 
 
-def build_checklist_chat_message(data: dict, changes: list, editor: dict) -> str:
-    checklist_title = (data.get("title") or "Чек-лист ИД").strip()
+def build_checklist_message_block(data: dict, changes: list) -> str:
     checklist_key = normalize_checklist_key(data.get("checklistKey") or "id")
+    checklist_title = get_checklist_message_title(checklist_key, data.get("title") or "")
+    dialog_id = normalize_dialog_id(data.get("resolvedDialogId") or data.get("dialogId") or "")
+    link_url = build_checklist_message_link(dialog_id, checklist_key)
+    link_caption = get_checklist_link_caption(checklist_key)
+
     parts = [
         build_recent_changes_text(changes, checklist_title, checklist_key),
         "",
-        build_editor_text(editor),
         build_progress_text(data),
+        "",
     ]
-    dialog_id = normalize_dialog_id(data.get("resolvedDialogId") or data.get("dialogId") or "")
-    link_url = build_checklist_message_link(dialog_id, checklist_key)
+
     if link_url:
-        parts.extend([
-            "",
-            f"[URL={link_url}]Чтобы посмотреть весь чек-лист нажмите на этот текст[/URL]",
-        ])
+        parts.append(f"[URL={link_url}]Чтобы посмотреть весь чек-лист {link_caption} нажмите на этот текст[/URL]")
     else:
-        parts.extend([
-            "",
-            "Чтобы посмотреть весь чек-лист нажмите на этот текст",
-        ])
+        parts.append(f"Чтобы посмотреть весь чек-лист {link_caption} нажмите на этот текст")
+
     return "\n".join(parts).strip()
+
+
+def build_multi_checklist_chat_message(sessions: list, editor: dict) -> str:
+    if not sessions:
+        return ""
+
+    indexed = []
+    for session in sessions:
+        data = session.get("data") or {}
+        changes = session.get("changes") or []
+        checklist_key = normalize_checklist_key(session.get("checklistKey") or data.get("checklistKey") or "id")
+        if not changes:
+            continue
+        indexed.append({
+            "checklistKey": checklist_key,
+            "data": data,
+            "changes": changes,
+        })
+
+    if not indexed:
+        return ""
+
+    order_map = {key: index for index, key in enumerate(MESSAGE_CHECKLIST_ORDER)}
+    indexed.sort(key=lambda item: order_map.get(item["checklistKey"], 999))
+
+    parts = []
+    for entry in indexed:
+        block = build_checklist_message_block(entry["data"], entry["changes"])
+        if block:
+            parts.append(block)
+
+    if not parts:
+        return ""
+
+    parts.extend([
+        "",
+        build_editor_text(editor),
+    ])
+    return "\n\n".join(parts).strip()
+
+
+def build_checklist_chat_message(data: dict, changes: list, editor: dict) -> str:
+    return build_multi_checklist_chat_message([
+        {
+            "checklistKey": normalize_checklist_key(data.get("checklistKey") or "id"),
+            "data": data,
+            "changes": changes,
+        }
+    ], editor)
 
 
 def install_finish_block():
@@ -1786,52 +2017,71 @@ def app_home_html():
     <html>
     <head>
         <meta charset="utf-8">
-        <title>Чек-лист ИД</title>
+        <title>Чек-листы проекта</title>
         <script>
             (function () {
-                try {
-                    const query = new URLSearchParams(window.location.search || '');
-                    const queryDialogId = (query.get('dialogId') || '').trim();
-                    const queryChecklistKey = (query.get('checklistKey') || 'id').trim() || 'id';
+                function pickValue(searchParams, hashParams, key, fallback) {
+                    return (searchParams.get(key) || hashParams.get(key) || fallback || '').trim();
+                }
 
-                    if (queryDialogId) {
-                        window.location.replace(
-                            '/popup?dialogId=' + encodeURIComponent(queryDialogId) +
-                            '&checklistKey=' + encodeURIComponent(queryChecklistKey)
-                        );
-                        return;
+                try {
+                    const searchParams = new URLSearchParams(window.location.search || '');
+                    const hashRaw = String(window.location.hash || '').replace(/^#/, '');
+                    const hashParams = new URLSearchParams(hashRaw);
+                    const raw = localStorage.getItem('checklist_pending_dialog');
+                    let localPayload = null;
+
+                    if (raw) {
+                        try {
+                            localPayload = JSON.parse(raw);
+                        } catch (e) {
+                            console.log('pending dialog parse skipped:', e);
+                        }
                     }
 
-                    const raw = localStorage.getItem('checklist_pending_dialog');
-                    if (!raw) return;
+                    const dialogId = pickValue(searchParams, hashParams, 'dialogId', localPayload && localPayload.dialogId);
+                    const checklistKey = pickValue(searchParams, hashParams, 'checklistKey', localPayload && localPayload.checklistKey) || 'id';
+                    const ts = Number((localPayload && localPayload.ts) || 0);
+                    const age = ts ? (Date.now() - ts) : 0;
 
-                    const payload = JSON.parse(raw);
-                    if (!payload || !payload.dialogId) return;
+                    if (dialogId) {
+                        try {
+                            localStorage.setItem('checklist_pending_dialog', JSON.stringify({
+                                dialogId: dialogId,
+                                checklistKey: checklistKey,
+                                ts: Date.now()
+                            }));
+                        } catch (e) {
+                            console.log('pending dialog save skipped:', e);
+                        }
 
-                    const age = Date.now() - (payload.ts || 0);
-                    localStorage.removeItem('checklist_pending_dialog');
-
-                    if (age < 60000) {
-                        const checklistKey = (payload.checklistKey || 'id').trim() || 'id';
                         window.location.replace(
-                            '/popup?dialogId=' + encodeURIComponent(payload.dialogId) +
+                            '/popup?dialogId=' + encodeURIComponent(dialogId) +
                             '&checklistKey=' + encodeURIComponent(checklistKey)
                         );
                         return;
                     }
+
+                    if (localPayload && localPayload.dialogId && age < 60000) {
+                        window.location.replace(
+                            '/popup?dialogId=' + encodeURIComponent(localPayload.dialogId) +
+                            '&checklistKey=' + encodeURIComponent((localPayload.checklistKey || 'id').trim() || 'id')
+                        );
+                        return;
+                    }
                 } catch (e) {
-                    console.log('pending dialog redirect skipped:', e);
+                    console.log('launcher redirect skipped:', e);
                 }
             })();
         </script>
     </head>
-    <body style="font-family:Arial,sans-serif;padding:40px">
-        <h1>Чек-лист ИД</h1>
-        <p>Открывайте приложение из Bitrix24.</p>
+    <body style="margin:0;font-family:Arial,sans-serif;background:#f8fafc;color:#344054;display:flex;align-items:center;justify-content:center;min-height:100vh;">
+        <div style="padding:24px 28px;border:1px solid #e5e7eb;border-radius:14px;background:#fff;box-shadow:0 12px 30px rgba(15,23,42,0.08);font-size:14px;">
+            Открываем нужный чек-лист...
+        </div>
     </body>
     </html>
     """
-
 
 def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
     initial_dialog_id_json = json.dumps(initial_dialog_id or "", ensure_ascii=False)
@@ -2164,6 +2414,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
             };
             let lockHeartbeatTimer = null;
             let suppressAutoCloseSave = false;
+            let activeInlineEditor = { role: '', itemId: '' };
 
             const headerRightEl = document.querySelector('.header-right');
             if (headerRightEl && !document.getElementById('lockNotice')) {
@@ -2301,6 +2552,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                 sessionChanges = deepClone(cachedState.changes || []);
                 sessionDirty = !!cachedState.dirty;
                 closeSummarySent = false;
+                activeInlineEditor = { role: '', itemId: '' };
                 currentChecklistLock.checklistKey = currentChecklistKey;
                 updateLockNotice();
             };
@@ -2344,42 +2596,47 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                 };
             }
 
+            function buildCloseBatchPayload(closeEvent) {
+                const dirtyKeys = getDirtyChecklistKeys();
+                return {
+                    dialogId,
+                    editor: currentEditor,
+                    closeEvent,
+                    ts: new Date().toISOString(),
+                    sessions: dirtyKeys.map(key => buildClosePayloadForKey(key, closeEvent))
+                };
+            }
+
             async function persistDirtyChecklists(closeEvent, useBeacon = false) {
                 const dirtyKeys = getDirtyChecklistKeys();
                 if (!dirtyKeys.length) {
                     return 0;
                 }
 
+                const payload = buildCloseBatchPayload(closeEvent);
+
                 if (useBeacon && navigator.sendBeacon) {
-                    dirtyKeys.forEach(key => {
-                        const payload = buildClosePayloadForKey(key, closeEvent);
-                        const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' });
-                        navigator.sendBeacon(APP_BASE_URL + '/api/checklist/close-session', blob);
-                    });
+                    const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' });
+                    navigator.sendBeacon(APP_BASE_URL + '/api/checklist/close-session', blob);
                     dirtyKeys.forEach(clearChecklistSessionState);
                     return dirtyKeys.length;
                 }
 
-                let savedCount = 0;
-                for (const key of dirtyKeys) {
-                    const payload = buildClosePayloadForKey(key, closeEvent);
-                    const response = await fetch('/api/checklist/close-session', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify(payload),
-                        keepalive: true
-                    });
-                    if (!response.ok) {
-                        const result = await response.json().catch(() => ({}));
-                        throw new Error(result.error || 'close-session failed');
-                    }
-                    clearChecklistSessionState(key);
-                    savedCount += 1;
+                const response = await fetch('/api/checklist/close-session', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(payload),
+                    keepalive: true
+                });
+                if (!response.ok) {
+                    const result = await response.json().catch(() => ({}));
+                    throw new Error(result.error || 'close-session failed');
                 }
 
-                return savedCount;
+                dirtyKeys.forEach(clearChecklistSessionState);
+                return dirtyKeys.length;
             }
 
             function stopLockHeartbeat() {
@@ -2700,12 +2957,90 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                 return `<div class="group-block"><div class="group-title">${esc(group.title)}</div>${rows}${addBlock}</div>`;
             };
 
+            function getInlineEditorDomId(role, itemId) {
+                return 'inline_' + String(role || '').replace(/[^a-z0-9_-]/ig, '_') + '_' + String(itemId || '').replace(/[^a-z0-9_-]/ig, '_');
+            }
+
+            function isInlineEditorActive(role, itemId) {
+                return activeInlineEditor.role === role && String(activeInlineEditor.itemId || '') === String(itemId || '');
+            }
+
+            function startInlineEditor(role, itemId) {
+                if (!isEditingAllowed()) {
+                    return;
+                }
+                activeInlineEditor = {
+                    role,
+                    itemId: String(itemId || '')
+                };
+                renderAll();
+            }
+
+            function stopInlineEditor() {
+                activeInlineEditor = { role: '', itemId: '' };
+            }
+
+            function focusActiveInlineEditor() {
+                if (!activeInlineEditor.role || !activeInlineEditor.itemId) {
+                    return;
+                }
+                const el = document.getElementById(getInlineEditorDomId(activeInlineEditor.role, activeInlineEditor.itemId));
+                if (!el) {
+                    return;
+                }
+                if (typeof el.focus === 'function') {
+                    el.focus();
+                }
+                if (typeof el.select === 'function') {
+                    el.select();
+                }
+                if (el.tagName === 'TEXTAREA') {
+                    el.dataset.initialValue = String(el.value || '');
+                    el.dataset.baseHeight = '32';
+                    autoGrowTextarea(el);
+                }
+            }
+
+            function buildConceptInlineCell(role, item, value, placeholder, extraStyle = '') {
+                const itemId = String(item.id || '');
+                const isActive = isInlineEditorActive(role, itemId) && isEditingAllowed();
+                const displayValue = String(value || '').trim();
+                const content = displayValue || String(placeholder || '').trim() || '';
+                const displayClass = 'concept-inline-display' + (displayValue ? '' : ' empty') + (isEditingAllowed() ? '' : ' disabled');
+                const styleAttr = extraStyle ? ` style="${extraStyle}"` : '';
+
+                if (isActive) {
+                    return `
+                        <textarea
+                            id="${esc(getInlineEditorDomId(role, itemId))}"
+                            class="concept-inline-input"
+                            data-role="${esc(role + '-edit')}"
+                            data-item-id="${esc(itemId)}"
+                            data-initial-value="${esc(value || '')}"
+                            placeholder="${esc(placeholder || '')}"
+                            ${disabledAttr()}
+                        >${esc(value || '')}</textarea>
+                    `;
+                }
+
+                return `
+                    <div
+                        class="${displayClass}"
+                        data-role="${esc(role + '-display')}"
+                        data-item-id="${esc(itemId)}"
+                        tabindex="${isEditingAllowed() ? '0' : '-1'}"
+                        ${styleAttr}
+                    >${esc(content) || '&nbsp;'}</div>
+                `;
+            }
+
             function buildConceptNameCell(item) {
-                return `<textarea class="concept-extra-textarea" data-role="concept-name" data-item-id="${esc(item.id)}" placeholder="Название пункта" ${disabledAttr()} style="${item.status === 'Не требуется' ? 'text-decoration:line-through;color:#98a2b3;' : ''}">${esc(item.name || '')}</textarea>`;
+                const textStyle = item.status === 'Не требуется' ? 'text-decoration:line-through;color:#98a2b3;' : '';
+                return buildConceptInlineCell('concept-name', item, item.name || '', 'Название пункта', textStyle);
             }
 
             function buildConceptSourceCell(item) {
-                return `<textarea class="concept-extra-textarea" data-role="concept-source" data-item-id="${esc(item.id)}" placeholder="Нормативы" ${disabledAttr()}>${esc(item.source || '')}</textarea>`;
+                return buildConceptInlineCell('concept-source', item, item.source || '', 'Нормативы');
             }
 
             buildConceptStatusCell = function (item) {
@@ -2920,13 +3255,14 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
             renderAll = function () {
                 previousRenderAll();
                 updateLockNotice();
+                focusActiveInlineEditor();
             };
 
             const previousBindEventsEnhanced = bindEvents;
             bindEvents = function () {
                 previousBindEventsEnhanced();
 
-                document.querySelectorAll('[data-role="concept-name"], [data-role="concept-source"], [data-role="concept-extra"], [data-role="opr-extra"]').forEach(el => {
+                document.querySelectorAll('[data-role="concept-extra"], [data-role="opr-extra"], [data-role="concept-name-edit"], [data-role="concept-source-edit"]').forEach(el => {
                     el.dataset.initialValue = String(el.value || '');
                     el.dataset.baseHeight = '32';
                     el.style.height = '32px';
@@ -2935,32 +3271,88 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                     });
                 });
 
-                document.querySelectorAll('[data-role="concept-name"]').forEach(el => {
-                    const handler = function () {
+                document.querySelectorAll('[data-role="concept-name-display"]').forEach(el => {
+                    const openEditor = function () {
+                        startInlineEditor('concept-name', this.dataset.itemId);
+                    };
+                    el.addEventListener('click', openEditor);
+                    el.addEventListener('keydown', function (e) {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            openEditor.call(this);
+                        }
+                    });
+                });
+
+                document.querySelectorAll('[data-role="concept-source-display"]').forEach(el => {
+                    const openEditor = function () {
+                        startInlineEditor('concept-source', this.dataset.itemId);
+                    };
+                    el.addEventListener('click', openEditor);
+                    el.addEventListener('keydown', function (e) {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            openEditor.call(this);
+                        }
+                    });
+                });
+
+                document.querySelectorAll('[data-role="concept-name-edit"]').forEach(el => {
+                    const commit = function () {
                         const item = items.find(x => x.id === this.dataset.itemId);
                         if (!item) return;
                         const oldValue = item.name || '';
                         const newValue = String(this.value || '').trim();
                         item.name = newValue;
                         pushSessionChange(item.id, newValue || oldValue || item.id, 'name', oldValue, newValue);
+                        stopInlineEditor();
                         renderAll();
                     };
-                    el.addEventListener('change', handler);
-                    el.addEventListener('blur', handler);
+                    const cancel = function () {
+                        stopInlineEditor();
+                        renderAll();
+                    };
+                    el.addEventListener('blur', commit);
+                    el.addEventListener('keydown', function (e) {
+                        if (e.key === 'Escape') {
+                            e.preventDefault();
+                            cancel();
+                            return;
+                        }
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                            e.preventDefault();
+                            commit.call(this);
+                        }
+                    });
                 });
 
-                document.querySelectorAll('[data-role="concept-source"]').forEach(el => {
-                    const handler = function () {
+                document.querySelectorAll('[data-role="concept-source-edit"]').forEach(el => {
+                    const commit = function () {
                         const item = items.find(x => x.id === this.dataset.itemId);
                         if (!item) return;
                         const oldValue = item.source || '';
                         const newValue = String(this.value || '').trim();
                         item.source = newValue;
-                        pushSessionChange(item.id, item.name, 'source', oldValue, newValue);
+                        pushSessionChange(item.id, item.name || item.id, 'source', oldValue, newValue);
+                        stopInlineEditor();
                         renderAll();
                     };
-                    el.addEventListener('change', handler);
-                    el.addEventListener('blur', handler);
+                    const cancel = function () {
+                        stopInlineEditor();
+                        renderAll();
+                    };
+                    el.addEventListener('blur', commit);
+                    el.addEventListener('keydown', function (e) {
+                        if (e.key === 'Escape') {
+                            e.preventDefault();
+                            cancel();
+                            return;
+                        }
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                            e.preventDefault();
+                            commit.call(this);
+                        }
+                    });
                 });
 
                 document.querySelectorAll('[data-role="opr-status"]').forEach(el => {
@@ -3084,6 +3476,11 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
             .item-name {{ font-size:13px; font-weight:700; color:#1f2328; line-height:1.15; min-width:0; word-break:break-word; max-width:165px; }}
             .status-select,.date-input {{ width:100%; border:1px solid #d0d7de; border-radius:8px; padding:6px 8px; font-size:12px; background:#fff; }}
             .concept-extra-textarea {{ width:100%; height:32px; min-height:32px; border:1px solid #d0d7de; border-radius:8px; padding:6px 8px; font-size:12px; background:#fff; resize:vertical; overflow:hidden; line-height:1.35; }}
+            .concept-inline-display {{ min-height:32px; padding:6px 8px; border:1px solid transparent; border-radius:8px; font-size:12px; line-height:1.35; white-space:pre-wrap; word-break:break-word; cursor:text; }}
+            .concept-inline-display:hover {{ background:#f8fafc; border-color:#e5e7eb; }}
+            .concept-inline-display.empty {{ color:#98a2b3; }}
+            .concept-inline-display.disabled {{ cursor:default; background:#f8fafc; border-color:transparent; }}
+            .concept-inline-input {{ width:100%; min-height:32px; height:32px; border:1px solid #d0d7de; border-radius:8px; padding:6px 8px; font-size:12px; background:#fff; resize:vertical; overflow:hidden; line-height:1.35; }}
             .doc-btn,.upload-btn,.add-item-btn {{ display:inline-block; width:100%; text-align:center; padding:6px 8px; border:1px solid #d0d7de; border-radius:8px; background:#f8fafc; color:#1f2328; font-size:12px; text-decoration:none; cursor:pointer; }}
             .doc-btn:hover,.upload-btn:hover,.side-link:hover,.add-item-btn:hover {{ background:#f1f5f9; }}
             .add-item-row {{ padding:9px 12px 10px; min-height:52px; border-top:1px solid #edf0f2; background:#fcfcfd; display:flex; gap:8px; align-items:center; justify-content:flex-start; }}
@@ -3413,47 +3810,13 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
             }}
 
             async function flushCurrentChecklistSummary(reason = 'checklist_switch') {{
-                if (!sessionDirty || !sessionChanges.length) {{
-                    sessionChanges = [];
-                    sessionDirty = false;
-                    closeSummarySent = false;
-                    return;
-                }}
-
-                const payload = {{
-                    dialogId,
+                syncChecklistCache();
+                debugLog('close_summary_switch_skipped', {{
                     checklistKey: currentChecklistKey,
-                    editor: currentEditor,
-                    data: buildChecklistSnapshot(),
-                    changes: sessionChanges,
-                    closeEvent: reason,
-                    ts: new Date().toISOString()
-                }};
-
-                try {{
-                    await fetch('/api/checklist/close-session', {{
-                        method: 'POST',
-                        headers: {{
-                            'Content-Type': 'application/json'
-                        }},
-                        body: JSON.stringify(payload),
-                        keepalive: true
-                    }});
-                    debugLog('close_summary_switch_sent', {{
-                        checklistKey: currentChecklistKey,
-                        changesCount: sessionChanges.length
-                    }});
-                }} catch (e) {{
-                    console.log('flushCurrentChecklistSummary error:', e);
-                    debugLog('close_summary_switch_error', {{
-                        checklistKey: currentChecklistKey,
-                        message: e && e.message ? e.message : String(e)
-                    }});
-                }}
-
-                sessionChanges = [];
-                sessionDirty = false;
-                closeSummarySent = false;
+                    reason,
+                    changesCount: sessionChanges.length,
+                    dirty: !!sessionDirty
+                }});
             }}
 
             async function loadChecklistByKey(checklistKey) {{
@@ -5132,9 +5495,87 @@ async def api_checklist_close_session(request: Request):
     write_debug_log("close_session_received", payload)
 
     dialog_id = normalize_dialog_id(payload.get("dialogId"))
+    editor = payload.get("editor") or {}
+    raw_sessions = payload.get("sessions") or []
+
+    if raw_sessions:
+        sessions = []
+        for raw_session in raw_sessions:
+            checklist_key = normalize_checklist_key(raw_session.get("checklistKey"))
+            session_dialog_id = normalize_dialog_id(raw_session.get("dialogId") or dialog_id)
+            changes = raw_session.get("changes") or []
+            session_data = raw_session.get("data") or {}
+
+            if not session_dialog_id:
+                continue
+
+            if changes and session_data:
+                session_data = dict(session_data)
+                session_data["checklistKey"] = checklist_key
+                session_data["resolvedDialogId"] = session_dialog_id
+                data = normalize_checklist_data(session_data, checklist_key)
+                data["resolvedDialogId"] = session_dialog_id
+                save_checklist(session_dialog_id, data, checklist_key)
+            else:
+                data = get_checklist(session_dialog_id, checklist_key)
+
+            sessions.append({
+                "dialogId": session_dialog_id,
+                "checklistKey": checklist_key,
+                "changes": changes,
+                "data": data,
+            })
+
+        if not sessions:
+            write_debug_log("close_session_skipped", {
+                "dialogId": dialog_id,
+                "reason": "no sessions"
+            })
+            return JSONResponse({"ok": True, "skipped": True, "reason": "no sessions"})
+
+        visible_sessions = [session for session in sessions if build_recent_changes_sections(session["changes"], session["checklistKey"])]
+        if not visible_sessions:
+            write_debug_log("close_session_message_skipped", {
+                "dialogId": dialog_id or sessions[0]["dialogId"],
+                "reason": "no visible message changes",
+                "sessions": [
+                    {
+                        "checklistKey": session["checklistKey"],
+                        "changesCount": len(session["changes"]),
+                    }
+                    for session in sessions
+                ]
+            })
+            return JSONResponse({
+                "ok": True,
+                "dialogId": dialog_id or sessions[0]["dialogId"],
+                "saved": True,
+                "messageSkipped": True,
+            })
+
+        message = build_multi_checklist_chat_message(visible_sessions, editor)
+        result = bitrix_webhook_call("im.message.add", {
+            "DIALOG_ID": dialog_id or sessions[0]["dialogId"],
+            "MESSAGE": message,
+        })
+
+        write_debug_log("close_session_im_message_add_result", {
+            "dialogId": dialog_id or sessions[0]["dialogId"],
+            "changesCount": sum(len(session["changes"]) for session in visible_sessions),
+            "editor": editor,
+            "result": result,
+            "checklistKeys": [session["checklistKey"] for session in visible_sessions],
+        })
+
+        return JSONResponse({
+            "ok": "error" not in result,
+            "dialogId": dialog_id or sessions[0]["dialogId"],
+            "result": result,
+            "checklistKeys": [session["checklistKey"] for session in sessions],
+        })
+
     checklist_key = normalize_checklist_key(payload.get("checklistKey"))
     changes = payload.get("changes") or []
-    editor = payload.get("editor") or {}
     session_data = payload.get("data") or {}
 
     if not dialog_id:
@@ -5162,11 +5603,7 @@ async def api_checklist_close_session(request: Request):
     else:
         data = get_checklist(dialog_id, checklist_key)
 
-    visible_fields = {"status", "plan", "document", "add-item", "extraInfo"}
-    if checklist_key == "opr":
-        visible_fields = {"status", "plannedDate"}
-
-    if not any(str(change.get("field") or "").strip() in visible_fields for change in changes):
+    if not build_recent_changes_sections(changes, checklist_key):
         write_debug_log("close_session_message_skipped", {
             "dialogId": dialog_id,
             "checklistKey": checklist_key,
@@ -5182,7 +5619,6 @@ async def api_checklist_close_session(request: Request):
         })
 
     message = build_checklist_chat_message(data, changes, editor)
-
     result = bitrix_webhook_call("im.message.add", {
         "DIALOG_ID": dialog_id,
         "MESSAGE": message,
