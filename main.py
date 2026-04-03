@@ -1744,118 +1744,222 @@ def get_checklist(dialog_id: str, checklist_key: str = "id"):
     return data
 
 
-def app_home_html():
-    return """
+def app_home_html(
+    initial_dialog_id: str = "",
+    initial_checklist_key: str = "id",
+    initial_context_text: str = ""
+):
+    initial_dialog_id_json = json.dumps(
+        normalize_dialog_id(initial_dialog_id or ""),
+        ensure_ascii=False
+    )
+    initial_checklist_key_json = json.dumps(
+        normalize_checklist_key(initial_checklist_key or "id"),
+        ensure_ascii=False
+    )
+    initial_context_text_json = json.dumps(initial_context_text or "", ensure_ascii=False)
+
+    return f"""
     <html>
     <head>
         <meta charset="utf-8">
         <title>Чек-листы проекта</title>
+        <script src="https://api.bitrix24.com/api/v1/"></script>
         <script>
-            (function () {
-                function detectAppBasePath() {
+            (function () {{
+                const initialDialogId = {initial_dialog_id_json};
+                const initialChecklistKey = {initial_checklist_key_json};
+                const initialContextText = {initial_context_text_json};
+
+                function detectAppBasePath() {{
                     const path = String(window.location.pathname || '/').replace(/\/+$/, '');
                     const suffixes = ['/launch', '/popup', '/textarea', '/install', '/health', '/debug/logs', '/admin', '/admin/upload'];
 
-                    for (const suffix of suffixes) {
+                    for (const suffix of suffixes) {{
                         if (path === suffix) return '';
-                        if (path.endsWith(suffix)) {
+                        if (path.endsWith(suffix)) {{
                             return path.slice(0, -suffix.length) || '';
-                        }
-                    }
+                        }}
+                    }}
 
                     return path === '/' ? '' : path;
-                }
+                }}
 
                 const APP_BASE_PATH = detectAppBasePath();
 
-                function appPath(path) {
+                function appPath(path) {{
                     return (APP_BASE_PATH || '') + '/' + String(path || '').replace(/^\/+/, '');
-                }
+                }}
 
-                function pickValue(searchParams, hashParams, key, fallback) {
+                function pickValue(searchParams, hashParams, key, fallback) {{
                     return (searchParams.get(key) || hashParams.get(key) || fallback || '').trim();
-                }
+                }}
 
-                function redirectToPopup(dialogId, checklistKey) {
+                function normalizeChecklistKey(value) {{
+                    const v = String(value || '').trim().toLowerCase();
+                    if (v === 'concept' || v === 'opr' || v === 'id') return v;
+                    return 'id';
+                }}
+
+                function extractFromBx24() {{
+                    let dialogId = '';
+                    let checklistKey = '';
+
+                    try {{
+                        if (!(window.BX24 && typeof window.BX24.placement === 'object' && typeof window.BX24.placement.info === 'function')) {{
+                            return {{ dialogId: '', checklistKey: '' }};
+                        }}
+
+                        const info = window.BX24.placement.info() || {{}};
+                        const options = info.options || {{}};
+
+                        const dialogCandidates = [
+                            options.dialogId,
+                            options.DIALOG_ID,
+                            options.dialog_id,
+                            info.dialogId,
+                            info.DIALOG_ID,
+                            info.dialog_id,
+                            options.chatId,
+                            options.CHAT_ID,
+                            options.chat_id,
+                            info.chatId,
+                            info.CHAT_ID,
+                            info.chat_id
+                        ];
+
+                        for (let i = 0; i < dialogCandidates.length; i++) {{
+                            const candidate = String(dialogCandidates[i] || '').trim();
+                            if (candidate) {{
+                                dialogId = candidate;
+                                break;
+                            }}
+                        }}
+
+                        const checklistCandidates = [
+                            options.checklistKey,
+                            options.CHECKLIST_KEY,
+                            options.checklist_key,
+                            info.checklistKey,
+                            info.CHECKLIST_KEY,
+                            info.checklist_key
+                        ];
+
+                        for (let i = 0; i < checklistCandidates.length; i++) {{
+                            const candidate = String(checklistCandidates[i] || '').trim();
+                            if (candidate) {{
+                                checklistKey = normalizeChecklistKey(candidate);
+                                break;
+                            }}
+                        }}
+
+                        try {{
+                            console.log('app_home placement.info =', info);
+                        }} catch (e) {{}}
+                    }} catch (e) {{
+                        console.log('app_home extractFromBx24 error:', e);
+                    }}
+
+                    return {{
+                        dialogId: dialogId,
+                        checklistKey: checklistKey || 'id'
+                    }};
+                }}
+
+                function rememberAndRedirect(dialogId, checklistKey) {{
+                    if (!dialogId) return;
+
+                    try {{
+                        localStorage.setItem('checklist_pending_dialog', JSON.stringify({{
+                            dialogId: dialogId,
+                            checklistKey: checklistKey || 'id',
+                            ts: Date.now()
+                        }}));
+                    }} catch (e) {{
+                        console.log('pending dialog save skipped:', e);
+                    }}
+
                     const popupUrl =
                         appPath('popup') +
                         '?dialogId=' + encodeURIComponent(dialogId) +
                         '&checklistKey=' + encodeURIComponent(checklistKey || 'id');
 
-                    const go = function () {
-                        window.location.replace(popupUrl);
-                    };
+                    window.location.replace(popupUrl);
+                }}
 
-                    try {
-                        if (window.BX24 && typeof window.BX24.init === 'function') {
-                            window.BX24.init(function () {
-                                try {
-                                    if (typeof window.BX24.resizeWindow === 'function') {
-                                        window.BX24.resizeWindow(1180, 680);
-                                    }
-                                    if (typeof window.BX24.fitWindow === 'function') {
-                                        window.BX24.fitWindow();
-                                    }
-                                } catch (e) {
-                                    console.log('bridge resize skipped:', e);
-                                }
-                                go();
-                            });
-                            return;
-                        }
-                    } catch (e) {
-                        console.log('bridge BX24 init skipped:', e);
-                    }
+                try {{
+                    if (initialContextText) {{
+                        console.log('HOME initial context:', initialContextText);
+                    }}
 
-                    go();
-                }
-
-                try {
                     const searchParams = new URLSearchParams(window.location.search || '');
                     const hashRaw = String(window.location.hash || '').replace(/^#/, '');
                     const hashParams = new URLSearchParams(hashRaw);
+
                     const raw = localStorage.getItem('checklist_pending_dialog');
                     let localPayload = null;
 
-                    if (raw) {
-                        try {
+                    if (raw) {{
+                        try {{
                             localPayload = JSON.parse(raw);
-                        } catch (e) {
+                        }} catch (e) {{
                             console.log('pending dialog parse skipped:', e);
-                        }
-                    }
+                        }}
+                    }}
 
-                    const dialogId = pickValue(searchParams, hashParams, 'dialogId', localPayload && localPayload.dialogId);
-                    const checklistKey = pickValue(searchParams, hashParams, 'checklistKey', localPayload && localPayload.checklistKey) || 'id';
+                    const dialogId = pickValue(
+                        searchParams,
+                        hashParams,
+                        'dialogId',
+                        initialDialogId || (localPayload && localPayload.dialogId)
+                    );
+
+                    const checklistKey = normalizeChecklistKey(
+                        pickValue(
+                            searchParams,
+                            hashParams,
+                            'checklistKey',
+                            initialChecklistKey || (localPayload && localPayload.checklistKey)
+                        ) || 'id'
+                    );
+
                     const ts = Number((localPayload && localPayload.ts) || 0);
                     const age = ts ? (Date.now() - ts) : 0;
 
-                    if (dialogId) {
-                        try {
-                            localStorage.setItem('checklist_pending_dialog', JSON.stringify({
-                                dialogId: dialogId,
-                                checklistKey: checklistKey,
-                                ts: Date.now()
-                            }));
-                        } catch (e) {
-                            console.log('pending dialog save skipped:', e);
-                        }
-
-                        redirectToPopup(dialogId, checklistKey);
+                    if (dialogId) {{
+                        rememberAndRedirect(dialogId, checklistKey);
                         return;
-                    }
+                    }}
 
-                    if (localPayload && localPayload.dialogId && age < 60000) {
-                        redirectToPopup(
+                    if (window.BX24 && typeof window.BX24.init === 'function') {{
+                        window.BX24.init(function () {{
+                            const bxData = extractFromBx24();
+                            if (bxData.dialogId) {{
+                                rememberAndRedirect(bxData.dialogId, bxData.checklistKey || checklistKey || 'id');
+                                return;
+                            }}
+
+                            if (localPayload && localPayload.dialogId && age < 60000) {{
+                                rememberAndRedirect(
+                                    localPayload.dialogId,
+                                    normalizeChecklistKey(localPayload.checklistKey || 'id')
+                                );
+                            }}
+                        }});
+                        return;
+                    }}
+
+                    if (localPayload && localPayload.dialogId && age < 60000) {{
+                        rememberAndRedirect(
                             localPayload.dialogId,
-                            (localPayload.checklistKey || 'id').trim() || 'id'
+                            normalizeChecklistKey(localPayload.checklistKey || 'id')
                         );
                         return;
-                    }
-                } catch (e) {
+                    }}
+                }} catch (e) {{
                     console.log('launcher redirect skipped:', e);
-                }
-            })();
+                }}
+            }})();
         </script>
     </head>
     <body style="margin:0;font-family:Arial,sans-serif;background:#f8fafc;color:#344054;display:flex;align-items:center;justify-content:center;min-height:100vh;">
@@ -1998,7 +2102,11 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
 
                 try {{
                     if (window.BX24 && typeof window.BX24.openApplication === 'function') {{
-                        BX24.openApplication();
+                        BX24.openApplication({{
+                            dialogId: dialogId,
+                            checklistKey: checklistKey,
+                            source: 'textarea'
+                        }});
                         autoOpened = true;
                         setMeta('Открываем popup для ' + dialogId);
                         return;
@@ -2131,7 +2239,75 @@ def home_get(dialogId: str = "", checklistKey: str = "id", mode: str = ""):
 
 @app.post("/", response_class=HTMLResponse)
 async def home_post(request: Request):
-    return app_home_html()
+    form = dict(await request.form())
+
+    def extract_checklist_key_from_form(form_data: dict) -> str:
+        def pick(value) -> str:
+            raw = str(value or "").strip()
+            return normalize_checklist_key(raw) if raw else ""
+
+        direct_candidates = [
+            form_data.get("checklistKey"),
+            form_data.get("CHECKLIST_KEY"),
+            form_data.get("checklist_key"),
+        ]
+
+        for value in direct_candidates:
+            found = pick(value)
+            if found:
+                return found
+
+        def walk(obj) -> str:
+            if isinstance(obj, dict):
+                preferred_keys = [
+                    "checklistKey", "CHECKLIST_KEY", "checklist_key"
+                ]
+                for key in preferred_keys:
+                    found = pick(obj.get(key))
+                    if found:
+                        return found
+
+                for value in obj.values():
+                    found = walk(value)
+                    if found:
+                        return found
+
+            elif isinstance(obj, list):
+                for value in obj:
+                    found = walk(value)
+                    if found:
+                        return found
+
+            return ""
+
+        json_candidates = [
+            form_data.get("PLACEMENT_OPTIONS"),
+            form_data.get("placementOptions"),
+            form_data.get("options"),
+        ]
+
+        for raw in json_candidates:
+            if not raw:
+                continue
+            try:
+                data = json.loads(raw) if isinstance(raw, str) else raw
+                found = walk(data)
+                if found:
+                    return found
+            except Exception:
+                pass
+
+        return "id"
+
+    dialog_id = extract_dialog_id_from_form(form)
+    checklist_key = extract_checklist_key_from_form(form)
+    raw_context = json.dumps(form, ensure_ascii=False, indent=2)
+
+    print("HOME POST FORM:", raw_context)
+    print("HOME EXTRACTED DIALOG ID:", dialog_id)
+    print("HOME EXTRACTED CHECKLIST KEY:", checklist_key)
+
+    return app_home_html(dialog_id, checklist_key, raw_context)
 
 @app.get("/launch", response_class=HTMLResponse)
 def launch_get(dialogId: str = "", checklistKey: str = "id"):
