@@ -25,7 +25,7 @@ DB_DIR.mkdir(parents=True, exist_ok=True)
 
 DB_PATH = str(DB_DIR / "app.db")
 
-APP_PORTAL_PATH = (os.getenv("APP_PORTAL_PATH", "/marketplace/app/84/") or "/marketplace/app/84/").strip()
+APP_PORTAL_PATH = (os.getenv("APP_PORTAL_PATH", "/marketplace/app/80/") or "/marketplace/app/80/").strip()
 APP_BASE_PATH = (os.getenv("APP_BASE_PATH", "") or "").strip()
 PUBLIC_APP_BASE_URL = (os.getenv("PUBLIC_APP_BASE_URL", "") or "").strip()
 TECH_USER_ID = int(os.getenv("TECH_USER_ID", "138"))
@@ -2166,6 +2166,19 @@ async def install_post(request: Request):
     access_token = form.get("AUTH_ID") or form.get("access_token") or ""
     domain = normalize_domain(form.get("DOMAIN") or form.get("domain") or "")
     base_url = get_public_app_base_url(request)
+
+    app_sid = form.get("APP_SID") or ""
+    if app_sid and domain and not access_token:
+        try:
+            auth_response = requests.get(
+                f"https://{domain}/rest/app.auth.json",
+                params={"app_sid": app_sid},
+                timeout=10
+            )
+            auth_data = auth_response.json()
+            access_token = auth_data.get("result", {}).get("access_token", "")
+        except Exception:
+            pass
 
     bind_result = {
         "im_textarea": {"skipped": True}
