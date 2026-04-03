@@ -25,8 +25,10 @@ DB_DIR.mkdir(parents=True, exist_ok=True)
 
 DB_PATH = str(DB_DIR / "app.db")
 
-APP_PORTAL_PATH = "/marketplace/app/84/"
-TECH_USER_ID = 138
+APP_PORTAL_PATH = (os.getenv("APP_PORTAL_PATH", "/marketplace/app/84/") or "/marketplace/app/84/").strip()
+APP_BASE_PATH = (os.getenv("APP_BASE_PATH", "") or "").strip()
+PUBLIC_APP_BASE_URL = (os.getenv("PUBLIC_APP_BASE_URL", "") or "").strip()
+TECH_USER_ID = int(os.getenv("TECH_USER_ID", "138"))
 BITRIX_TECH_WEBHOOK_URL = os.getenv("BITRIX_TECH_WEBHOOK_URL", "").strip()
 
 UPLOAD_ROOT = BASE_DIR / "uploads"
@@ -878,6 +880,42 @@ def normalize_domain(value: str) -> str:
     value = value.replace("https://", "").replace("http://", "").strip("/")
     return value
 
+def normalize_base_path(value: str) -> str:
+    value = str(value or "").strip()
+    if not value or value == "/":
+        return ""
+    if not value.startswith("/"):
+        value = "/" + value
+    return value.rstrip("/")
+
+
+def get_public_app_base_path(request: Request) -> str:
+    if APP_BASE_PATH:
+        return normalize_base_path(APP_BASE_PATH)
+
+    forwarded_prefix = request.headers.get("x-forwarded-prefix", "").split(",")[0].strip()
+    if forwarded_prefix:
+        return normalize_base_path(forwarded_prefix)
+
+    root_path = str(request.scope.get("root_path") or "").strip()
+    return normalize_base_path(root_path)
+
+
+def get_public_origin(request: Request) -> str:
+    if PUBLIC_APP_BASE_URL:
+        parsed = urlparse(PUBLIC_APP_BASE_URL)
+        if parsed.scheme and parsed.netloc:
+            return f"{parsed.scheme}://{parsed.netloc}"
+
+    proto = (request.headers.get("x-forwarded-proto") or request.url.scheme or "https").split(",")[0].strip()
+    host = (request.headers.get("x-forwarded-host") or request.headers.get("host") or request.url.netloc).split(",")[0].strip()
+    return f"{proto}://{host}"
+
+
+def get_public_app_base_url(request: Request) -> str:
+    if PUBLIC_APP_BASE_URL:
+        return PUBLIC_APP_BASE_URL.rstrip("/")
+    return f"{get_public_origin(request)}{get_public_app_base_path(request)}"
 
 def bitrix_rest_call(domain: str, method: str, access_token: str, payload: dict):
     url = f"https://{domain}/rest/{method}.json"
@@ -1058,405 +1096,6 @@ def release_checklist_lock(dialog_id: str, checklist_key: str, lock_id: str = ""
             "dialogId": dialog_id,
             "checklistKey": checklist_key,
         }
-
-
-def status_emoji(status: str) -> str:
-    status = display_status_text(status)
-
-    if status == "Есть" or status == "Да":
-        return "🟢"
-    if status == "Нет":
-        return "🔴"
-    if status == "Не требуется":
-        return "🚫"
-    return "⚪️"
-
-
-def display_status_text(status: str) -> str:
-    status = clean_cell_value(status)
-    normalized = normalize_status(status)
-    return normalized or status
-
-
-def format_plan_suffix(plan: str) -> str:
-    plan = str(plan or "").strip()
-    if not plan or plan == "—":
-        return ""
-    return f" | До {plan}"
-
-
-def split_changes(changes: list) -> tuple[list, list, list, list, list]:
-    status_changes = []
-    date_changes = []
-    document_changes = []
-    add_item_changes = []
-    extra_info_changes = []
-
-    for change in changes or []:
-        field = str(change.get("field") or "").strip()
-
-        if field == "status":
-            status_changes.append(change)
-        elif field in {"plan", "plannedDate"}:
-            date_changes.append(change)
-        elif field == "document":
-            document_changes.append(change)
-        elif field == "add-item":
-            add_item_changes.append(change)
-        elif field == "extraInfo":
-            extra_info_changes.append(change)
-
-    return status_changes, date_changes, document_changes, add_item_changes, extra_info_changes
-
-
-def format_change_arrow(old_value: str, new_value: str) -> str:
-    old_value = str(old_value or "").strip()
-    new_value = str(new_value or "").strip()
-
-    if not old_value or old_value == "—":
-        return f"→ [B]{new_value}[/B]"
-    return f"{old_value} → [B]{new_value}[/B]"
-
-
-def format_status_change_line(change: dict) -> str:
-    item_name = str(change.get("itemName") or "").strip() or "Без названия"
-    new_value = display_status_text(change.get("newValue"))
-    old_value = display_status_text(change.get("oldValue"))
-
-    emoji = status_emoji(new_value)
-    arrow = format_change_arrow(old_value, new_value)
-
-    return f"{emoji}{item_name} / Статус: {arrow}"
-
-
-def format_plan_change_line(change: dict) -> str:
-    item_name = str(change.get("itemName") or "").strip() or "Без названия"
-    old_value = str(change.get("oldValue") or "").strip()
-    new_value = str(change.get("newValue") or "").strip()
-
-    arrow = format_change_arrow(old_value, new_value)
-    return f"📆{item_name} / План: {arrow}"
-
-
-def format_document_change_line(change: dict) -> str:
-    item_name = str(change.get("itemName") or "").strip() or "Без названия"
-    old_value = str(change.get("oldValue") or "").strip() or "—"
-    new_value = str(change.get("newValue") or "").strip() or "—"
-    return f"📎{item_name} / Документ: {old_value} → [B]{new_value}[/B]"
-
-
-def format_add_item_change_line(change: dict) -> str:
-    item_name = str(change.get("itemName") or "").strip() or "Без названия"
-    return f"➕{item_name} / Пункт: → [B]добавлен[/B]"
-
-
-def format_extra_info_change_line(change: dict) -> str:
-    item_name = str(change.get("itemName") or "").strip() or "Без названия"
-    old_value = str(change.get("oldValue") or "").strip() or "—"
-    new_value = str(change.get("newValue") or "").strip() or "—"
-    return f"📝{item_name} / Доп информация: {old_value} → [B]{new_value}[/B]"
-
-
-def collect_item_change_meta(item_id: str, changes: list) -> dict:
-    meta = {
-        "changed": False,
-        "status_changed": False,
-        "plan_changed": False,
-    }
-
-    for change in changes or []:
-        if str(change.get("itemId") or "") != str(item_id):
-            continue
-
-        meta["changed"] = True
-
-        field = str(change.get("field") or "").strip()
-        if field == "status":
-            meta["status_changed"] = True
-        elif field == "plan":
-            meta["plan_changed"] = True
-
-    return meta
-
-
-def build_item_change_flags(item: dict, changes: list) -> str:
-    meta = collect_item_change_meta(str(item.get("id") or ""), changes)
-
-    if not meta["changed"]:
-        return ""
-
-    parts = ["✏️"]
-
-    if meta["status_changed"]:
-        parts.append(status_emoji(item.get("status")))
-
-    if meta["plan_changed"]:
-        parts.append("📆")
-
-    return "".join(parts)
-
-
-def build_checklist_line(item: dict, changes: list) -> str:
-    name = str(item.get("name") or "").strip()
-    status = display_status_text(item.get("status"))
-    plan = str(item.get("plan") or "").strip()
-
-    emoji = status_emoji(status)
-    line = f"{emoji}{name}"
-
-    if status:
-        line += f" — {status}"
-
-    line += format_plan_suffix(plan)
-
-    flags = build_item_change_flags(item, changes)
-    if flags:
-        line += f" {flags}"
-
-    return line
-
-
-def build_recent_changes_text(changes: list, checklist_title: str = "Чек-лист ИД") -> str:
-    status_changes, date_changes, document_changes, add_item_changes, extra_info_changes = split_changes(changes)
-    checklist_title = clean_cell_value(checklist_title) or "Чек-лист ИД"
-
-    lines = [
-        f"[B]✏️ИЗМЕНЕНИЯ В {checklist_title.upper()}[/B]",
-        "",
-    ]
-
-    if status_changes:
-        lines.append("[B]Статусы:[/B]")
-        lines.append("")
-        for change in status_changes:
-            lines.append(format_status_change_line(change))
-        lines.append("")
-
-    if date_changes:
-        lines.append("[B]Даты:[/B]")
-        lines.append("")
-        for change in date_changes:
-            lines.append(format_plan_change_line(change))
-        lines.append("")
-
-    if document_changes:
-        lines.append("[B]Документы:[/B]")
-        lines.append("")
-        for change in document_changes:
-            lines.append(format_document_change_line(change))
-        lines.append("")
-
-    if add_item_changes:
-        lines.append("[B]Пункты:[/B]")
-        lines.append("")
-        for change in add_item_changes:
-            lines.append(format_add_item_change_line(change))
-        lines.append("")
-
-    if extra_info_changes:
-        lines.append("[B]Доп информация:[/B]")
-        lines.append("")
-        for change in extra_info_changes:
-            lines.append(format_extra_info_change_line(change))
-        lines.append("")
-
-    if not status_changes and not date_changes and not document_changes and not add_item_changes and not extra_info_changes:
-        lines.append("Изменений нет")
-        lines.append("")
-
-    return "\n".join(lines).strip()
-
-
-def build_checklist_message_link(dialog_id: str, checklist_key: str) -> str:
-    dialog_id = normalize_dialog_id(dialog_id)
-    checklist_key = normalize_checklist_key(checklist_key)
-
-    if not BITRIX_TECH_WEBHOOK_URL:
-        return ""
-
-    parsed = urlparse(BITRIX_TECH_WEBHOOK_URL)
-    if not parsed.scheme or not parsed.netloc:
-        return ""
-
-    base_url = f"{parsed.scheme}://{parsed.netloc}"
-    app_path = APP_PORTAL_PATH if APP_PORTAL_PATH.endswith("/") else APP_PORTAL_PATH + "/"
-    return (
-        f"{base_url}{app_path}"
-        f"?dialogId={quote(dialog_id)}&checklistKey={quote(checklist_key)}"
-    )
-
-
-def build_editor_text(editor: dict) -> str:
-    editor_name = str(editor.get("name") or "").strip()
-    editor_id = str(editor.get("id") or "").strip()
-
-    if editor_name and editor_id:
-        return f"👤Кем изменено: {editor_name} (ID {editor_id})"
-    if editor_name:
-        return f"👤Кем изменено: {editor_name}"
-    if editor_id:
-        return f"👤Кем изменено: ID {editor_id}"
-    return "👤Кем изменено: неизвестно"
-
-
-def build_checklist_full_text(data: dict, changes: list) -> str:
-    groups = data.get("groups", [])
-    items = data.get("items", [])
-
-    items_by_group = defaultdict(list)
-    for item in items:
-        items_by_group[int(item.get("group") or 0)].append(item)
-
-    lines = []
-    title = (data.get("title") or "Чек-лист ИД").strip()
-    collab_title = (data.get("collabTitle") or "").strip()
-
-    lines.append("_________________________________")
-
-    if collab_title:
-        lines.append(f"[B]{title} — {collab_title}[/B]")
-    else:
-        lines.append(f"[B]{title}[/B]")
-
-    lines.append("")
-
-    for group in groups:
-        group_id = int(group.get("id") or 0)
-        group_title = str(group.get("title") or "").strip()
-        group_items = sorted(
-            items_by_group.get(group_id, []),
-            key=lambda x: (x.get("order", 0), x.get("name", ""))
-        )
-
-        if not group_items:
-            continue
-
-        lines.append(f"[B]{group_title}[/B]")
-
-        for item in group_items:
-            lines.append(build_checklist_line(item, changes))
-
-        lines.append("")
-
-    return "\n".join(lines).strip()
-
-
-def build_checklist_chat_message(data: dict, changes: list, editor: dict) -> str:
-    checklist_title = (data.get("title") or "Чек-лист ИД").strip()
-    parts = [
-        build_recent_changes_text(changes, checklist_title),
-        "",
-        build_editor_text(editor),
-    ]
-    dialog_id = normalize_dialog_id(data.get("resolvedDialogId") or data.get("dialogId") or "")
-    checklist_key = normalize_checklist_key(data.get("checklistKey") or "id")
-    link_url = build_checklist_message_link(dialog_id, checklist_key)
-    if link_url:
-        parts.extend([
-            "",
-            f"[URL={link_url}]Чтобы посмотреть весь чек-лист нажмите на этот текст[/URL]",
-        ])
-    else:
-        parts.extend([
-            "",
-            "Чтобы посмотреть весь чек-лист нажмите на этот текст",
-        ])
-    return "\n".join(parts).strip()
-
-
-def format_plan_change_line(change: dict) -> str:
-    item_name = str(change.get("itemName") or "").strip() or "Без названия"
-    old_value = str(change.get("oldValue") or "").strip()
-    new_value = str(change.get("newValue") or "").strip()
-
-    arrow = format_change_arrow(old_value, new_value)
-    field = str(change.get("field") or "").strip()
-    field_title = "Планируемая дата" if field == "plannedDate" else "План"
-    return f"📆{item_name} / {field_title}: {arrow}"
-
-
-def build_recent_changes_text(
-    changes: list,
-    checklist_title: str = "Чек-лист ИД",
-    checklist_key: str = "id"
-) -> str:
-    status_changes, date_changes, document_changes, add_item_changes, extra_info_changes = split_changes(changes)
-    checklist_title = clean_cell_value(checklist_title) or "Чек-лист ИД"
-    checklist_key = normalize_checklist_key(checklist_key)
-
-    lines = [
-        f"[B]✏️ИЗМЕНЕНИЯ В {checklist_title.upper()}[/B]",
-        "",
-    ]
-
-    if status_changes:
-        lines.append("[B]Статусы:[/B]")
-        lines.append("")
-        for change in status_changes:
-            lines.append(format_status_change_line(change))
-        lines.append("")
-
-    if date_changes:
-        lines.append("[B]Даты:[/B]")
-        lines.append("")
-        for change in date_changes:
-            lines.append(format_plan_change_line(change))
-        lines.append("")
-
-    if checklist_key != "opr" and document_changes:
-        lines.append("[B]Документы:[/B]")
-        lines.append("")
-        for change in document_changes:
-            lines.append(format_document_change_line(change))
-        lines.append("")
-
-    if checklist_key != "opr" and add_item_changes:
-        lines.append("[B]Пункты:[/B]")
-        lines.append("")
-        for change in add_item_changes:
-            lines.append(format_add_item_change_line(change))
-        lines.append("")
-
-    if checklist_key != "opr" and extra_info_changes:
-        lines.append("[B]Доп информация:[/B]")
-        lines.append("")
-        for change in extra_info_changes:
-            lines.append(format_extra_info_change_line(change))
-        lines.append("")
-
-    has_visible_changes = bool(status_changes or date_changes)
-    if checklist_key != "opr":
-        has_visible_changes = has_visible_changes or bool(document_changes or add_item_changes or extra_info_changes)
-
-    if not has_visible_changes:
-        lines.append("Изменений нет")
-        lines.append("")
-
-    return "\n".join(lines).strip()
-
-
-def build_checklist_chat_message(data: dict, changes: list, editor: dict) -> str:
-    checklist_title = (data.get("title") or "Чек-лист ИД").strip()
-    checklist_key = normalize_checklist_key(data.get("checklistKey") or "id")
-    parts = [
-        build_recent_changes_text(changes, checklist_title, checklist_key),
-        "",
-        build_editor_text(editor),
-    ]
-    dialog_id = normalize_dialog_id(data.get("resolvedDialogId") or data.get("dialogId") or "")
-    link_url = build_checklist_message_link(dialog_id, checklist_key)
-    if link_url:
-        parts.extend([
-            "",
-            f"[URL={link_url}]Чтобы посмотреть весь чек-лист нажмите на этот текст[/URL]",
-        ])
-    else:
-        parts.extend([
-            "",
-            "Чтобы посмотреть весь чек-лист нажмите на этот текст",
-        ])
-    return "\n".join(parts).strip()
-
 
 def status_emoji(status: str) -> str:
     status = display_status_text(status)
@@ -1971,17 +1610,48 @@ def save_checklist(dialog_id: str, data: dict, checklist_key: str = "id"):
     conn.close()
 
 def extract_dialog_id_from_form(form: dict) -> str:
+    def pick(value) -> str:
+        value = normalize_dialog_id(value)
+        return value or ""
+
     direct_candidates = [
         form.get("dialogId"),
         form.get("DIALOG_ID"),
         form.get("DIALOGID"),
         form.get("dialog_id"),
+        form.get("chatId"),
+        form.get("CHAT_ID"),
+        form.get("chat_id"),
     ]
 
     for value in direct_candidates:
-        value = normalize_dialog_id(value)
-        if value:
-            return value
+        found = pick(value)
+        if found:
+            return found
+
+    def walk(obj) -> str:
+        if isinstance(obj, dict):
+            preferred_keys = [
+                "dialogId", "DIALOG_ID", "dialog_id",
+                "chatId", "CHAT_ID", "chat_id"
+            ]
+            for key in preferred_keys:
+                found = pick(obj.get(key))
+                if found:
+                    return found
+
+            for value in obj.values():
+                found = walk(value)
+                if found:
+                    return found
+
+        elif isinstance(obj, list):
+            for value in obj:
+                found = walk(value)
+                if found:
+                    return found
+
+        return ""
 
     json_candidates = [
         form.get("PLACEMENT_OPTIONS"),
@@ -1994,19 +1664,18 @@ def extract_dialog_id_from_form(form: dict) -> str:
             continue
         try:
             data = json.loads(raw) if isinstance(raw, str) else raw
-            for key in ["dialogId", "DIALOG_ID", "dialog_id"]:
-                value = normalize_dialog_id(data.get(key))
-                if value:
-                    return value
+            found = walk(data)
+            if found:
+                return found
         except Exception:
             pass
 
-    # На случай неожиданных имен полей
     for key, value in form.items():
-        if "dialog" in str(key).lower():
-            value = normalize_dialog_id(value)
-            if value:
-                return value
+        key_l = str(key).lower()
+        if "dialog" in key_l or "chat" in key_l:
+            found = pick(value)
+            if found:
+                return found
 
     return ""
 
@@ -2083,13 +1752,34 @@ def app_home_html():
         <title>Чек-листы проекта</title>
         <script>
             (function () {
+                function detectAppBasePath() {
+                    const path = String(window.location.pathname || '/').replace(/\/+$/, '');
+                    const suffixes = ['/launch', '/popup', '/textarea', '/install', '/health', '/debug/logs', '/admin', '/admin/upload'];
+
+                    for (const suffix of suffixes) {
+                        if (path === suffix) return '';
+                        if (path.endsWith(suffix)) {
+                            return path.slice(0, -suffix.length) || '';
+                        }
+                    }
+
+                    return path === '/' ? '' : path;
+                }
+
+                const APP_BASE_PATH = detectAppBasePath();
+
+                function appPath(path) {
+                    return (APP_BASE_PATH || '') + '/' + String(path || '').replace(/^\/+/, '');
+                }
+
                 function pickValue(searchParams, hashParams, key, fallback) {
                     return (searchParams.get(key) || hashParams.get(key) || fallback || '').trim();
                 }
 
                 function redirectToPopup(dialogId, checklistKey) {
                     const popupUrl =
-                        '/popup?dialogId=' + encodeURIComponent(dialogId) +
+                        appPath('popup') +
+                        '?dialogId=' + encodeURIComponent(dialogId) +
                         '&checklistKey=' + encodeURIComponent(checklistKey || 'id');
 
                     const go = function () {
@@ -2263,6 +1953,25 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
             var initialContextText = {initial_context_text_json};
             var autoOpened = false;
 
+            function detectAppBasePath() {{
+                const path = String(window.location.pathname || '/').replace(/\/+$/, '');
+                const suffixes = ['/launch', '/popup', '/textarea', '/install', '/health', '/debug/logs', '/admin', '/admin/upload'];
+
+                for (const suffix of suffixes) {{
+                    if (path === suffix) return '';
+                    if (path.endsWith(suffix)) {{
+                        return path.slice(0, -suffix.length) || '';
+                    }}
+                }}
+
+                return path === '/' ? '' : path;
+            }}
+
+            const APP_BASE_PATH = detectAppBasePath();
+
+            function appPath(path) {{
+                return (APP_BASE_PATH || '') + '/' + String(path || '').replace(/^\/+/, '');
+            }}
             function setMeta(text) {{
                 document.getElementById('meta').textContent = text;
             }}
@@ -2299,7 +2008,8 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
                 }}
 
                 window.open(
-                    '/popup?dialogId=' + encodeURIComponent(dialogId) +
+                    appPath('popup') +
+                    '?dialogId=' + encodeURIComponent(dialogId) +
                     '&checklistKey=' + encodeURIComponent(checklistKey),
                     '_blank'
                 );
@@ -2345,13 +2055,39 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
                     window.BX24.init(function () {{
                         var dialogId = '';
                         try {{
-                            var info = window.BX24.placement.info();
-                            if (info && info.options && info.options.dialogId) {{
-                                dialogId = info.options.dialogId;
+                            var info = window.BX24.placement.info() || {{}};
+                            var options = info.options || {{}};
+
+                            var candidates = [
+                                options.dialogId,
+                                options.DIALOG_ID,
+                                options.dialog_id,
+                                info.dialogId,
+                                info.DIALOG_ID,
+                                info.dialog_id,
+                                options.chatId,
+                                options.CHAT_ID,
+                                options.chat_id,
+                                info.chatId,
+                                info.CHAT_ID,
+                                info.chat_id
+                            ];
+
+                            for (var i = 0; i < candidates.length; i++) {{
+                                var candidate = String(candidates[i] || '').trim();
+                                if (candidate) {{
+                                    dialogId = candidate;
+                                    break;
+                                }}
                             }}
+
+                            try {{
+                                console.log('placement.info =', info);
+                            }} catch (e) {{}}
                         }} catch (e) {{
                             setError('placement.info error: ' + String(e));
                         }}
+
                         finish(dialogId, 'BX24-js');
                     }});
                 }} catch (e) {{
@@ -2369,8 +2105,23 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
 
 
 @app.get("/health")
-def health():
-    return {"ok": True}
+def health(request: Request):
+    return {
+        "ok": True,
+        "appBasePathEnv": APP_BASE_PATH,
+        "publicAppBaseUrlEnv": PUBLIC_APP_BASE_URL,
+        "portalPath": APP_PORTAL_PATH,
+        "requestBaseUrl": str(request.base_url).rstrip("/"),
+        "publicBasePathDetected": get_public_app_base_path(request),
+        "publicBaseUrlDetected": get_public_app_base_url(request),
+        "xForwardedPrefix": request.headers.get("x-forwarded-prefix", ""),
+        "xForwardedProto": request.headers.get("x-forwarded-proto", ""),
+        "xForwardedHost": request.headers.get("x-forwarded-host", ""),
+        "rootPath": request.scope.get("root_path", ""),
+        "launchRoute": "/launch",
+        "popupRoute": "/popup",
+        "textareaRoute": "/textarea",
+    }
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -2382,6 +2133,14 @@ def home_get(dialogId: str = "", checklistKey: str = "id", mode: str = ""):
 async def home_post(request: Request):
     return app_home_html()
 
+@app.get("/launch", response_class=HTMLResponse)
+def launch_get(dialogId: str = "", checklistKey: str = "id"):
+    return app_home_html()
+
+
+@app.post("/launch", response_class=HTMLResponse)
+async def launch_post(request: Request):
+    return app_home_html()
 
 @app.get("/install", response_class=HTMLResponse)
 def install_get():
@@ -2406,7 +2165,7 @@ async def install_post(request: Request):
 
     access_token = form.get("AUTH_ID") or form.get("access_token") or ""
     domain = normalize_domain(form.get("DOMAIN") or form.get("domain") or "")
-    base_url = str(request.base_url).rstrip("/")
+    base_url = get_public_app_base_url(request)
 
     bind_result = {
         "im_textarea": {"skipped": True}
@@ -2628,7 +2387,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                     dirty: !!sessionDirty
                 };
                 if (typeof previousSyncChecklistCache === 'function') {
-                    return;
+                    previousSyncChecklistCache();
                 }
             };
 
@@ -2720,7 +2479,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                     };
                 }
 
-                const response = await fetch('/api/checklist/close-session', {
+                const response = await fetch(appUrl('api/checklist/close-session'), {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
@@ -2777,7 +2536,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                 };
 
                 try {
-                    const response = await fetch('/api/checklist/lock/acquire', {
+                    const response = await fetch(appUrl('api/checklist/lock/acquire'), {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json'
@@ -2826,7 +2585,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
 
                 const editorIdentity = getCurrentEditorIdentity();
                 try {
-                    const response = await fetch('/api/checklist/lock/heartbeat', {
+                    const response = await fetch(appUrl('api/checklist/lock/heartbeat'), {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json'
@@ -2904,7 +2663,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                     navigator.sendBeacon(APP_BASE_URL + '/api/checklist/lock/release', blob);
                 } else {
                     try {
-                        await fetch('/api/checklist/lock/release', {
+                        await fetch(appUrl('api/checklist/lock/release'), {
                             method: 'POST',
                             headers: {
                                 'Content-Type': 'application/json'
@@ -3024,7 +2783,8 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                     }
 
                     const response = await fetch(
-                        '/api/checklist?dialogId=' + encodeURIComponent(dialogId) +
+                        appUrl('api/checklist') +
+                        '?dialogId=' + encodeURIComponent(dialogId) +
                         '&checklistKey=' + encodeURIComponent(targetKey)
                     );
                     const result = await response.json();
@@ -3745,7 +3505,26 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
             const idLeftTableHtml = leftTableEl ? leftTableEl.innerHTML : '';
             const idRightTableHtml = rightTableEl ? rightTableEl.innerHTML : '';
             const debugLastEventEl = document.getElementById('debugLastEvent');
-            const APP_BASE_URL = window.location.origin;
+            function detectAppBasePath() {{
+                const path = String(window.location.pathname || '/').replace(/\/+$/, '');
+                const suffixes = ['/popup', '/launch', '/textarea', '/install', '/health', '/debug/logs', '/admin', '/admin/upload'];
+
+                for (const suffix of suffixes) {{
+                    if (path === suffix) return '';
+                    if (path.endsWith(suffix)) {{
+                        return path.slice(0, -suffix.length) || '';
+                    }}
+                }}
+
+                return '';
+            }}
+
+            const APP_BASE_PATH = detectAppBasePath();
+            const APP_BASE_URL = window.location.origin + (APP_BASE_PATH || '');
+
+            function appUrl(path) {{
+                return APP_BASE_URL + '/' + String(path || '').replace(/^\/+/, '');
+            }}
             let closeSummarySent = false;
             let sessionDirty = false;
 
@@ -3978,7 +3757,8 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                     }}
 
                     const response = await fetch(
-                        '/api/checklist?dialogId=' + encodeURIComponent(dialogId) +
+                        appUrl('api/checklist') +
+                        '?dialogId=' + encodeURIComponent(dialogId) +
                         '&checklistKey=' + encodeURIComponent(targetKey)
                     );
                     const result = await response.json();
@@ -4043,7 +3823,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                                         title: title
                                     }});
                                     try {{
-                                        await fetch('/api/checklist/update-meta', {{
+                                        await fetch(appUrl('api/checklist/update-meta'), {{
                                             method: 'POST',
                                             headers: {{ 'Content-Type': 'application/json' }},
                                             body: JSON.stringify({{ dialogId, checklistKey: currentChecklistKey, field: 'collabTitle', value: title }})
@@ -4099,7 +3879,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
             }}
             async function updateItem(itemId, field, value, checklistKey = currentChecklistKey) {{
                 setSaveState('saving', 'Сохраняем...');
-                const response = await fetch('/api/checklist/update-item', {{
+                const response = await fetch(appUrl('api/checklist/update-item'), {{
                     method: 'POST',
                     headers: {{ 'Content-Type': 'application/json' }},
                     body: JSON.stringify({{ dialogId, checklistKey, itemId, field, value }})
@@ -4111,7 +3891,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
             }}
             async function addItem(groupId, name, checklistKey = currentChecklistKey) {{
                 setSaveState('saving', 'Сохраняем...');
-                const response = await fetch('/api/checklist/add-item', {{
+                const response = await fetch(appUrl('api/checklist/add-item'), {{
                     method: 'POST',
                     headers: {{ 'Content-Type': 'application/json' }},
                     body: JSON.stringify({{ dialogId, checklistKey, groupId, name }})
@@ -4123,7 +3903,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
             }}
             async function removeDocument(itemId, documentUrl = '') {{
                 setSaveState('saving', 'Сохраняем...');
-                const response = await fetch('/api/checklist/remove-document', {{
+                const response = await fetch(appUrl('api/checklist/remove-document'), {{
                     method: 'POST',
                     headers: {{ 'Content-Type': 'application/json' }},
                     body: JSON.stringify({{ dialogId, checklistKey: currentChecklistKey, itemId, documentUrl }})
@@ -4142,7 +3922,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                 formData.append('file', file);
                 formData.append('checklistKey', currentChecklistKey);
                 formData.append('itemGroup', String(item && item.group ? item.group : ''));
-                const response = await fetch('/api/checklist/upload-document', {{ method: 'POST', body: formData }});
+                const response = await fetch(appUrl('api/checklist/upload-document'), {{ method: 'POST', body: formData }})
                 const result = await response.json();
                 if (!response.ok || !result.ok) throw new Error(result.error || 'upload document failed');
                 setSaveState('', 'Сохранено');
@@ -4711,7 +4491,13 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                         const rawUrl = this.dataset.documentUrl || '';
                         if (!rawUrl) return;
                         try {{
-                            const absoluteUrl = new URL(rawUrl, window.location.origin).href;
+                            let absoluteUrl = rawUrl;
+
+                            if (String(rawUrl || '').startsWith('/uploads/')) {{
+                                absoluteUrl = APP_BASE_URL + rawUrl;
+                            }} else {{
+                                absoluteUrl = new URL(rawUrl, window.location.href).href;
+                            }}
                             window.open(absoluteUrl, '_blank', 'noopener,noreferrer');
                         }} catch (e) {{
                             console.log('open document error:', e);
@@ -5047,7 +4833,8 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                     }}
 
                     const response = await fetch(
-                        '/api/checklist?dialogId=' + encodeURIComponent(dialogId) +
+                        appUrl('api/checklist') +
+                        '?dialogId=' + encodeURIComponent(dialogId) +
                         '&checklistKey=' + encodeURIComponent(targetKey)
                     );
                     const result = await response.json();
