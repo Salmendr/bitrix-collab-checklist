@@ -2359,7 +2359,9 @@ async def install_post(request: Request):
     bind_result = {
         "im_textarea": {"skipped": True}
     }
-
+    placement_get_result = {
+        "all": {"skipped": True}
+    }
     if domain and access_token:
         bind_result["im_textarea"] = bitrix_rest_call(
             domain,
@@ -2375,6 +2377,12 @@ async def install_post(request: Request):
                 }
             }
         )
+        placement_get_result["all"] = bitrix_rest_call(
+            domain,
+            "placement.get",
+            access_token,
+            {}
+        )    
 
     return f"""
     <html>
@@ -2391,6 +2399,8 @@ async def install_post(request: Request):
 
         <h2>Ответ placement.bind</h2>
         <pre>{html.escape(json.dumps(bind_result, ensure_ascii=False, indent=2))}</pre>
+        <h2>Ответ placement.get</h2>
+        <pre>{html.escape(json.dumps(placement_get_result, ensure_ascii=False, indent=2))}</pre>
 
         {install_finish_block()}
     </body>
