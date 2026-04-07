@@ -2336,14 +2336,18 @@ def install_get():
 
 
 @app.post("/install", response_class=HTMLResponse)
+@app.post("/install/", response_class=HTMLResponse)
 async def install_post(request: Request):
     form = dict(await request.form())
+    query = dict(request.query_params)
+    params = {**query, **form}
 
-    access_token = form.get("AUTH_ID") or form.get("access_token") or ""
-    domain = normalize_domain(form.get("DOMAIN") or form.get("domain") or "")
+    access_token = params.get("AUTH_ID") or params.get("access_token") or ""
+    domain = normalize_domain(params.get("DOMAIN") or params.get("domain") or "")
     base_url = get_public_app_base_url(request)
 
-    app_sid = form.get("APP_SID") or ""
+    app_sid = params.get("APP_SID") or ""
+
     if app_sid and domain and not access_token:
         try:
             auth_response = requests.get(
@@ -2362,6 +2366,7 @@ async def install_post(request: Request):
     placement_get_result = {
         "all": {"skipped": True}
     }
+
     if domain and access_token:
         bind_result["im_textarea"] = bitrix_rest_call(
             domain,
@@ -2370,19 +2375,20 @@ async def install_post(request: Request):
             {
                 "PLACEMENT": "IM_TEXTAREA",
                 "HANDLER": f"{base_url}/textarea",
-                "TITLE": "Чек-лист ИД",
+                "TITLE": "Чек-лист",
                 "OPTIONS": {
                     "iconName": "fa-bars",
                     "context": "CHAT"
                 }
             }
         )
+
         placement_get_result["all"] = bitrix_rest_call(
             domain,
             "placement.get",
             access_token,
             {}
-        )    
+        )
 
     return f"""
     <html>
@@ -2394,7 +2400,10 @@ async def install_post(request: Request):
         <h1>Install callback получен</h1>
         <p>Если bind прошёл успешно, launcher будет зарегистрирован в IM_TEXTAREA.</p>
 
-        <h2>Что прислал Bitrix24</h2>
+        <h2>Что прислал Bitrix24 (query)</h2>
+        <pre>{html.escape(json.dumps(query, ensure_ascii=False, indent=2))}</pre>
+
+        <h2>Что прислал Bitrix24 (form)</h2>
         <pre>{html.escape(json.dumps(form, ensure_ascii=False, indent=2))}</pre>
 
         <h2>Ответ placement.bind</h2>
