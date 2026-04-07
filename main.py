@@ -1801,6 +1801,31 @@ def app_home_html(
                     return 'id';
                 }}
 
+                function openChecklistInSlider(dialogId, checklistKey, source) {{
+                    if (!dialogId) return false;
+
+                    try {{
+                        if (window.BX24 && typeof window.BX24.openApplication === 'function') {{
+                            BX24.openApplication({{
+                                dialogId: dialogId,
+                                checklistKey: checklistKey || 'id',
+                                source: source || 'direct',
+                                bx24_width: 1180,
+                                bx24_title: 'Чек-лист проекта',
+                                bx24_label: {{
+                                    text: 'Чек-лист',
+                                    bgColor: 'pink'
+                                }}
+                            }});
+                            return true;
+                        }}
+                    }} catch (e) {{
+                        console.log('BX24.openApplication error:', e);
+                    }}
+
+                    return false;
+                }}
+
                 function extractFromBx24() {{
                     let dialogId = '';
                     let checklistKey = '';
@@ -1877,6 +1902,10 @@ def app_home_html(
                         }}));
                     }} catch (e) {{
                         console.log('pending dialog save skipped:', e);
+                    }}
+
+                    if (openChecklistInSlider(dialogId, checklistKey, 'message-link')) {{
+                        return;
                     }}
 
                     const popupUrl =
@@ -2083,7 +2112,7 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
             function setError(text) {{
                 document.getElementById('error').textContent = text || '';
             }}
-
+            
             function openChecklist(dialogId, checklistKey = 'id') {{
                 if (!dialogId) {{
                     setError('dialogId не найден');
@@ -2100,19 +2129,10 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
                     console.log('localStorage save error:', e);
                 }}
 
-                try {{
-                    if (window.BX24 && typeof window.BX24.openApplication === 'function') {{
-                        BX24.openApplication({{
-                            dialogId: dialogId,
-                            checklistKey: checklistKey,
-                            source: 'textarea'
-                        }});
-                        autoOpened = true;
-                        setMeta('Открываем popup для ' + dialogId);
-                        return;
-                    }}
-                }} catch (e) {{
-                    setError('BX24.openApplication error: ' + String(e));
+                if (openChecklistInSlider(dialogId, checklistKey, 'textarea')) {{
+                    autoOpened = true;
+                    setMeta('Открываем popup для ' + dialogId);
+                    return;
                 }}
 
                 window.open(
@@ -2121,6 +2141,31 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
                     '&checklistKey=' + encodeURIComponent(checklistKey),
                     '_blank'
                 );
+            }}
+
+            function openChecklistInSlider(dialogId, checklistKey, source) {{
+                if (!dialogId) return false;
+
+                try {{
+                    if (window.BX24 && typeof window.BX24.openApplication === 'function') {{
+                        BX24.openApplication({{
+                            dialogId: dialogId,
+                            checklistKey: checklistKey || 'id',
+                            source: source || 'textarea',
+                            bx24_width: 1180,
+                            bx24_title: 'Чек-лист проекта',
+                            bx24_label: {{
+                                text: 'Чек-лист',
+                                bgColor: 'pink'
+                            }}
+                        }});
+                        return true;
+                    }}
+                }} catch (e) {{
+                    setError('BX24.openApplication error: ' + String(e));
+                }}
+
+                return false;
             }}
 
             document.getElementById('openBtn').addEventListener('click', function () {{
@@ -2375,11 +2420,9 @@ async def install_post(request: Request):
             {
                 "PLACEMENT": "IM_TEXTAREA",
                 "HANDLER": f"{base_url}/textarea",
-                "TITLE": "Чек-лист",
-                "OPTIONS": {
-                    "iconName": "fa-bars",
-                    "context": "CHAT"
-                }
+                "TITLE": "Чек-лист ИД",
+                "OPTIONS[iconName]": "fa-bars",
+                "OPTIONS[context]": "CHAT"
             }
         )
 
