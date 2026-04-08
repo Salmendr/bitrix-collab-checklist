@@ -4444,18 +4444,25 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                 setSaveState('', 'Сохранено');
                 return result;
             }}
-            async function removeDocument(itemId, documentUrl = '') {{
+
+            async function removeDocument(itemId, documentId = '') {{
                 setSaveState('saving', 'Сохраняем...');
                 const response = await fetch(appUrl('api/checklist/remove-document'), {{
                     method: 'POST',
                     headers: {{ 'Content-Type': 'application/json' }},
-                    body: JSON.stringify({{ dialogId, checklistKey: currentChecklistKey, itemId, documentUrl }})
+                    body: JSON.stringify({{
+                        dialogId,
+                        checklistKey: currentChecklistKey,
+                        itemId,
+                        documentId
+                    }})
                 }});
                 const result = await response.json();
                 if (!response.ok || !result.ok) throw new Error(result.error || 'remove document failed');
                 setSaveState('', 'Сохранено');
                 return result;
             }}
+
             async function uploadDocument(itemId, file) {{
                 setSaveState('saving', 'Сохраняем...');
                 const item = items.find(x => x.id === itemId);
@@ -4996,18 +5003,30 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                             newValue: newValue || ''
                         }});
 
-                        if (newValue === 'Нет' && oldItem.documentUrl) {{
-                            pushSessionChange(item.id, item.name, 'document', 'uploaded', 'removed');
+                        const oldDocuments = getItemDocuments(oldItem);
+
+                        if (newValue === 'Нет' && oldDocuments.length) {{
+                            const removedNames = oldDocuments.map(x => x.name || 'uploaded').join(', ');
+
+                            pushSessionChange(item.id, item.name, 'document', removedNames, 'removed');
                             debugLog('document_removed_by_status', {{
                                 itemId: item.id,
                                 itemName: item.name,
-                                oldValue: 'uploaded',
+                                oldValue: removedNames,
                                 newValue: 'removed'
                             }});
+
+                            item.documents = [];
                             item.documentUrl = '';
                             item.documentName = '';
+
                             try {{
-                                await removeDocument(item.id, oldItem.documentUrl);
+                                for (const doc of oldDocuments) {{
+                                    const result = await removeDocument(item.id, String(doc.id || ''));
+                                    if (result && result.item) {{
+                                        replaceItem(result.item);
+                                    }}
+                                }}
                             }} catch (e) {{
                                 console.log('remove document by status error:', e);
                             }}
@@ -5671,7 +5690,17 @@ async def api_checklist_update_item(request: Request):
             target_item["priority"] = derive_indicator_from_status(new_status)
 
             if new_status == "Нет":
-                remove_item_document_file(target_item)
+                target_item = migrate_legacy_document_fields(target_item)
+                existing_documents = normalize_documents_list(target_item.get("documents"))
+
+                for doc in existing_documents:
+                    remove_item_document_file({
+                        "documentUrl": clean_cell_value(doc.get("fileUrl"))
+                            or clean_cell_value(doc.get("previewUrl"))
+                            or clean_cell_value(doc.get("path"))
+                    })
+
+                target_item["documents"] = []
                 target_item["documentUrl"] = ""
                 target_item["documentName"] = ""
     elif field == "plan":
@@ -5762,8 +5791,9 @@ async def api_checklist_add_item(request: Request):
     next_order = len(group_items) + 1
 
     if checklist_key == "concept":
+        new_item_id = f"concept_g{group_id}_custom_{uuid.uuid4().hex[:8]}"
         new_item = {
-            "id": f"concept_g{group_id}_custom_{uuid.uuid4().hex[:8]}",
+            "id": new_item_id,
             "group": group_id,
             "order": next_order,
             "name": name,
@@ -5774,14 +5804,19 @@ async def api_checklist_add_item(request: Request):
             "status": "",
             "extraInfo": "",
             "extraInfoPlaceholder": "",
+            "folderKey": build_folder_key("concept", name, new_item_id),
+            "folderPath": "",
+            "folderUrl": "",
+            "documents": [],
             "documentUrl": "",
             "documentName": "",
             "isCustom": True,
             "priority": "white",
         }
     elif checklist_key == "opr":
+        new_item_id = f"opr_g{group_id}_custom_{uuid.uuid4().hex[:8]}"
         new_item = {
-            "id": f"opr_g{group_id}_custom_{uuid.uuid4().hex[:8]}",
+            "id": new_item_id,
             "group": group_id,
             "order": next_order,
             "name": name,
@@ -5789,13 +5824,18 @@ async def api_checklist_add_item(request: Request):
             "status": "",
             "plannedDate": "",
             "extraInfo": "",
+            "folderKey": build_folder_key("opr", name, new_item_id),
+            "folderPath": "",
+            "folderUrl": "",
+            "documents": [],
             "documentUrl": "",
             "documentName": "",
             "isCustom": True,
         }
     else:
+        new_item_id = build_item_id(group_id, next_order) + "_custom"
         new_item = {
-            "id": build_item_id(group_id, next_order) + "_custom",
+            "id": new_item_id,
             "group": group_id,
             "order": next_order,
             "name": name,
@@ -5803,6 +5843,10 @@ async def api_checklist_add_item(request: Request):
             "status": "",
             "plan": "",
             "fact": "",
+            "folderKey": build_folder_key("id", name, new_item_id),
+            "folderPath": "",
+            "folderUrl": "",
+            "documents": [],
             "documentUrl": "",
             "documentName": "",
             "isCustom": True,
@@ -5845,6 +5889,18 @@ async def api_checklist_upload_document(
     if not item_id:
         return JSONResponse({"ok": False, "error": "itemId is required"}, status_code=400)
 
+    data = get_checklist(dialog_id, checklist_key)
+    items = data.get("items", []) or []
+
+    target_item = None
+    for item in items:
+        if str(item.get("id") or "") == item_id:
+            target_item = item
+            break
+
+    if not target_item:
+        return JSONResponse({"ok": False, "error": "item not found"}, status_code=404)
+
     rel_path = build_upload_rel_path(dialog_id, item_id, file.filename or "file.bin")
     abs_path = UPLOAD_ROOT / rel_path
     abs_path.parent.mkdir(parents=True, exist_ok=True)
@@ -5853,22 +5909,52 @@ async def api_checklist_upload_document(
     with open(abs_path, "wb") as f:
         f.write(file_bytes)
 
-    updated_item = {
-        "id": item_id,
-        "documentUrl": "/uploads/" + rel_path.replace("\\", "/"),
-        "documentName": Path(file.filename or "file.bin").name,
-    }
+    file_url = "/uploads/" + rel_path.replace("\\", "/")
+    document_record = normalize_document_record({
+        "id": uuid.uuid4().hex,
+        "name": Path(file.filename or "file.bin").name,
+        "path": file_url,
+        "fileUrl": file_url,
+        "previewUrl": file_url,
+        "size": len(file_bytes),
+        "modifiedAt": datetime.now().isoformat(timespec="seconds"),
+        "source": "local",
+    })
 
-    if checklist_key == "id" and item_group != 4:
-        updated_item["status"] = "Есть"
-        updated_item["priority"] = derive_indicator_from_status("Есть")
+    existing_documents = list(target_item.get("documents") or [])
+    existing_documents.append(document_record)
+    normalized_documents = normalize_documents_list(existing_documents)
+
+    target_item["documents"] = normalized_documents
+
+    first_doc = normalized_documents[0] if normalized_documents else {}
+    target_item["documentUrl"] = clean_cell_value(first_doc.get("fileUrl"))
+    target_item["documentName"] = clean_cell_value(first_doc.get("name"))
+
+    actual_group = int(target_item.get("group") or item_group or 0)
+    if checklist_key == "id" and actual_group != 4:
+        target_item["status"] = "Есть"
+        target_item["priority"] = derive_indicator_from_status("Есть")
+
+    data["items"] = items
+    data = normalize_checklist_data(data, checklist_key)
+    save_checklist(dialog_id, data, checklist_key)
+
+    updated_item = None
+    for item in data.get("items", []):
+        if str(item.get("id") or "") == item_id:
+            updated_item = item
+            break
+
+    if not updated_item:
+        return JSONResponse({"ok": False, "error": "updated item not found"}, status_code=500)
 
     return JSONResponse({
         "ok": True,
         "dialogId": dialog_id,
         "checklistKey": checklist_key,
         "item": updated_item,
-        "progressPercent": 0,
+        "progressPercent": data.get("progressPercent", 0),
     })
 
 
@@ -5879,6 +5965,7 @@ async def api_checklist_remove_document(request: Request):
     dialog_id = normalize_dialog_id(payload.get("dialogId"))
     checklist_key = normalize_checklist_key(payload.get("checklistKey"))
     item_id = str(payload.get("itemId") or "").strip()
+    document_id = clean_cell_value(payload.get("documentId"))
     document_url = clean_cell_value(payload.get("documentUrl"))
 
     if not dialog_id:
@@ -5887,30 +5974,91 @@ async def api_checklist_remove_document(request: Request):
     if not item_id:
         return JSONResponse({"ok": False, "error": "itemId is required"}, status_code=400)
 
-    if document_url:
-        remove_item_document_file({"documentUrl": document_url})
-    else:
-        data = get_checklist(dialog_id, checklist_key)
-        target_item = None
-        for item in data.get("items", []):
-            if str(item.get("id")) == item_id:
-                target_item = item
-                break
-        if target_item:
-            remove_item_document_file(target_item)
+    data = get_checklist(dialog_id, checklist_key)
+    items = data.get("items", []) or []
 
-    updated_item = {
-        "id": item_id,
-        "documentUrl": "",
-        "documentName": "",
-    }
+    target_item = None
+    for item in items:
+        if str(item.get("id") or "") == item_id:
+            target_item = item
+            break
+
+    if not target_item:
+        return JSONResponse({"ok": False, "error": "item not found"}, status_code=404)
+
+    target_item = migrate_legacy_document_fields(target_item)
+    documents = normalize_documents_list(target_item.get("documents"))
+
+    doc_to_remove = None
+
+    if document_id:
+        for doc in documents:
+            if str(doc.get("id") or "") == document_id:
+                doc_to_remove = doc
+                break
+
+    if not doc_to_remove and document_url:
+        for doc in documents:
+            doc_file_url = clean_cell_value(doc.get("fileUrl"))
+            doc_preview_url = clean_cell_value(doc.get("previewUrl"))
+            doc_path = clean_cell_value(doc.get("path"))
+            if document_url in {doc_file_url, doc_preview_url, doc_path}:
+                doc_to_remove = doc
+                break
+
+    if not doc_to_remove and documents:
+        doc_to_remove = documents[0]
+
+    if doc_to_remove:
+        remove_item_document_file({
+            "documentUrl": clean_cell_value(doc_to_remove.get("fileUrl"))
+                or clean_cell_value(doc_to_remove.get("previewUrl"))
+                or clean_cell_value(doc_to_remove.get("path"))
+        })
+
+    remaining_documents = []
+    removed = False
+
+    for doc in documents:
+        same_id = document_id and str(doc.get("id") or "") == document_id
+        same_url = document_url and document_url in {
+            clean_cell_value(doc.get("fileUrl")),
+            clean_cell_value(doc.get("previewUrl")),
+            clean_cell_value(doc.get("path")),
+        }
+
+        if not removed and (same_id or same_url or (doc_to_remove and str(doc.get("id") or "") == str(doc_to_remove.get("id") or ""))):
+            removed = True
+            continue
+
+        remaining_documents.append(doc)
+
+    normalized_documents = normalize_documents_list(remaining_documents)
+    target_item["documents"] = normalized_documents
+
+    first_doc = normalized_documents[0] if normalized_documents else {}
+    target_item["documentUrl"] = clean_cell_value(first_doc.get("fileUrl"))
+    target_item["documentName"] = clean_cell_value(first_doc.get("name"))
+
+    data["items"] = items
+    data = normalize_checklist_data(data, checklist_key)
+    save_checklist(dialog_id, data, checklist_key)
+
+    updated_item = None
+    for item in data.get("items", []):
+        if str(item.get("id") or "") == item_id:
+            updated_item = item
+            break
+
+    if not updated_item:
+        return JSONResponse({"ok": False, "error": "updated item not found"}, status_code=500)
 
     return JSONResponse({
         "ok": True,
         "dialogId": dialog_id,
         "checklistKey": checklist_key,
         "item": updated_item,
-        "progressPercent": 0,
+        "progressPercent": data.get("progressPercent", 0),
     })
 
 
