@@ -5,12 +5,13 @@ from collections import defaultdict
 from pathlib import Path
 from fastapi import FastAPI, Request, UploadFile, File, Form
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 import requests
 import json
 import html
 import sqlite3
 import re
+import mimetypes
 from io import BytesIO
 from datetime import datetime
 from urllib.parse import quote, urlparse
@@ -492,6 +493,98 @@ def remove_item_document_file(item: dict):
             file_path.unlink()
     except Exception:
         pass
+
+def format_file_size(size_bytes: int) -> str:
+    try:
+        size = int(size_bytes or 0)
+    except Exception:
+        size = 0
+
+    if size <= 0:
+        return ""
+
+    units = ["Б", "КБ", "МБ", "ГБ"]
+    value = float(size)
+    unit_index = 0
+
+    while value >= 1024 and unit_index < len(units) - 1:
+        value /= 1024.0
+        unit_index += 1
+
+    if unit_index == 0:
+        return f"{int(value)} {units[unit_index]}"
+
+    if value >= 100:
+        return f"{value:.0f} {units[unit_index]}"
+    if value >= 10:
+        return f"{value:.1f} {units[unit_index]}"
+    return f"{value:.2f} {units[unit_index]}"
+
+
+def build_folder_view_url(dialog_id: str, checklist_key: str, item_id: str) -> str:
+    dialog_id = normalize_dialog_id(dialog_id)
+    checklist_key = normalize_checklist_key(checklist_key)
+    item_id = str(item_id or "").strip()
+    base_path = normalize_base_path(APP_BASE_PATH)
+
+    return (
+        f"{base_path}/api/checklist/folder"
+        f"?dialogId={quote(dialog_id)}"
+        f"&checklistKey={quote(checklist_key)}"
+        f"&itemId={quote(item_id)}"
+    )
+
+
+def build_document_view_url(dialog_id: str, checklist_key: str, item_id: str, document_id: str) -> str:
+    dialog_id = normalize_dialog_id(dialog_id)
+    checklist_key = normalize_checklist_key(checklist_key)
+    item_id = str(item_id or "").strip()
+    document_id = str(document_id or "").strip()
+    base_path = normalize_base_path(APP_BASE_PATH)
+
+    return (
+        f"{base_path}/api/checklist/file"
+        f"?dialogId={quote(dialog_id)}"
+        f"&checklistKey={quote(checklist_key)}"
+        f"&itemId={quote(item_id)}"
+        f"&documentId={quote(document_id)}"
+    )
+
+
+def get_upload_file_path_from_url(document_url: str):
+    document_url = clean_cell_value(document_url)
+    if not document_url.startswith("/uploads/"):
+        return None
+
+    rel_path = document_url.replace("/uploads/", "", 1)
+    return UPLOAD_ROOT / rel_path
+
+
+def can_preview_in_browser(filename: str, media_type: str = "") -> bool:
+    filename = str(filename or "").strip().lower()
+    media_type = str(media_type or "").strip().lower()
+
+    if media_type.startswith("image/"):
+        return True
+    if media_type.startswith("text/"):
+        return True
+
+    previewable_media_types = {
+        "application/pdf",
+        "application/json",
+        "application/xml",
+        "text/csv",
+    }
+
+    previewable_extensions = {
+        ".pdf", ".txt", ".md", ".csv", ".json", ".xml", ".html", ".htm"
+    }
+
+    if media_type in previewable_media_types:
+        return True
+
+    suffix = Path(filename).suffix.lower()
+    return suffix in previewable_extensions
 
 def slugify_folder_part(value: str) -> str:
     value = str(value or "").strip().lower()
@@ -3198,13 +3291,24 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
 
             buildDocumentCell = function (item) {
                 const documents = getItemDocuments(item);
-                const folderUrl = String(item.folderUrl || '').trim();
-                const showViewFolder = !!folderUrl;
+                const itemId = String(item && item.id || '');
+                const folderViewUrl = String(item.folderUrl || '').trim() || (documents.length ? (
+                    appUrl('api/checklist/folder') +
+                    '?dialogId=' + encodeURIComponent(dialogId) +
+                    '&checklistKey=' + encodeURIComponent(currentChecklistKey) +
+                    '&itemId=' + encodeURIComponent(itemId)
+                ) : '');
+                const showViewFolder = !!folderViewUrl;
 
                 const filesHtml = documents.map(doc => {
-                    const fileUrl = String(doc.fileUrl || doc.previewUrl || '').trim();
                     const docId = String(doc.id || '');
                     const docName = String(doc.name || 'Файл');
+                    const openUrl = appUrl('api/checklist/file') +
+                        '?dialogId=' + encodeURIComponent(dialogId) +
+                        '&checklistKey=' + encodeURIComponent(currentChecklistKey) +
+                        '&itemId=' + encodeURIComponent(itemId) +
+                        '&documentId=' + encodeURIComponent(docId);
+                    const sizeText = formatFileSize(doc.size || 0);
 
                     return `
                         <div class="doc-file-row">
@@ -3212,9 +3316,9 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                                 href="javascript:void(0)"
                                 class="doc-file-link"
                                 data-role="view-file"
-                                data-item-id="${esc(item.id)}"
+                                data-item-id="${esc(itemId)}"
                                 data-document-id="${esc(docId)}"
-                                data-file-url="${esc(fileUrl)}"
+                                data-open-url="${esc(openUrl)}"
                                 title="${esc(docName)}"
                             >
                                 ${esc(docName)}
@@ -3223,13 +3327,14 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                                 type="button"
                                 class="doc-file-remove"
                                 data-role="remove-file"
-                                data-item-id="${esc(item.id)}"
+                                data-item-id="${esc(itemId)}"
                                 data-document-id="${esc(docId)}"
                                 title="Удалить файл"
                                 ${typeof disabledAttr === 'function' ? disabledAttr() : ''}
                             >
                                 ×
                             </button>
+                            ${sizeText ? `<span class="doc-file-meta">${esc(sizeText)}</span>` : ''}
                         </div>
                     `;
                 }).join('');
@@ -3241,7 +3346,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                                 class="upload-btn"
                                 type="button"
                                 data-role="upload"
-                                data-item-id="${esc(item.id)}"
+                                data-item-id="${esc(itemId)}"
                                 ${typeof disabledAttr === 'function' ? disabledAttr() : ''}
                             >
                                 Загрузить
@@ -3252,8 +3357,8 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                                     class="doc-btn"
                                     type="button"
                                     data-role="view-folder"
-                                    data-item-id="${esc(item.id)}"
-                                    data-folder-url="${esc(folderUrl)}"
+                                    data-item-id="${esc(itemId)}"
+                                    data-folder-url="${esc(folderViewUrl)}"
                                 >
                                     Посмотреть
                                 </button>
@@ -3269,7 +3374,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                         <input
                             type="file"
                             data-role="file-input"
-                            data-item-id="${esc(item.id)}"
+                            data-item-id="${esc(itemId)}"
                             style="display:none;"
                             ${typeof disabledAttr === 'function' ? disabledAttr() : ''}
                         >
@@ -3423,7 +3528,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                 const groupItems = getItemsByGroup(group.id);
                 const allowAdd = Number(group.id) !== 10;
                 const rows = groupItems.map(item => `
-                    <div class="row" style="grid-template-columns: 1.05fr 0.9fr 110px 150px 1.15fr;" data-item-id="${esc(item.id)}">
+                    <div class="row" style="grid-template-columns: 1.05fr 0.72fr 165px 150px 1.15fr;" data-item-id="${esc(item.id)}">
                         <div class="td"><div class="cell-name"><div class="${conceptIndicatorClass(item)}"></div>${buildConceptNameCell(item)}</div></div>
                         <div class="td">${buildConceptSourceCell(item)}</div>
                         <div class="td">${buildDocumentCell(item)}</div>
@@ -3445,7 +3550,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
             function buildConceptTableHtmlEnhanced(conceptGroups) {
                 return `
                     <div class="thead">
-                        <div class="thead-top" style="grid-template-columns: 1.05fr 0.9fr 110px 150px 1.15fr;">
+                        <div class="thead-top" style="grid-template-columns: 1.05fr 0.72fr 165px 150px 1.15fr;">
                             <div class="th">Пункт</div>
                             <div class="th">Нормативы</div>
                             <div class="th">Документ</div>
@@ -3808,7 +3913,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
             .table {{ width:100%; border:1px solid #e5e7eb; border-radius:12px; overflow:hidden; background:#fff; }}
             .thead {{ position:sticky; top:0; z-index:10; background:#f8fafc; border-bottom:1px solid #e5e7eb; }}
             .thead-top,.thead-bottom {{ min-height:38px; }}
-            .thead-top,.thead-bottom,.row {{ display:grid; grid-template-columns:190px 100px 100px 136px 136px; gap:0; align-items:stretch; justify-content:start; }}
+            .thead-top,.thead-bottom,.row {{ display:grid; grid-template-columns:190px 150px 100px 136px 86px; gap:0; align-items:stretch; justify-content:start; }}
             .th,.td {{ padding:8px 9px; border-right:1px solid #edf0f2; }}
             .th:last-child,.td:last-child {{ border-right:none; }}
             .th {{ font-size:12px; font-weight:700; color:#475467; min-height:38px; display:flex; align-items:center; }}
@@ -3859,7 +3964,6 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
             .doc-file-row {{
                 display: flex;
                 align-items: center;
-                justify-content: space-between;
                 gap: 6px;
                 min-width: 0;
             }}
@@ -3889,8 +3993,18 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                 font-size: 14px;
                 line-height: 1;
                 padding: 0 2px;
+                position: relative;
+                z-index: 2;
+                pointer-events: auto;
             }}
 
+            .doc-file-meta {{
+                flex: 0 0 auto;
+                font-size: 11px;
+                color: #667085;
+                white-space: nowrap;
+            }}
+            
             .doc-file-remove:hover {{
                 opacity: .8;
             }}
@@ -4104,6 +4218,28 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                 }}
 
                 return [];
+            }}
+
+            function formatFileSize(size) {{
+                const value = Number(size || 0);
+                if (!value || value <= 0) return '';
+
+                const units = ['Б', 'КБ', 'МБ', 'ГБ'];
+                let current = value;
+                let unitIndex = 0;
+
+                while (current >= 1024 && unitIndex < units.length - 1) {{
+                    current /= 1024;
+                    unitIndex += 1;
+                }}
+
+                if (unitIndex === 0) {{
+                    return Math.round(current) + ' ' + units[unitIndex];
+                }}
+
+                if (current >= 100) return current.toFixed(0) + ' ' + units[unitIndex];
+                if (current >= 10) return current.toFixed(1) + ' ' + units[unitIndex];
+                return current.toFixed(2) + ' ' + units[unitIndex];
             }}
 
             function renderTitle() {{
@@ -4509,13 +4645,24 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
             }}
             function buildDocumentCell(item) {{
                 const documents = getItemDocuments(item);
-                const folderUrl = String(item.folderUrl || '').trim();
-                const showViewFolder = !!folderUrl;
+                const itemId = String(item && item.id || '');
+                const folderViewUrl = String(item.folderUrl || '').trim() || (documents.length ? (
+                    appUrl('api/checklist/folder') +
+                    '?dialogId=' + encodeURIComponent(dialogId) +
+                    '&checklistKey=' + encodeURIComponent(currentChecklistKey) +
+                    '&itemId=' + encodeURIComponent(itemId)
+                ) : '');
+                const showViewFolder = !!folderViewUrl;
 
                 const filesHtml = documents.map(doc => {{
-                    const fileUrl = String(doc.fileUrl || doc.previewUrl || '').trim();
                     const docId = String(doc.id || '');
                     const docName = String(doc.name || 'Файл');
+                    const openUrl = appUrl('api/checklist/file') +
+                        '?dialogId=' + encodeURIComponent(dialogId) +
+                        '&checklistKey=' + encodeURIComponent(currentChecklistKey) +
+                        '&itemId=' + encodeURIComponent(itemId) +
+                        '&documentId=' + encodeURIComponent(docId);
+                    const sizeText = formatFileSize(doc.size || 0);
 
                     return `
                         <div class="doc-file-row">
@@ -4523,9 +4670,9 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                                 href="javascript:void(0)"
                                 class="doc-file-link"
                                 data-role="view-file"
-                                data-item-id="${{esc(item.id)}}"
+                                data-item-id="${{esc(itemId)}}"
                                 data-document-id="${{esc(docId)}}"
-                                data-file-url="${{esc(fileUrl)}}"
+                                data-open-url="${{esc(openUrl)}}"
                                 title="${{esc(docName)}}"
                             >
                                 ${{esc(docName)}}
@@ -4534,13 +4681,14 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                                 type="button"
                                 class="doc-file-remove"
                                 data-role="remove-file"
-                                data-item-id="${{esc(item.id)}}"
+                                data-item-id="${{esc(itemId)}}"
                                 data-document-id="${{esc(docId)}}"
                                 title="Удалить файл"
                                 ${{typeof disabledAttr === 'function' ? disabledAttr() : ''}}
                             >
                                 ×
                             </button>
+                            ${{sizeText ? `<span class="doc-file-meta">${{esc(sizeText)}}</span>` : ''}}
                         </div>
                     `;
                 }}).join('');
@@ -4552,7 +4700,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                                 class="upload-btn"
                                 type="button"
                                 data-role="upload"
-                                data-item-id="${{esc(item.id)}}"
+                                data-item-id="${{esc(itemId)}}"
                                 ${{typeof disabledAttr === 'function' ? disabledAttr() : ''}}
                             >
                                 Загрузить
@@ -4563,8 +4711,8 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                                     class="doc-btn"
                                     type="button"
                                     data-role="view-folder"
-                                    data-item-id="${{esc(item.id)}}"
-                                    data-folder-url="${{esc(folderUrl)}}"
+                                    data-item-id="${{esc(itemId)}}"
+                                    data-folder-url="${{esc(folderViewUrl)}}"
                                 >
                                     Посмотреть
                                 </button>
@@ -4580,7 +4728,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                         <input
                             type="file"
                             data-role="file-input"
-                            data-item-id="${{esc(item.id)}}"
+                            data-item-id="${{esc(itemId)}}"
                             style="display:none;"
                             ${{typeof disabledAttr === 'function' ? disabledAttr() : ''}}
                         >
@@ -5140,19 +5288,15 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                 }});
 
                 document.querySelectorAll('[data-role="view-file"]').forEach(link => {{
-                    link.addEventListener('click', function () {{
-                        const fileUrl = this.dataset.fileUrl || '';
-                        if (!fileUrl) return;
+                    link.addEventListener('click', function (event) {{
+                        event.preventDefault();
+                        event.stopPropagation();
+
+                        const openUrl = this.dataset.openUrl || '';
+                        if (!openUrl) return;
 
                         try {{
-                            let absoluteUrl = fileUrl;
-
-                            if (String(fileUrl || '').startsWith('/uploads/')) {{
-                                absoluteUrl = APP_BASE_URL + fileUrl;
-                            }} else {{
-                                absoluteUrl = new URL(fileUrl, window.location.href).href;
-                            }}
-
+                            const absoluteUrl = new URL(openUrl, window.location.href).href;
                             window.open(absoluteUrl, '_blank', 'noopener,noreferrer');
                         }} catch (e) {{
                             console.log('open file error:', e);
@@ -5162,7 +5306,12 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                 }});
 
                 document.querySelectorAll('[data-role="remove-file"]').forEach(btn => {{
-                    btn.addEventListener('click', async function () {{
+                    btn.addEventListener('click', async function (event) {{
+                        event.preventDefault();
+                        event.stopPropagation();
+
+                        if (this.disabled) return;
+
                         const itemId = this.dataset.itemId;
                         const documentId = this.dataset.documentId;
 
@@ -5170,36 +5319,26 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                         const documents = getItemDocuments(item);
                         const doc = documents.find(x => String(x.id || '') === String(documentId || ''));
 
+                        this.disabled = true;
+
                         try {{
-                            const response = await fetch(appUrl('api/checklist/remove-document'), {{
-                                method: 'POST',
-                                headers: {{ 'Content-Type': 'application/json' }},
-                                body: JSON.stringify({{
-                                    dialogId,
-                                    checklistKey: currentChecklistKey,
-                                    itemId,
-                                    documentId
-                                }})
-                            }});
-
-                            const result = await response.json();
-                            if (!response.ok || !result.ok) throw new Error(result.error || 'remove document failed');
-
+                            const result = await removeDocument(itemId, documentId);
                             replaceItem(result.item);
 
-                            sessionChanges.push({{
-                                field: 'document',
-                                itemId: itemId,
-                                itemName: item ? item.name : '',
-                                oldValue: doc ? (doc.name || 'uploaded') : 'uploaded',
-                                newValue: 'removed'
-                            }});
-                            sessionDirty = true;
+                            pushSessionChange(
+                                itemId,
+                                item ? item.name : '',
+                                'document',
+                                doc ? (doc.name || 'uploaded') : 'uploaded',
+                                'removed'
+                            );
 
                             renderAll();
                         }} catch (e) {{
-                            console.log(e);
+                            console.log('remove file error:', e);
                             setSaveState('error', 'Ошибка удаления файла');
+                        }} finally {{
+                            this.disabled = false;
                         }}
                     }});
                 }});
@@ -5910,12 +6049,21 @@ async def api_checklist_upload_document(
         f.write(file_bytes)
 
     file_url = "/uploads/" + rel_path.replace("\\", "/")
+    document_id = uuid.uuid4().hex
+    document_view_url = build_document_view_url(dialog_id, checklist_key, item_id, document_id)
+    folder_view_url = build_folder_view_url(dialog_id, checklist_key, item_id)
+
+    try:
+        folder_path = "/" + str(abs_path.parent.relative_to(BASE_DIR)).replace("\\", "/")
+    except Exception:
+        folder_path = file_url.rsplit("/", 1)[0]
+
     document_record = normalize_document_record({
-        "id": uuid.uuid4().hex,
+        "id": document_id,
         "name": Path(file.filename or "file.bin").name,
         "path": file_url,
         "fileUrl": file_url,
-        "previewUrl": file_url,
+        "previewUrl": document_view_url,
         "size": len(file_bytes),
         "modifiedAt": datetime.now().isoformat(timespec="seconds"),
         "source": "local",
@@ -5926,6 +6074,8 @@ async def api_checklist_upload_document(
     normalized_documents = normalize_documents_list(existing_documents)
 
     target_item["documents"] = normalized_documents
+    target_item["folderPath"] = folder_path
+    target_item["folderUrl"] = folder_view_url if normalized_documents else ""
 
     first_doc = normalized_documents[0] if normalized_documents else {}
     target_item["documentUrl"] = clean_cell_value(first_doc.get("fileUrl"))
@@ -6040,6 +6190,14 @@ async def api_checklist_remove_document(request: Request):
     target_item["documentUrl"] = clean_cell_value(first_doc.get("fileUrl"))
     target_item["documentName"] = clean_cell_value(first_doc.get("name"))
 
+    if normalized_documents:
+        first_file_url = clean_cell_value(first_doc.get("fileUrl"))
+        target_item["folderPath"] = first_file_url.rsplit("/", 1)[0] if first_file_url.startswith("/") else ""
+        target_item["folderUrl"] = build_folder_view_url(dialog_id, checklist_key, item_id)
+    else:
+        target_item["folderPath"] = ""
+        target_item["folderUrl"] = ""
+
     data["items"] = items
     data = normalize_checklist_data(data, checklist_key)
     save_checklist(dialog_id, data, checklist_key)
@@ -6061,6 +6219,149 @@ async def api_checklist_remove_document(request: Request):
         "progressPercent": data.get("progressPercent", 0),
     })
 
+@app.get("/api/checklist/folder", response_class=HTMLResponse)
+def api_checklist_folder(dialogId: str = "", itemId: str = "", checklistKey: str = "id"):
+    dialog_id = normalize_dialog_id(dialogId)
+    checklist_key = normalize_checklist_key(checklistKey)
+    item_id = str(itemId or "").strip()
+
+    if not dialog_id or not item_id:
+        return HTMLResponse("<h3>Не переданы dialogId или itemId</h3>", status_code=400)
+
+    data = get_checklist(dialog_id, checklist_key)
+    items = data.get("items", []) or []
+
+    target_item = None
+    for item in items:
+        if str(item.get("id") or "") == item_id:
+            target_item = item
+            break
+
+    if not target_item:
+        return HTMLResponse("<h3>Пункт не найден</h3>", status_code=404)
+
+    target_item = migrate_legacy_document_fields(target_item)
+    documents = normalize_documents_list(target_item.get("documents"))
+
+    rows = []
+    for doc in documents:
+        doc_id = str(doc.get("id") or "")
+        doc_name = html.escape(str(doc.get("name") or "Файл"))
+        doc_size = html.escape(format_file_size(doc.get("size") or 0))
+        open_url = build_document_view_url(dialog_id, checklist_key, item_id, doc_id)
+        download_url = open_url + "&download=1"
+
+        rows.append(f"""
+            <tr>
+                <td style="padding:10px 12px;border-bottom:1px solid #edf0f2;">{doc_name}</td>
+                <td style="padding:10px 12px;border-bottom:1px solid #edf0f2;white-space:nowrap;">{doc_size}</td>
+                <td style="padding:10px 12px;border-bottom:1px solid #edf0f2;white-space:nowrap;">
+                    <a href="{html.escape(open_url)}" target="_blank">Открыть</a>
+                    &nbsp;|&nbsp;
+                    <a href="{html.escape(download_url)}" target="_blank">Скачать</a>
+                </td>
+            </tr>
+        """)
+
+    table_html = "".join(rows) if rows else """
+        <tr>
+            <td colspan="3" style="padding:14px 12px;color:#667085;">В папке пока нет файлов</td>
+        </tr>
+    """
+
+    title = html.escape(str(target_item.get("name") or "Папка"))
+    checklist_title = html.escape(str(data.get("title") or "Чек-лист"))
+
+    return f"""
+    <html>
+    <head>
+        <meta charset="utf-8">
+        <title>{title}</title>
+    </head>
+    <body style="font-family:Arial,sans-serif;background:#f8fafc;margin:0;padding:24px;color:#1f2328;">
+        <div style="max-width:960px;margin:0 auto;background:#fff;border:1px solid #e5e7eb;border-radius:14px;overflow:hidden;">
+            <div style="padding:16px 18px;border-bottom:1px solid #edf0f2;background:#fafbfc;">
+                <div style="font-size:13px;color:#667085;margin-bottom:4px;">{checklist_title}</div>
+                <div style="font-size:22px;font-weight:700;">{title}</div>
+            </div>
+            <div style="padding:18px;">
+                <table style="width:100%;border-collapse:collapse;">
+                    <thead>
+                        <tr>
+                            <th style="text-align:left;padding:10px 12px;background:#f8fafc;border-bottom:1px solid #e5e7eb;">Файл</th>
+                            <th style="text-align:left;padding:10px 12px;background:#f8fafc;border-bottom:1px solid #e5e7eb;">Размер</th>
+                            <th style="text-align:left;padding:10px 12px;background:#f8fafc;border-bottom:1px solid #e5e7eb;">Действия</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {table_html}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+
+@app.get("/api/checklist/file")
+def api_checklist_file(
+    dialogId: str = "",
+    itemId: str = "",
+    documentId: str = "",
+    checklistKey: str = "id",
+    download: int = 0
+):
+    dialog_id = normalize_dialog_id(dialogId)
+    checklist_key = normalize_checklist_key(checklistKey)
+    item_id = str(itemId or "").strip()
+    document_id = str(documentId or "").strip()
+
+    if not dialog_id or not item_id or not document_id:
+        return JSONResponse({"ok": False, "error": "dialogId, itemId and documentId are required"}, status_code=400)
+
+    data = get_checklist(dialog_id, checklist_key)
+    items = data.get("items", []) or []
+
+    target_item = None
+    for item in items:
+        if str(item.get("id") or "") == item_id:
+            target_item = item
+            break
+
+    if not target_item:
+        return JSONResponse({"ok": False, "error": "item not found"}, status_code=404)
+
+    target_item = migrate_legacy_document_fields(target_item)
+    documents = normalize_documents_list(target_item.get("documents"))
+
+    target_doc = None
+    for doc in documents:
+        if str(doc.get("id") or "") == document_id:
+            target_doc = doc
+            break
+
+    if not target_doc:
+        return JSONResponse({"ok": False, "error": "document not found"}, status_code=404)
+
+    file_url = clean_cell_value(target_doc.get("fileUrl")) or clean_cell_value(target_doc.get("path"))
+    file_path = get_upload_file_path_from_url(file_url)
+
+    if not file_path or not file_path.exists():
+        return JSONResponse({"ok": False, "error": "file not found on disk"}, status_code=404)
+
+    filename = clean_cell_value(target_doc.get("name")) or file_path.name
+    media_type, _ = mimetypes.guess_type(str(file_path))
+    media_type = media_type or "application/octet-stream"
+
+    inline_allowed = can_preview_in_browser(filename, media_type)
+    disposition = "attachment" if download else ("inline" if inline_allowed else "attachment")
+
+    response = FileResponse(
+        path=str(file_path),
+        media_type=media_type
+    )
+    response.headers["Content-Disposition"] = f"{disposition}; filename*=UTF-8''{quote(filename)}"
+    return response
 
 @app.post("/api/debug/event")
 async def api_debug_event(request: Request):
