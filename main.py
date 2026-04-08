@@ -62,6 +62,7 @@ CHECKLIST_GROUPS = {
             "Сокращение ОКН",
             "Выписка ЕГРН",
             "ГПЗУ",
+            "Тех задание",
             "ИГДИ",
             "ИГИ",
             "ИЭИ",
@@ -492,6 +493,122 @@ def remove_item_document_file(item: dict):
     except Exception:
         pass
 
+def slugify_folder_part(value: str) -> str:
+    value = str(value or "").strip().lower()
+
+    translit_map = {
+        "а": "a", "б": "b", "в": "v", "г": "g", "д": "d",
+        "е": "e", "ё": "e", "ж": "zh", "з": "z", "и": "i",
+        "й": "y", "к": "k", "л": "l", "м": "m", "н": "n",
+        "о": "o", "п": "p", "р": "r", "с": "s", "т": "t",
+        "у": "u", "ф": "f", "х": "h", "ц": "ts", "ч": "ch",
+        "ш": "sh", "щ": "sch", "ъ": "", "ы": "y", "ь": "",
+        "э": "e", "ю": "yu", "я": "ya"
+    }
+
+    chars = []
+    for ch in value:
+        if ch in translit_map:
+            chars.append(translit_map[ch])
+        else:
+            chars.append(ch)
+
+    value = "".join(chars)
+    value = re.sub(r"[^a-z0-9]+", "_", value)
+    value = re.sub(r"_+", "_", value).strip("_")
+    return value or "item"
+
+
+def build_folder_key(checklist_key: str, item_name: str, item_id: str = "") -> str:
+    checklist_key = normalize_checklist_key(checklist_key)
+    raw_name = clean_cell_value(item_name)
+    raw_item_id = str(item_id or "").strip()
+
+    special_map = {
+        ("id", "Тех задание"): "id_tech_task",
+    }
+
+    special_key = (checklist_key, raw_name)
+    if special_key in special_map:
+        return special_map[special_key]
+
+    if raw_item_id:
+        safe_item_id = re.sub(r"[^a-zA-Z0-9_]+", "_", raw_item_id).strip("_").lower()
+        if safe_item_id:
+            return f"{checklist_key}_{safe_item_id}"
+
+    return f"{checklist_key}_{slugify_folder_part(raw_name)}"
+
+
+def normalize_document_record(doc: dict) -> dict:
+    doc = dict(doc or {})
+
+    file_url = clean_cell_value(doc.get("fileUrl") or doc.get("url") or doc.get("documentUrl"))
+    preview_url = clean_cell_value(doc.get("previewUrl") or file_url)
+    path = clean_cell_value(doc.get("path") or file_url)
+    name = clean_cell_value(doc.get("name") or doc.get("documentName"))
+
+    if not name and file_url:
+        try:
+            name = Path(urlparse(file_url).path).name
+        except Exception:
+            name = ""
+
+    return {
+        "id": clean_cell_value(doc.get("id")) or uuid.uuid4().hex,
+        "name": name,
+        "path": path,
+        "fileUrl": file_url,
+        "previewUrl": preview_url,
+        "size": int(doc.get("size") or 0),
+        "modifiedAt": clean_cell_value(doc.get("modifiedAt")),
+        "source": clean_cell_value(doc.get("source")) or "local",
+    }
+
+
+def normalize_documents_list(value) -> list[dict]:
+    if not isinstance(value, list):
+        return []
+
+    result = []
+    for raw_doc in value:
+        normalized = normalize_document_record(raw_doc)
+        if not normalized.get("name") and not normalized.get("fileUrl"):
+            continue
+        result.append(normalized)
+
+    result.sort(key=lambda x: (x.get("name") or "").lower())
+    return result
+
+
+def migrate_legacy_document_fields(item: dict) -> dict:
+    item = dict(item or {})
+
+    documents = item.get("documents")
+    if isinstance(documents, list):
+        item["documents"] = normalize_documents_list(documents)
+        return item
+
+    legacy_url = clean_cell_value(item.get("documentUrl"))
+    legacy_name = clean_cell_value(item.get("documentName"))
+
+    if legacy_url or legacy_name:
+        item["documents"] = normalize_documents_list([
+            {
+                "id": uuid.uuid4().hex,
+                "name": legacy_name,
+                "path": legacy_url,
+                "fileUrl": legacy_url,
+                "previewUrl": legacy_url,
+                "size": 0,
+                "modifiedAt": "",
+                "source": "local",
+            }
+        ])
+    else:
+        item["documents"] = []
+
+    return item
 
 def build_default_checklist_template(dialog_id: str = "", checklist_key: str = "id"):
     items = []
@@ -502,11 +619,14 @@ def build_default_checklist_template(dialog_id: str = "", checklist_key: str = "
                 continue
 
             for order, spec in enumerate(group["items"], start=1):
+                item_id = f"concept_g{group['id']}_{order}"
+                item_name = spec["name"]
+
                 items.append({
-                    "id": f"concept_g{group['id']}_{order}",
+                    "id": item_id,
                     "group": group["id"],
                     "order": order,
-                    "name": spec["name"],
+                    "name": item_name,
                     "source": spec.get("source", ""),
                     "statusKind": spec.get("statusKind", "bool"),
                     "statusOptions": spec.get("statusOptions", []),
@@ -514,8 +634,10 @@ def build_default_checklist_template(dialog_id: str = "", checklist_key: str = "
                     "status": "",
                     "extraInfo": "",
                     "extraInfoPlaceholder": spec.get("extraPlaceholder", ""),
-                    "documentUrl": "",
-                    "documentName": "",
+                    "folderKey": build_folder_key("concept", item_name, item_id),
+                    "folderPath": "",
+                    "folderUrl": "",
+                    "documents": [],
                     "isCustom": False,
                 })
 
@@ -536,8 +658,10 @@ def build_default_checklist_template(dialog_id: str = "", checklist_key: str = "
                 continue
 
             for order, name in enumerate(group["items"], start=1):
+                item_id = f"opr_g{group['id']}_{order}"
+
                 items.append({
-                    "id": f"opr_g{group['id']}_{order}",
+                    "id": item_id,
                     "group": group["id"],
                     "order": order,
                     "name": name,
@@ -545,8 +669,10 @@ def build_default_checklist_template(dialog_id: str = "", checklist_key: str = "
                     "status": "",
                     "plannedDate": "",
                     "extraInfo": "",
-                    "documentUrl": "",
-                    "documentName": "",
+                    "folderKey": build_folder_key("opr", name, item_id),
+                    "folderPath": "",
+                    "folderUrl": "",
+                    "documents": [],
                     "isCustom": False,
                 })
 
@@ -566,8 +692,10 @@ def build_default_checklist_template(dialog_id: str = "", checklist_key: str = "
             continue
 
         for order, name in enumerate(group_data["items"], start=1):
+            item_id = build_item_id(group_id, order)
+
             items.append({
-                "id": build_item_id(group_id, order),
+                "id": item_id,
                 "group": group_id,
                 "order": order,
                 "name": name,
@@ -575,8 +703,10 @@ def build_default_checklist_template(dialog_id: str = "", checklist_key: str = "
                 "status": "",
                 "plan": "",
                 "fact": "",
-                "documentUrl": "",
-                "documentName": "",
+                "folderKey": build_folder_key("id", name, item_id),
+                "folderPath": "",
+                "folderUrl": "",
+                "documents": [],
                 "isCustom": False,
             })
 
@@ -665,12 +795,33 @@ def normalize_checklist_data(data: dict, checklist_key: str = "id") -> dict:
     data = dict(data or {})
     checklist_key = str(checklist_key or data.get("checklistKey") or "id").strip() or "id"
 
+    def prepare_item_common(item: dict, default_name: str = "") -> tuple[dict, list[dict], dict, str, str, str]:
+        item = migrate_legacy_document_fields(dict(item or {}))
+
+        name = clean_cell_value(item.get("name")) or clean_cell_value(default_name)
+        documents = normalize_documents_list(item.get("documents"))
+        first_doc = documents[0] if documents else {}
+
+        folder_key = clean_cell_value(item.get("folderKey")) or build_folder_key(
+            checklist_key,
+            name,
+            item.get("id") or ""
+        )
+        folder_path = clean_cell_value(item.get("folderPath"))
+        folder_url = clean_cell_value(item.get("folderUrl"))
+
+        legacy_document_url = clean_cell_value(item.get("documentUrl")) or clean_cell_value(first_doc.get("fileUrl"))
+        legacy_document_name = clean_cell_value(item.get("documentName")) or clean_cell_value(first_doc.get("name"))
+
+        return item, documents, first_doc, folder_key, folder_path, folder_url, legacy_document_url, legacy_document_name
+
     if checklist_key == "concept":
         raw_items = data.get("items", []) or []
         normalized_items = []
 
-        for item in raw_items:
-            item = dict(item or {})
+        for raw_item in raw_items:
+            item, documents, first_doc, folder_key, folder_path, folder_url, legacy_document_url, legacy_document_name = prepare_item_common(raw_item)
+
             name = clean_cell_value(item.get("name"))
             if not name:
                 continue
@@ -679,7 +830,7 @@ def normalize_checklist_data(data: dict, checklist_key: str = "id") -> dict:
                 "id": str(item.get("id") or ""),
                 "group": int(item.get("group") or 0),
                 "order": int(item.get("order") or 0),
-                "name": clean_cell_value(item.get("name")),
+                "name": name,
                 "source": clean_cell_value(item.get("source")),
                 "statusKind": clean_cell_value(item.get("statusKind")) or "bool",
                 "statusOptions": item.get("statusOptions") or [],
@@ -687,8 +838,12 @@ def normalize_checklist_data(data: dict, checklist_key: str = "id") -> dict:
                 "status": clean_cell_value(item.get("status")),
                 "extraInfo": clean_cell_value(item.get("extraInfo")),
                 "extraInfoPlaceholder": clean_cell_value(item.get("extraInfoPlaceholder")),
-                "documentUrl": clean_cell_value(item.get("documentUrl")),
-                "documentName": clean_cell_value(item.get("documentName")),
+                "folderKey": folder_key,
+                "folderPath": folder_path,
+                "folderUrl": folder_url,
+                "documents": documents,
+                "documentUrl": legacy_document_url,
+                "documentName": legacy_document_name,
                 "isCustom": bool(item.get("isCustom", False)),
                 "priority": clean_cell_value(item.get("priority")) or "white",
             })
@@ -701,6 +856,8 @@ def normalize_checklist_data(data: dict, checklist_key: str = "id") -> dict:
                 item["order"] = order
                 if not item.get("id"):
                     item["id"] = f"concept_g{group['id']}_{order}"
+                if not item.get("folderKey"):
+                    item["folderKey"] = build_folder_key("concept", item.get("name"), item.get("id"))
 
         progress = calculate_concept_progress(normalized_items)
 
@@ -723,8 +880,9 @@ def normalize_checklist_data(data: dict, checklist_key: str = "id") -> dict:
         raw_items = data.get("items", []) or []
         normalized_items = []
 
-        for item in raw_items:
-            item = dict(item or {})
+        for raw_item in raw_items:
+            item, documents, first_doc, folder_key, folder_path, folder_url, legacy_document_url, legacy_document_name = prepare_item_common(raw_item)
+
             name = clean_cell_value(item.get("name"))
             if not name:
                 continue
@@ -745,8 +903,12 @@ def normalize_checklist_data(data: dict, checklist_key: str = "id") -> dict:
                 "status": status,
                 "plannedDate": normalize_date_string(item.get("plannedDate")),
                 "extraInfo": clean_cell_value(item.get("extraInfo")),
-                "documentUrl": clean_cell_value(item.get("documentUrl")),
-                "documentName": clean_cell_value(item.get("documentName")),
+                "folderKey": folder_key,
+                "folderPath": folder_path,
+                "folderUrl": folder_url,
+                "documents": documents,
+                "documentUrl": legacy_document_url,
+                "documentName": legacy_document_name,
                 "isCustom": bool(item.get("isCustom", False)),
             })
 
@@ -758,6 +920,8 @@ def normalize_checklist_data(data: dict, checklist_key: str = "id") -> dict:
                 item["order"] = order
                 if not item.get("id"):
                     item["id"] = f"opr_g{group['id']}_{order}"
+                if not item.get("folderKey"):
+                    item["folderKey"] = build_folder_key("opr", item.get("name"), item.get("id"))
 
         progress = calculate_opr_progress(normalized_items)
 
@@ -781,8 +945,8 @@ def normalize_checklist_data(data: dict, checklist_key: str = "id") -> dict:
 
     group_order_counters = {1: 0, 2: 0, 3: 0, 4: 0}
 
-    for item in raw_items:
-        item = dict(item or {})
+    for raw_item in raw_items:
+        item, documents, first_doc, folder_key, folder_path, folder_url, legacy_document_url, legacy_document_name = prepare_item_common(raw_item)
 
         name = clean_cell_value(item.get("name"))
         if not name:
@@ -807,8 +971,12 @@ def normalize_checklist_data(data: dict, checklist_key: str = "id") -> dict:
             "status": status,
             "plan": normalize_date_string(item.get("plan")),
             "fact": normalize_date_string(item.get("fact")),
-            "documentUrl": clean_cell_value(item.get("documentUrl")),
-            "documentName": clean_cell_value(item.get("documentName")),
+            "folderKey": folder_key,
+            "folderPath": folder_path,
+            "folderUrl": folder_url,
+            "documents": documents,
+            "documentUrl": legacy_document_url,
+            "documentName": legacy_document_name,
             "isCustom": bool(item.get("isCustom", False)),
         })
 
@@ -820,6 +988,8 @@ def normalize_checklist_data(data: dict, checklist_key: str = "id") -> dict:
             item["order"] = order
             if not item.get("id"):
                 item["id"] = build_item_id(group_id, order)
+            if not item.get("folderKey"):
+                item["folderKey"] = build_folder_key("id", item.get("name"), item.get("id"))
 
     progress = calculate_progress(normalized_items)
 
@@ -3027,21 +3197,83 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
             };
 
             buildDocumentCell = function (item) {
-                const hasDocument = !!(item.documentUrl && String(item.documentUrl).trim());
+                const documents = getItemDocuments(item);
+                const folderUrl = String(item.folderUrl || '').trim();
+                const showViewFolder = !!folderUrl;
 
-                if (hasDocument) {
+                const filesHtml = documents.map(doc => {
+                    const fileUrl = String(doc.fileUrl || doc.previewUrl || '').trim();
+                    const docId = String(doc.id || '');
+                    const docName = String(doc.name || 'Файл');
+
                     return `
-                        <button class="doc-btn" type="button" data-role="view-document" data-document-url="${esc(item.documentUrl)}">
-                            Посмотреть
-                        </button>
+                        <div class="doc-file-row">
+                            <a
+                                href="javascript:void(0)"
+                                class="doc-file-link"
+                                data-role="view-file"
+                                data-item-id="${esc(item.id)}"
+                                data-document-id="${esc(docId)}"
+                                data-file-url="${esc(fileUrl)}"
+                                title="${esc(docName)}"
+                            >
+                                ${esc(docName)}
+                            </a>
+                            <button
+                                type="button"
+                                class="doc-file-remove"
+                                data-role="remove-file"
+                                data-item-id="${esc(item.id)}"
+                                data-document-id="${esc(docId)}"
+                                title="Удалить файл"
+                                ${typeof disabledAttr === 'function' ? disabledAttr() : ''}
+                            >
+                                ×
+                            </button>
+                        </div>
                     `;
-                }
+                }).join('');
 
                 return `
-                    <button class="upload-btn" type="button" data-role="upload" data-item-id="${esc(item.id)}" ${disabledAttr()}>
-                        Загрузить
-                    </button>
-                    <input type="file" data-role="file-input" data-item-id="${esc(item.id)}" style="display:none;" ${disabledAttr()}>
+                    <div class="doc-cell">
+                        <div class="doc-actions">
+                            <button
+                                class="upload-btn"
+                                type="button"
+                                data-role="upload"
+                                data-item-id="${esc(item.id)}"
+                                ${typeof disabledAttr === 'function' ? disabledAttr() : ''}
+                            >
+                                Загрузить
+                            </button>
+
+                            ${showViewFolder ? `
+                                <button
+                                    class="doc-btn"
+                                    type="button"
+                                    data-role="view-folder"
+                                    data-item-id="${esc(item.id)}"
+                                    data-folder-url="${esc(folderUrl)}"
+                                >
+                                    Посмотреть
+                                </button>
+                            ` : ''}
+                        </div>
+
+                        ${documents.length ? `
+                            <div class="doc-files">
+                                ${filesHtml}
+                            </div>
+                        ` : ''}
+
+                        <input
+                            type="file"
+                            data-role="file-input"
+                            data-item-id="${esc(item.id)}"
+                            style="display:none;"
+                            ${typeof disabledAttr === 'function' ? disabledAttr() : ''}
+                        >
+                    </div>
                 `;
             };
 
@@ -3601,6 +3833,67 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
             .concept-inline-input {{ width:100%; min-height:32px; height:32px; border:1px solid #d0d7de; border-radius:8px; padding:6px 8px; font-size:12px; background:#fff; resize:vertical; overflow:hidden; line-height:1.35; }}
             .doc-btn,.upload-btn,.add-item-btn {{ display:inline-block; width:100%; text-align:center; padding:6px 8px; border:1px solid #d0d7de; border-radius:8px; background:#f8fafc; color:#1f2328; font-size:12px; text-decoration:none; cursor:pointer; }}
             .doc-btn:hover,.upload-btn:hover,.side-link:hover,.add-item-btn:hover {{ background:#f1f5f9; }}
+            .doc-cell {{
+                display: flex;
+                flex-direction: column;
+                gap: 6px;
+            }}
+
+            .doc-actions {{
+                display: flex;
+                gap: 6px;
+            }}
+
+            .doc-actions .upload-btn,
+            .doc-actions .doc-btn {{
+                flex: 1 1 0;
+                width: auto;
+            }}
+
+            .doc-files {{
+                display: flex;
+                flex-direction: column;
+                gap: 4px;
+            }}
+
+            .doc-file-row {{
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 6px;
+                min-width: 0;
+            }}
+
+            .doc-file-link {{
+                flex: 1 1 auto;
+                min-width: 0;
+                font-size: 12px;
+                color: #175cd3;
+                text-decoration: none;
+                cursor: pointer;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            }}
+
+            .doc-file-link:hover {{
+                text-decoration: underline;
+            }}
+
+            .doc-file-remove {{
+                flex: 0 0 auto;
+                border: none;
+                background: transparent;
+                color: #b42318;
+                cursor: pointer;
+                font-size: 14px;
+                line-height: 1;
+                padding: 0 2px;
+            }}
+
+            .doc-file-remove:hover {{
+                opacity: .8;
+            }}
             .add-item-row {{ padding:9px 12px 10px; min-height:52px; border-top:1px solid #edf0f2; background:#fcfcfd; display:flex; gap:8px; align-items:center; justify-content:flex-start; }}
             .add-item-row::after {{ content:''; flex:1 1 auto; }}
             .add-item-input {{ flex:0 0 190px; width:190px; min-width:190px; height:32px; border:1px solid #d0d7de; border-radius:8px; padding:7px 9px; font-size:12px; }}
@@ -3787,6 +4080,32 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                 if (s === 'Нет' || s === 'Не требуется') return 'status-indicator gray';
                 return 'status-indicator';
             }}
+
+            function getItemDocuments(item) {{
+                const docs = Array.isArray(item && item.documents) ? item.documents : [];
+                if (docs.length) {{
+                    return docs;
+                }}
+
+                const legacyUrl = String(item && item.documentUrl || '').trim();
+                const legacyName = String(item && item.documentName || '').trim();
+
+                if (legacyUrl || legacyName) {{
+                    return [{{
+                        id: 'legacy_' + String(item && item.id || ''),
+                        name: legacyName || 'Файл',
+                        path: legacyUrl,
+                        fileUrl: legacyUrl,
+                        previewUrl: legacyUrl,
+                        size: 0,
+                        modifiedAt: '',
+                        source: 'local'
+                    }}];
+                }}
+
+                return [];
+            }}
+
             function renderTitle() {{
                 if (collabTitle) {{
                     popupTitleEl.innerHTML = esc(checklistTitle) + ' <small>— ' + esc(collabTitle) + '</small>';
@@ -4182,36 +4501,83 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                 }});
             }}
             function buildDocumentCell(item) {{
-                const hasDocument = !!(item.documentUrl && String(item.documentUrl).trim());
+                const documents = getItemDocuments(item);
+                const folderUrl = String(item.folderUrl || '').trim();
+                const showViewFolder = !!folderUrl;
 
-                if (hasDocument) {{
+                const filesHtml = documents.map(doc => {{
+                    const fileUrl = String(doc.fileUrl || doc.previewUrl || '').trim();
+                    const docId = String(doc.id || '');
+                    const docName = String(doc.name || 'Файл');
+
                     return `
-                        <button
-                            class="doc-btn"
-                            type="button"
-                            data-role="view-document"
-                            data-document-url="${{esc(item.documentUrl)}}"
-                        >
-                            Посмотреть
-                        </button>
+                        <div class="doc-file-row">
+                            <a
+                                href="javascript:void(0)"
+                                class="doc-file-link"
+                                data-role="view-file"
+                                data-item-id="${{esc(item.id)}}"
+                                data-document-id="${{esc(docId)}}"
+                                data-file-url="${{esc(fileUrl)}}"
+                                title="${{esc(docName)}}"
+                            >
+                                ${{esc(docName)}}
+                            </a>
+                            <button
+                                type="button"
+                                class="doc-file-remove"
+                                data-role="remove-file"
+                                data-item-id="${{esc(item.id)}}"
+                                data-document-id="${{esc(docId)}}"
+                                title="Удалить файл"
+                                ${{typeof disabledAttr === 'function' ? disabledAttr() : ''}}
+                            >
+                                ×
+                            </button>
+                        </div>
                     `;
-                }}
+                }}).join('');
 
                 return `
-                    <button
-                        class="upload-btn"
-                        type="button"
-                        data-role="upload"
-                        data-item-id="${{esc(item.id)}}"
-                    >
-                        Загрузить
-                    </button>
-                    <input
-                        type="file"
-                        data-role="file-input"
-                        data-item-id="${{esc(item.id)}}"
-                        style="display:none;"
-                    >
+                    <div class="doc-cell">
+                        <div class="doc-actions">
+                            <button
+                                class="upload-btn"
+                                type="button"
+                                data-role="upload"
+                                data-item-id="${{esc(item.id)}}"
+                                ${{typeof disabledAttr === 'function' ? disabledAttr() : ''}}
+                            >
+                                Загрузить
+                            </button>
+
+                            ${{showViewFolder ? `
+                                <button
+                                    class="doc-btn"
+                                    type="button"
+                                    data-role="view-folder"
+                                    data-item-id="${{esc(item.id)}}"
+                                    data-folder-url="${{esc(folderUrl)}}"
+                                >
+                                    Посмотреть
+                                </button>
+                            ` : ''}}
+                        </div>
+
+                        ${{documents.length ? `
+                            <div class="doc-files">
+                                ${{filesHtml}}
+                            </div>
+                        ` : ''}}
+
+                        <input
+                            type="file"
+                            data-role="file-input"
+                            data-item-id="${{esc(item.id)}}"
+                            style="display:none;"
+                            ${{typeof disabledAttr === 'function' ? disabledAttr() : ''}}
+                        >
+                    </div>
                 `;
             }}
             function pushSessionChange(itemId, itemName, field, oldValue, newValue) {{
@@ -4518,8 +4884,38 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
             }}
             function replaceItem(updatedItem) {{
                 if (!updatedItem) return;
-                const idx = items.findIndex(x => x.id === updatedItem.id);
-                if (idx >= 0) items[idx] = Object.assign({{}}, items[idx], updatedItem); else items.push(updatedItem);
+
+                const normalizedItem = Object.assign({{
+                    folderKey: '',
+                    folderPath: '',
+                    folderUrl: '',
+                    documents: [],
+                    documentUrl: '',
+                    documentName: ''
+                }}, updatedItem || {{}});
+
+                normalizedItem.documents = Array.isArray(normalizedItem.documents) ? normalizedItem.documents : [];
+
+                if (!Object.prototype.hasOwnProperty.call(normalizedItem, 'documentUrl')) {{
+                    normalizedItem.documentUrl = '';
+                }}
+                if (!Object.prototype.hasOwnProperty.call(normalizedItem, 'documentName')) {{
+                    normalizedItem.documentName = '';
+                }}
+
+                const idx = items.findIndex(x => x.id === normalizedItem.id);
+                if (idx >= 0) {{
+                    items[idx] = Object.assign({{}}, items[idx], normalizedItem, {{
+                        folderKey: normalizedItem.folderKey || '',
+                        folderPath: normalizedItem.folderPath || '',
+                        folderUrl: normalizedItem.folderUrl || '',
+                        documents: normalizedItem.documents || [],
+                        documentUrl: normalizedItem.documentUrl || '',
+                        documentName: normalizedItem.documentName || ''
+                    }});
+                }} else {{
+                    items.push(normalizedItem);
+                }}
             }}
             function bindEvents() {{
                 document.querySelectorAll('[data-role="concept-status"]').forEach(el => {{
@@ -4710,22 +5106,81 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                     }});
                 }});
 
-                document.querySelectorAll('[data-role="view-document"]').forEach(btn => {{
+                document.querySelectorAll('[data-role="view-folder"]').forEach(btn => {{
                     btn.addEventListener('click', function () {{
-                        const rawUrl = this.dataset.documentUrl || '';
-                        if (!rawUrl) return;
-                        try {{
-                            let absoluteUrl = rawUrl;
+                        const folderUrl = this.dataset.folderUrl || '';
+                        if (!folderUrl) return;
 
-                            if (String(rawUrl || '').startsWith('/uploads/')) {{
-                                absoluteUrl = APP_BASE_URL + rawUrl;
+                        try {{
+                            window.open(folderUrl, '_blank', 'noopener,noreferrer');
+                        }} catch (e) {{
+                            console.log('open folder error:', e);
+                            setSaveState('error', 'Ошибка открытия папки');
+                        }}
+                    }});
+                }});
+
+                document.querySelectorAll('[data-role="view-file"]').forEach(link => {{
+                    link.addEventListener('click', function () {{
+                        const fileUrl = this.dataset.fileUrl || '';
+                        if (!fileUrl) return;
+
+                        try {{
+                            let absoluteUrl = fileUrl;
+
+                            if (String(fileUrl || '').startsWith('/uploads/')) {{
+                                absoluteUrl = APP_BASE_URL + fileUrl;
                             }} else {{
-                                absoluteUrl = new URL(rawUrl, window.location.href).href;
+                                absoluteUrl = new URL(fileUrl, window.location.href).href;
                             }}
+
                             window.open(absoluteUrl, '_blank', 'noopener,noreferrer');
                         }} catch (e) {{
-                            console.log('open document error:', e);
-                            setSaveState('error', 'Ошибка открытия документа');
+                            console.log('open file error:', e);
+                            setSaveState('error', 'Ошибка открытия файла');
+                        }}
+                    }});
+                }});
+
+                document.querySelectorAll('[data-role="remove-file"]').forEach(btn => {{
+                    btn.addEventListener('click', async function () {{
+                        const itemId = this.dataset.itemId;
+                        const documentId = this.dataset.documentId;
+
+                        const item = items.find(x => x.id === itemId);
+                        const documents = getItemDocuments(item);
+                        const doc = documents.find(x => String(x.id || '') === String(documentId || ''));
+
+                        try {{
+                            const response = await fetch(appUrl('api/checklist/remove-document'), {{
+                                method: 'POST',
+                                headers: {{ 'Content-Type': 'application/json' }},
+                                body: JSON.stringify({{
+                                    dialogId,
+                                    checklistKey: currentChecklistKey,
+                                    itemId,
+                                    documentId
+                                }})
+                            }});
+
+                            const result = await response.json();
+                            if (!response.ok || !result.ok) throw new Error(result.error || 'remove document failed');
+
+                            replaceItem(result.item);
+
+                            sessionChanges.push({{
+                                field: 'document',
+                                itemId: itemId,
+                                itemName: item ? item.name : '',
+                                oldValue: doc ? (doc.name || 'uploaded') : 'uploaded',
+                                newValue: 'removed'
+                            }});
+                            sessionDirty = true;
+
+                            renderAll();
+                        }} catch (e) {{
+                            console.log(e);
+                            setSaveState('error', 'Ошибка удаления файла');
                         }}
                     }});
                 }});
@@ -4735,48 +5190,43 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                         const itemId = this.dataset.itemId;
                         const file = this.files && this.files[0];
                         if (!file) return;
+
                         const item = items.find(x => x.id === itemId);
                         const oldStatus = item ? normalizeStatus(item.status) : '';
 
                         try {{
                             const result = await uploadDocument(itemId, file);
                             replaceItem(result.item);
-                            if (result.item) {{
+
+                            const uploadedDocs = getItemDocuments(result.item);
+                            const uploadedDoc = uploadedDocs.length ? uploadedDocs[uploadedDocs.length - 1] : null;
+
+                            sessionChanges.push({{
+                                field: 'document',
+                                itemId: result.item ? result.item.id : itemId,
+                                itemName: result.item ? result.item.name : (item ? item.name : ''),
+                                oldValue: '',
+                                newValue: uploadedDoc ? (uploadedDoc.name || 'uploaded') : 'uploaded'
+                            }});
+                            sessionDirty = true;
+
+                            if (result.item && (result.item.status || '') !== (oldStatus || '')) {{
                                 sessionChanges.push({{
-                                    field: 'document',
+                                    field: 'status',
                                     itemId: result.item.id,
                                     itemName: result.item.name,
-                                    oldValue: '',
-                                    newValue: 'uploaded'
+                                    oldValue: oldStatus || '',
+                                    newValue: result.item.status || ''
                                 }});
                                 sessionDirty = true;
-                                debugLog('document_uploaded', {{
-                                    itemId: result.item.id,
-                                    itemName: result.item.name,
-                                    documentUrl: result.item.documentUrl || ''
-                                }});
-
-                                if ((result.item.status || '') && (result.item.status || '') !== (oldStatus || '')) {{
-                                    sessionChanges.push({{
-                                        field: 'status',
-                                        itemId: result.item.id,
-                                        itemName: result.item.name,
-                                        oldValue: oldStatus || '',
-                                        newValue: result.item.status || ''
-                                    }});
-                                    sessionDirty = true;
-                                    debugLog('status_changed_by_upload', {{
-                                        itemId: result.item.id,
-                                        itemName: result.item.name,
-                                        oldValue: oldStatus || '',
-                                        newValue: result.item.status || ''
-                                    }});
-                                }}
                             }}
+
                             renderAll();
                         }} catch (e) {{
                             console.log(e);
                             setSaveState('error', 'Ошибка загрузки файла');
+                        }} finally {{
+                            this.value = '';
                         }}
                     }});
                 }});
