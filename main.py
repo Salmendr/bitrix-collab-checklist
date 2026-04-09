@@ -63,7 +63,6 @@ CHECKLIST_GROUPS = {
         "title": "ИД",
         "items": [
             "ППТ",
-            "Сокращение ОКН",
             "Выписка ЕГРН",
             "ГПЗУ",
             "Тех задание",
@@ -77,26 +76,26 @@ CHECKLIST_GROUPS = {
     2: {
         "title": "ТУ",
         "items": [
-            "ТУ Свет",
+            "ТУ Тепловые сети",
             "ТУ Водоснабжение",
             "ТУ Бытовая канализация",
-            "Расположение пож гидрантов",
-            "ТУ СС",
-            "ТУ ТС",
-            "ТУ Газ",
-            "ТУ Ливневка",
-            "ТУ выносы",
-            "СТУ",
+            "ТУ Электроснабжение",
+            "ТУ Сети связи",
+            "ТУ Наружное освещение",
+            "ТУ Ливневая канализация",
+            "ТУ Газоснабжение",
         ],
     },
     3: {
         "title": "Прочее",
         "items": [
-            "Задание на лифты",
-            "Аэропорт",
-            "Примыкание ОДД",
+            "Согласование с Аэропортом",
+            "Примыкание к УДС",
             "Порубочный лист",
             "Справка вывоза мусора",
+            "СТУ",
+            "Сокращение ОКН",
+            "Расположение пожарных гидрантов",
         ],
     },
     4: {
@@ -3355,7 +3354,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                     '&checklistKey=' + encodeURIComponent(currentChecklistKey) +
                     '&itemId=' + encodeURIComponent(itemId)
                 ) : '');
-                const showViewFolder = !!folderViewUrl;
+                const showViewFolder = documents.length > 0 && !!folderViewUrl;
 
                 const filesHtml = documents.map(doc => {
                     const docId = String(doc.id || '');
@@ -4775,7 +4774,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                     '&checklistKey=' + encodeURIComponent(currentChecklistKey) +
                     '&itemId=' + encodeURIComponent(itemId)
                 ) : '');
-                const showViewFolder = !!folderViewUrl;
+                const showViewFolder = documents.length > 0 && !!folderViewUrl;
 
                 const filesHtml = documents.map(doc => {{
                     const docId = String(doc.id || '');
@@ -5483,7 +5482,12 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                         this.disabled = true;
 
                         try {{
-                            await removeDocument(itemId, documentId);
+                            const removeResult = await removeDocument(itemId, documentId);
+
+                            if (removeResult && removeResult.item) {{
+                                replaceItem(removeResult.item);
+                            }}
+
                             await reloadCurrentChecklistFromServer();
 
                             pushSessionChange(
@@ -5941,9 +5945,11 @@ async def api_checklist_update_item(request: Request):
     items = data.get("items", [])
 
     target_item = None
-    for item in items:
-        if str(item.get("id")) == item_id:
-            target_item = item
+
+    for index, item in enumerate(items):
+        if str(item.get("id") or "") == item_id:
+            target_item = migrate_legacy_document_fields(item)
+            items[index] = target_item
             break
 
     if not target_item:
@@ -5990,7 +5996,10 @@ async def api_checklist_update_item(request: Request):
             target_item["priority"] = derive_indicator_from_status(new_status)
 
             if new_status == "Нет":
-                target_item = migrate_legacy_document_fields(target_item)
+                migrated_item = migrate_legacy_document_fields(target_item)
+                target_item.clear()
+                target_item.update(migrated_item)
+
                 existing_documents = normalize_documents_list(target_item.get("documents"))
 
                 for doc in existing_documents:
@@ -6003,6 +6012,8 @@ async def api_checklist_update_item(request: Request):
                 target_item["documents"] = []
                 target_item["documentUrl"] = ""
                 target_item["documentName"] = ""
+                target_item["folderPath"] = ""
+                target_item["folderUrl"] = ""
     elif field == "plan":
         target_item["plan"] = normalize_date_string(value)
     elif field == "fact":
@@ -6193,9 +6204,10 @@ async def api_checklist_upload_document(
     items = data.get("items", []) or []
 
     target_item = None
-    for item in items:
+    for index, item in enumerate(items):
         if str(item.get("id") or "") == item_id:
-            target_item = item
+            target_item = migrate_legacy_document_fields(item)
+            items[index] = target_item
             break
 
     if not target_item:
@@ -6230,7 +6242,7 @@ async def api_checklist_upload_document(
         "source": "local",
     })
 
-    existing_documents = list(target_item.get("documents") or [])
+    existing_documents = normalize_documents_list(target_item.get("documents"))
     existing_documents.append(document_record)
     normalized_documents = normalize_documents_list(existing_documents)
 
@@ -6289,15 +6301,15 @@ async def api_checklist_remove_document(request: Request):
     items = data.get("items", []) or []
 
     target_item = None
-    for item in items:
+    for index, item in enumerate(items):
         if str(item.get("id") or "") == item_id:
-            target_item = item
+            target_item = migrate_legacy_document_fields(item)
+            items[index] = target_item
             break
 
     if not target_item:
         return JSONResponse({"ok": False, "error": "item not found"}, status_code=404)
 
-    target_item = migrate_legacy_document_fields(target_item)
     documents = normalize_documents_list(target_item.get("documents"))
 
     doc_to_remove = None
@@ -6358,6 +6370,8 @@ async def api_checklist_remove_document(request: Request):
     else:
         target_item["folderPath"] = ""
         target_item["folderUrl"] = ""
+        target_item["documentUrl"] = ""
+        target_item["documentName"] = ""
 
     data["items"] = items
     data = normalize_checklist_data(data, checklist_key)
@@ -6393,15 +6407,16 @@ def api_checklist_folder(dialogId: str = "", itemId: str = "", checklistKey: str
     items = data.get("items", []) or []
 
     target_item = None
-    for item in items:
+
+    for index, item in enumerate(items):
         if str(item.get("id") or "") == item_id:
-            target_item = item
+            target_item = migrate_legacy_document_fields(item)
+            items[index] = target_item
             break
 
     if not target_item:
-        return HTMLResponse("<h3>Пункт не найден</h3>", status_code=404)
+        return JSONResponse({"ok": False, "error": "item not found"}, status_code=404)
 
-    target_item = migrate_legacy_document_fields(target_item)
     documents = normalize_documents_list(target_item.get("documents"))
 
     rows = []
