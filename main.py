@@ -3912,17 +3912,39 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                 });
 
                 document.querySelectorAll('[data-role="opr-add-item"]').forEach(btn => {
-                    btn.addEventListener('click', function() {
+                    btn.addEventListener('click', async function() {
                         const groupId = Number(this.dataset.groupId);
                         const input = document.getElementById('oprAddItemInput_' + groupId);
                         if (!input) return;
+
                         const name = (input.value || '').trim();
                         if (!name) return;
-                        const newItem = createLocalItem(groupId, name, 'opr');
-                        items.push(newItem);
-                        pushSessionChange(newItem.id, newItem.name, 'add-item', '', newItem.name);
-                        input.value = '';
-                        renderAll();
+
+                        this.disabled = true;
+
+                        try {
+                            const result = await addItem(groupId, name, 'opr');
+                            if (!result || !result.item) {
+                                throw new Error('add opr item failed');
+                            }
+
+                            replaceItem(result.item);
+                            pushSessionChange(result.item.id, result.item.name, 'add-item', '', result.item.name);
+
+                            debugLog('opr_item_added', {
+                                itemId: result.item.id,
+                                itemName: result.item.name,
+                                groupId: groupId
+                            });
+
+                            input.value = '';
+                            renderAll();
+                        } catch (e) {
+                            console.log('opr add item error:', e);
+                            setSaveState('error', 'Ошибка добавления пункта');
+                        } finally {
+                            this.disabled = false;
+                        }
                     });
                 });
             };
@@ -4521,6 +4543,22 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                     console.log('loadChecklistByKey error:', e);
                     setSaveState('error', 'Ошибка загрузки чек-листа');
                 }}
+            }}
+
+            async function reloadCurrentChecklistFromServer() {{
+                const response = await fetch(
+                    appUrl('api/checklist') +
+                    '?dialogId=' + encodeURIComponent(dialogId) +
+                    '&checklistKey=' + encodeURIComponent(currentChecklistKey)
+                );
+                const result = await response.json();
+
+                if (!response.ok) {{
+                    throw new Error(result.error || 'reload checklist failed');
+                }}
+
+                applyChecklistData(result);
+                return result;
             }}
 
             function sendCloseSummaryOnce(eventName) {{
@@ -5311,44 +5349,76 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                 }});
 
                 document.querySelectorAll('[data-role="add-item"]').forEach(btn => {{
-                    btn.addEventListener('click', function() {{
+                    btn.addEventListener('click', async function() {{
                         const groupId = Number(this.dataset.groupId);
                         const input = document.getElementById('addItemInput_' + groupId);
                         if (!input) return;
+
                         const name = (input.value || '').trim();
                         if (!name) return;
 
-                        const newItem = createLocalItem(groupId, name, 'id');
-                        items.push(newItem);
-                        pushSessionChange(newItem.id, newItem.name, 'add-item', '', newItem.name);
-                        debugLog('item_added', {{
-                            itemId: newItem.id,
-                            itemName: newItem.name,
-                            groupId: groupId
-                        }});
-                        input.value = '';
-                        renderAll();
+                        this.disabled = true;
+
+                        try {{
+                            const result = await addItem(groupId, name, 'id');
+                            if (!result || !result.item) {{
+                                throw new Error('add item failed');
+                            }}
+
+                            replaceItem(result.item);
+                            pushSessionChange(result.item.id, result.item.name, 'add-item', '', result.item.name);
+
+                            debugLog('item_added', {{
+                                itemId: result.item.id,
+                                itemName: result.item.name,
+                                groupId: groupId
+                            }});
+
+                            input.value = '';
+                            renderAll();
+                        }} catch (e) {{
+                            console.log('add item error:', e);
+                            setSaveState('error', 'Ошибка добавления пункта');
+                        }} finally {{
+                            this.disabled = false;
+                        }}
                     }});
                 }});
 
                 document.querySelectorAll('[data-role="concept-add-item"]').forEach(btn => {{
-                    btn.addEventListener('click', function() {{
+                    btn.addEventListener('click', async function() {{
                         const groupId = Number(this.dataset.groupId);
                         const input = document.getElementById('conceptAddItemInput_' + groupId);
                         if (!input) return;
+
                         const name = (input.value || '').trim();
                         if (!name) return;
 
-                        const newItem = createLocalItem(groupId, name, 'concept');
-                        items.push(newItem);
-                        pushSessionChange(newItem.id, newItem.name, 'add-item', '', newItem.name);
-                        debugLog('item_added', {{
-                            itemId: newItem.id,
-                            itemName: newItem.name,
-                            groupId: groupId
-                        }});
-                        input.value = '';
-                        renderAll();
+                        this.disabled = true;
+
+                        try {{
+                            const result = await addItem(groupId, name, 'concept');
+                            if (!result || !result.item) {{
+                                throw new Error('add concept item failed');
+                            }}
+
+                            replaceItem(result.item);
+                            pushSessionChange(result.item.id, result.item.name, 'add-item', '', result.item.name);
+
+                            debugLog('item_added', {{
+                                itemId: result.item.id,
+                                itemName: result.item.name,
+                                groupId: groupId
+                            }});
+
+                            input.value = '';
+                            renderAll();
+                        }} catch (e) {{
+                            console.log('concept add item error:', e);
+                            setSaveState('error', 'Ошибка добавления пункта');
+                        }} finally {{
+                            this.disabled = false;
+                        }}
                     }});
                 }});
 
@@ -5413,12 +5483,8 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                         this.disabled = true;
 
                         try {{
-                            const result = await removeDocument(itemId, documentId);
-                            if (!result || !result.item) {{
-                                throw new Error('remove document failed');
-                            }}
-
-                            replaceItem(result.item);
+                            await removeDocument(itemId, documentId);
+                            await reloadCurrentChecklistFromServer();
 
                             pushSessionChange(
                                 itemId,
