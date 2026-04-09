@@ -2127,7 +2127,7 @@ def app_home_html(
                 function resizeCurrentPopupFrame() {{
                     try {{
                         if (window.BX24 && typeof window.BX24.resizeWindow === 'function') {{
-                            window.BX24.resizeWindow(1180, 680);
+                            window.BX24.resizeWindow(1180, 720);
                         }}
                         if (window.BX24 && typeof window.BX24.fitWindow === 'function') {{
                             window.BX24.fitWindow();
@@ -3324,6 +3324,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                                 data-role="remove-file"
                                 data-item-id="${esc(itemId)}"
                                 data-document-id="${esc(docId)}"
+                                data-document-name="${esc(docName)}"
                                 title="Удалить файл"
                                 ${typeof disabledAttr === 'function' ? disabledAttr() : ''}
                             >
@@ -3523,7 +3524,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                 const groupItems = getItemsByGroup(group.id);
                 const allowAdd = Number(group.id) !== 10;
                 const rows = groupItems.map(item => `
-                    <div class="row" style="grid-template-columns: 1.05fr 0.72fr 165px 150px 1.15fr;" data-item-id="${esc(item.id)}">
+                    <div class="row" style="grid-template-columns: 1.05fr 0.66fr 190px 150px 1.15fr;" data-item-id="${esc(item.id)}">
                         <div class="td"><div class="cell-name"><div class="${conceptIndicatorClass(item)}"></div>${buildConceptNameCell(item)}</div></div>
                         <div class="td">${buildConceptSourceCell(item)}</div>
                         <div class="td">${buildDocumentCell(item)}</div>
@@ -3545,7 +3546,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
             function buildConceptTableHtmlEnhanced(conceptGroups) {
                 return `
                     <div class="thead">
-                        <div class="thead-top" style="grid-template-columns: 1.05fr 0.72fr 165px 150px 1.15fr;">
+                        <div class="thead-top" style="grid-template-columns: 1.05fr 0.66fr 190px 150px 1.15fr;">
                             <div class="th">Пункт</div>
                             <div class="th">Нормативы</div>
                             <div class="th">Документ</div>
@@ -3895,20 +3896,20 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
             .save-state {{ font-size:12px; font-weight:700; padding:7px 10px; border-radius:999px; background:#eef2ff; color:#3730a3; white-space:nowrap; }}
             .save-state.saving {{ background:#fff4e5; color:#b26a00; }}
             .save-state.error {{ background:#fdecec; color:#b42318; }}
-            .content {{ padding:14px 16px 16px; max-height:78vh; overflow:auto; }}
-            .layout {{ display:grid; grid-template-columns:minmax(0,1fr) 240px; gap:14px; align-items:start; }}
+            .content {{ padding:14px 16px 16px; max-height:82vh; overflow:auto; }}
+            .layout {{ display:flex; flex-direction:column; gap:12px; align-items:stretch; }}
             .tables-grid {{ display:grid; grid-template-columns:1fr 1fr; gap:14px; align-items:start; }}
             .table-panel {{ min-width:0; display:flex; }}
             .table-panel .table {{ flex:1 1 auto; }}
-            .side-panel {{ border:1px solid #e5e7eb; border-radius:12px; background:#fff; overflow:hidden; position:sticky; top:0; }}
+            .side-panel {{ order:-1; border:1px solid #e5e7eb; border-radius:12px; background:#fff; overflow:hidden; position:static; }}
             .side-panel-title {{ padding:12px 14px; background:#fafbfc; border-bottom:1px solid #e5e7eb; font-size:13px; font-weight:700; color:#344054; }}
-            .side-panel-list {{ padding:10px; display:flex; flex-direction:column; gap:8px; }}
-            .side-link {{ display:block; width:100%; text-align:left; border:1px solid #d0d7de; border-radius:8px; background:#fff; padding:9px 10px; font-size:13px; cursor:pointer; }}
+            .side-panel-list {{ padding:10px; display:flex; flex-wrap:wrap; gap:8px; }}
+            .side-link {{ display:inline-flex; width:auto; text-align:left; border:1px solid #d0d7de; border-radius:8px; background:#fff; padding:9px 12px; font-size:13px; cursor:pointer; align-items:center; }}
             .side-link.active {{ background:#eef2ff; border-color:#c7d2fe; font-weight:700; }}
             .table {{ width:100%; border:1px solid #e5e7eb; border-radius:12px; overflow:hidden; background:#fff; }}
             .thead {{ position:sticky; top:0; z-index:10; background:#f8fafc; border-bottom:1px solid #e5e7eb; }}
             .thead-top,.thead-bottom {{ min-height:38px; }}
-            .thead-top,.thead-bottom,.row {{ display:grid; grid-template-columns:190px 150px 100px 136px 86px; gap:0; align-items:stretch; justify-content:start; }}
+            .thead-top,.thead-bottom,.row {{ display:grid; grid-template-columns:190px 190px 100px 136px 136px; gap:0; align-items:stretch; justify-content:start; }}
             .th,.td {{ padding:8px 9px; border-right:1px solid #edf0f2; }}
             .th:last-child,.td:last-child {{ border-right:none; }}
             .th {{ font-size:12px; font-weight:700; color:#475467; min-height:38px; display:flex; align-items:center; }}
@@ -4237,6 +4238,11 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                 return current.toFixed(2) + ' ' + units[unitIndex];
             }}
 
+            function confirmFileRemoval(fileName) {{
+                const safeName = String(fileName || 'файл').trim() || 'файл';
+                return window.confirm('Удалить файл "' + safeName + '"?');
+            }}
+
             function renderTitle() {{
                 if (collabTitle) {{
                     popupTitleEl.innerHTML = esc(checklistTitle) + ' <small>— ' + esc(collabTitle) + '</small>';
@@ -4465,6 +4471,28 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                 releaseChecklistLock(currentChecklistKey, true);
             }}
 
+            window.addEventListener('message', async function (event) {{
+                const data = event && event.data ? event.data : {{}};
+                if (!data || data.type !== 'checklist-document-removed') return;
+                if (String(data.dialogId || '') !== String(dialogId || '')) return;
+                if (String(data.checklistKey || '') !== String(currentChecklistKey || '')) return;
+
+                try {{
+                    const response = await fetch(
+                        appUrl('api/checklist') +
+                        '?dialogId=' + encodeURIComponent(dialogId) +
+                        '&checklistKey=' + encodeURIComponent(currentChecklistKey)
+                    );
+                    const result = await response.json();
+                    if (!response.ok) throw new Error(result.error || 'reload after folder remove failed');
+
+                    applyChecklistData(result);
+                    renderAll();
+                }} catch (e) {{
+                    console.log('folder remove sync error:', e);
+                }}
+            }});
+
             document.addEventListener('visibilitychange', function () {{
                 if (document.visibilityState === 'hidden') {{
                     sendCloseSummaryOnce('popup_hidden');
@@ -4678,6 +4706,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                                 data-role="remove-file"
                                 data-item-id="${{esc(itemId)}}"
                                 data-document-id="${{esc(docId)}}"
+                                data-document-name="${{esc(docName)}}"
                                 title="Удалить файл"
                                 ${{typeof disabledAttr === 'function' ? disabledAttr() : ''}}
                             >
@@ -4904,7 +4933,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                 const groupItems = getItemsByGroup(group.id);
                 const allowAdd = Number(group.id) !== 10;
                 const rows = groupItems.map(item => `
-                    <div class="row" style="grid-template-columns: 1.05fr 0.8fr 110px 150px 1.15fr;" data-item-id="${{esc(item.id)}}">
+                    <div class="row" style="grid-template-columns: 1.05fr 0.66fr 190px 150px 1.15fr;" data-item-id="${{esc(item.id)}}">
                         <div class="td">
                             <div class="cell-name">
                                 <div class="${{conceptIndicatorClass(item)}}"></div>
@@ -4932,7 +4961,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
             function buildConceptTableHtml(conceptGroups) {{
                 return `
                     <div class="thead">
-                        <div class="thead-top" style="grid-template-columns: 1.05fr 0.8fr 110px 150px 1.15fr;">
+                        <div class="thead-top" style="grid-template-columns: 1.05fr 0.66fr 190px 150px 1.15fr;">
                             <div class="th">Пункт</div>
                             <div class="th">Нормативы</div>
                             <div class="th">Документ</div>
@@ -5301,14 +5330,19 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                 }});
 
                 document.querySelectorAll('[data-role="remove-file"]').forEach(btn => {{
-                    btn.addEventListener('click', async function (event) {{
+                    btn.onclick = async function (event) {{
                         event.preventDefault();
                         event.stopPropagation();
 
                         if (this.disabled) return;
 
-                        const itemId = this.dataset.itemId;
-                        const documentId = this.dataset.documentId;
+                        const itemId = this.dataset.itemId || '';
+                        const documentId = this.dataset.documentId || '';
+                        const documentName = this.dataset.documentName || 'файл';
+
+                        if (!confirmFileRemoval(documentName)) {{
+                            return;
+                        }}
 
                         const item = items.find(x => x.id === itemId);
                         const documents = getItemDocuments(item);
@@ -5318,13 +5352,17 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
 
                         try {{
                             const result = await removeDocument(itemId, documentId);
+                            if (!result || !result.item) {{
+                                throw new Error('remove document failed');
+                            }}
+
                             replaceItem(result.item);
 
                             pushSessionChange(
                                 itemId,
                                 item ? item.name : '',
                                 'document',
-                                doc ? (doc.name || 'uploaded') : 'uploaded',
+                                doc ? (doc.name || documentName) : documentName,
                                 'removed'
                             );
 
@@ -5335,7 +5373,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                         }} finally {{
                             this.disabled = false;
                         }}
-                    }});
+                    }};
                 }});
 
                 document.querySelectorAll('[data-role="file-input"]').forEach(input => {{
@@ -5687,7 +5725,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                 function applyPopupWindowSize() {{
                     try {{
                         if (typeof window.BX24.resizeWindow === 'function') {{
-                            window.BX24.resizeWindow(1180, 680);
+                            window.BX24.resizeWindow(1180, 720);
                         }}
                         if (typeof window.BX24.fitWindow === 'function') {{
                             window.BX24.fitWindow();
@@ -6254,6 +6292,20 @@ def api_checklist_folder(dialogId: str = "", itemId: str = "", checklistKey: str
                     <a href="{html.escape(open_url)}" target="_blank">Открыть</a>
                     &nbsp;|&nbsp;
                     <a href="{html.escape(download_url)}" target="_blank">Скачать</a>
+                    &nbsp;|&nbsp;
+                    <button
+                        type="button"
+                        data-role="folder-remove-file"
+                        data-dialog-id="{html.escape(dialog_id)}"
+                        data-checklist-key="{html.escape(checklist_key)}"
+                        data-item-id="{html.escape(item_id)}"
+                        data-document-id="{html.escape(doc_id)}"
+                        data-document-name="{doc_name}"
+                        style="border:none;background:transparent;color:#b42318;cursor:pointer;font-size:16px;line-height:1;padding:0 2px;"
+                        title="Удалить файл"
+                    >
+                        ×
+                    </button>
                 </td>
             </tr>
         """)
@@ -6266,7 +6318,7 @@ def api_checklist_folder(dialogId: str = "", itemId: str = "", checklistKey: str
 
     title = html.escape(str(target_item.get("name") or "Папка"))
     checklist_title = html.escape(str(data.get("title") or "Чек-лист"))
-
+    remove_api_url = html.escape(f"{normalize_base_path(APP_BASE_PATH)}/api/checklist/remove-document")
     return f"""
     <html>
     <head>
@@ -6294,6 +6346,58 @@ def api_checklist_folder(dialogId: str = "", itemId: str = "", checklistKey: str
                 </table>
             </div>
         </div>
+        <script>
+            const folderRemoveApiUrl = "{remove_api_url}";
+
+            document.querySelectorAll('[data-role="folder-remove-file"]').forEach(btn => {{
+                btn.addEventListener('click', async function () {{
+                    const documentName = this.dataset.documentName || 'файл';
+                    if (!window.confirm('Удалить файл "' + documentName + '"?')) {{
+                        return;
+                    }}
+
+                    this.disabled = true;
+
+                    try {{
+                        const response = await fetch(folderRemoveApiUrl, {{
+                            method: 'POST',
+                            headers: {{ 'Content-Type': 'application/json' }},
+                            body: JSON.stringify({{
+                                dialogId: this.dataset.dialogId,
+                                checklistKey: this.dataset.checklistKey,
+                                itemId: this.dataset.itemId,
+                                documentId: this.dataset.documentId
+                            }})
+                        }});
+
+                        const result = await response.json();
+                        if (!response.ok || !result.ok) {{
+                            throw new Error(result.error || 'remove document failed');
+                        }}
+
+                        try {{
+                            if (window.opener && typeof window.opener.postMessage === 'function') {{
+                                window.opener.postMessage({{
+                                    type: 'checklist-document-removed',
+                                    dialogId: this.dataset.dialogId,
+                                    checklistKey: this.dataset.checklistKey,
+                                    itemId: this.dataset.itemId
+                                }}, '*');
+                            }}
+                        }} catch (e) {{
+                            console.log('opener sync error:', e);
+                        }}
+
+                        window.location.reload();
+                    }} catch (e) {{
+                        console.log('folder remove error:', e);
+                        alert('Ошибка удаления файла');
+                    }} finally {{
+                        this.disabled = false;
+                    }}
+                }});
+            }});
+        </script>
     </body>
     </html>
     """
