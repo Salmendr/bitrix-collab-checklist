@@ -21,7 +21,10 @@ app = FastAPI()
 
 BASE_DIR = Path(__file__).resolve().parent
 
-DB_DIR = BASE_DIR / "db"
+VOLUME_DIR = BASE_DIR / "Volume"
+VOLUME_DIR.mkdir(parents=True, exist_ok=True)
+
+DB_DIR = VOLUME_DIR / "DB"
 DB_DIR.mkdir(parents=True, exist_ok=True)
 
 DB_PATH = str(DB_DIR / "app.db")
@@ -32,7 +35,7 @@ PUBLIC_APP_BASE_URL = (os.getenv("PUBLIC_APP_BASE_URL", "") or "").strip()
 TECH_USER_ID = int(os.getenv("TECH_USER_ID", "138"))
 BITRIX_TECH_WEBHOOK_URL = os.getenv("BITRIX_TECH_WEBHOOK_URL", "").strip()
 
-UPLOAD_ROOT = BASE_DIR / "uploads"
+UPLOAD_ROOT = VOLUME_DIR / "uploads"
 UPLOAD_ROOT.mkdir(parents=True, exist_ok=True)
 
 CHECKLIST_UPLOAD_ROOT = UPLOAD_ROOT / "checklists"
@@ -973,29 +976,34 @@ def normalize_checklist_data(data: dict, checklist_key: str = "id") -> dict:
         raw_items = data.get("items", []) or []
         normalized_items = []
 
+        group_order_counters = {1: 0, 2: 0, 3: 0, 4: 0}
+
         for raw_item in raw_items:
             item, documents, first_doc, folder_key, folder_path, folder_url, legacy_document_url, legacy_document_name = prepare_item_common(raw_item)
 
-            name = clean_cell_value(item.get("name"))
-            if not name:
+            item_name = clean_cell_value(item.get("name"))
+            if not item_name:
                 continue
 
             status = normalize_status(item.get("status"))
-            group_id = int(item.get("group") or 0)
-            if status == "Не требуется":
-                group_id = 10
-            elif group_id == 10 or not group_id:
-                group_id = resolve_opr_group_id_by_item_id_or_name(item)
+            target_group_id = move_item_to_required_group({
+                "group": item.get("group"),
+                "name": item_name,
+                "status": status,
+            })
+
+            group_order_counters[target_group_id] += 1
+            default_order = group_order_counters[target_group_id]
 
             normalized_items.append({
-                "id": str(item.get("id") or ""),
-                "group": group_id,
-                "order": int(item.get("order") or 0),
-                "name": name,
+                "id": str(item.get("id") or build_item_id(target_group_id, default_order)),
+                "group": target_group_id,
+                "order": int(item.get("order") or default_order),
+                "name": item_name,
                 "priority": derive_indicator_from_status(status),
                 "status": status,
-                "plannedDate": normalize_date_string(item.get("plannedDate")),
-                "extraInfo": clean_cell_value(item.get("extraInfo")),
+                "plan": normalize_date_string(item.get("plan")),
+                "fact": normalize_date_string(item.get("fact")),
                 "folderKey": folder_key,
                 "folderPath": folder_path,
                 "folderUrl": folder_url,
@@ -1005,75 +1013,62 @@ def normalize_checklist_data(data: dict, checklist_key: str = "id") -> dict:
                 "isCustom": bool(item.get("isCustom", False)),
             })
 
-        normalized_items.sort(key=lambda x: (x["group"], x["order"], x["name"]))
-
-        for group in OPR_GROUPS:
-            group_items = [x for x in normalized_items if x["group"] == group["id"]]
-            for order, item in enumerate(group_items, start=1):
-                item["order"] = order
-                if not item.get("id"):
-                    item["id"] = f"opr_g{group['id']}_{order}"
-                if not item.get("folderKey"):
-                    item["folderKey"] = build_folder_key("opr", item.get("name"), item.get("id"))
-
-        progress = calculate_opr_progress(normalized_items)
-
-        return {
-            "title": data.get("title") or "Чек-лист ОПР",
-            "checklistKey": "opr",
-            "collabTitle": clean_cell_value(data.get("collabTitle")),
-            "contractDeadline": "",
-            "startDate": "",
-            "groups": [{"id": group["id"], "title": group["title"]} for group in OPR_GROUPS],
-            "projectChecklists": build_project_checklists(),
-            "items": normalized_items,
-            "notice": data.get("notice", ""),
-            "activeCount": progress["activeCount"],
-            "completedCount": progress["completedCount"],
-            "progressPercent": progress["progressPercent"],
+        existing_names = {
+            clean_cell_value(existing_item.get("name")).lower()
+            for existing_item in normalized_items
+            if clean_cell_value(existing_item.get("name"))
         }
 
-    raw_items = data.get("items", []) or []
-    normalized_items = []
+        for default_group_id, group_data in CHECKLIST_GROUPS.items():
+            if default_group_id == 4:
+                continue
 
-    group_order_counters = {1: 0, 2: 0, 3: 0, 4: 0}
+            for default_order, default_name in enumerate(group_data["items"], start=1):
+                normalized_name = clean_cell_value(default_name).lower()
+                if not normalized_name or normalized_name in existing_names:
+                    continue
 
-    for raw_item in raw_items:
-        item, documents, first_doc, folder_key, folder_path, folder_url, legacy_document_url, legacy_document_name = prepare_item_common(raw_item)
+                migrated_item_id = f"{build_item_id(default_group_id, default_order)}_migrated_{slugify_folder_part(default_name)}"
 
-        name = clean_cell_value(item.get("name"))
-        if not name:
-            continue
+                normalized_items.append({
+                    "id": migrated_item_id,
+                    "group": default_group_id,
+                    "order": default_order,
+                    "name": default_name,
+                    "priority": "white",
+                    "status": "",
+                    "plan": "",
+                    "fact": "",
+                    "folderKey": build_folder_key("id", default_name, migrated_item_id),
+                    "folderPath": "",
+                    "folderUrl": "",
+                    "documents": [],
+                    "documentUrl": "",
+                    "documentName": "",
+                    "isCustom": False,
+                })
 
-        status = normalize_status(item.get("status"))
-        group_id = move_item_to_required_group({
-            "group": item.get("group"),
-            "name": name,
-            "status": status,
-        })
+                existing_names.add(normalized_name)
 
-        group_order_counters[group_id] += 1
-        default_order = group_order_counters[group_id]
+        default_id_order = {}
+        for default_group_id, group_data in CHECKLIST_GROUPS.items():
+            if default_group_id == 4:
+                continue
 
-        normalized_items.append({
-            "id": str(item.get("id") or build_item_id(group_id, default_order)),
-            "group": group_id,
-            "order": int(item.get("order") or default_order),
-            "name": name,
-            "priority": derive_indicator_from_status(status),
-            "status": status,
-            "plan": normalize_date_string(item.get("plan")),
-            "fact": normalize_date_string(item.get("fact")),
-            "folderKey": folder_key,
-            "folderPath": folder_path,
-            "folderUrl": folder_url,
-            "documents": documents,
-            "documentUrl": legacy_document_url,
-            "documentName": legacy_document_name,
-            "isCustom": bool(item.get("isCustom", False)),
-        })
+            for default_order, default_name in enumerate(group_data["items"], start=1):
+                default_id_order[(default_group_id, clean_cell_value(default_name).lower())] = default_order
 
-    normalized_items.sort(key=lambda x: (x["group"], x["order"], x["name"]))
+        normalized_items.sort(
+            key=lambda x: (
+                x["group"],
+                default_id_order.get(
+                    (int(x["group"]), clean_cell_value(x.get("name")).lower()),
+                    10000
+                ),
+                x["order"],
+                x["name"],
+            )
+        )
 
     for group_id in [1, 2, 3, 4]:
         group_items = [x for x in normalized_items if x["group"] == group_id]
@@ -4049,7 +4044,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                     ">
                         <div><b>Debug:</b> <span id="debugLastEvent">popup init</span></div>
                         <div style="margin-top:4px;">
-                            <a href="/debug/logs" target="_blank">Открыть /debug/logs</a>
+                            <a href="debug/logs" target="_blank">Открыть /debug/logs</a>
                         </div>
                     </div>
                     <div class="layout">
