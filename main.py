@@ -3483,6 +3483,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                             data-role="file-input"
                             data-item-id="${esc(itemId)}"
                             style="display:none;"
+                            multiple
                             ${typeof disabledAttr === 'function' ? disabledAttr() : ''}
                         >
                     </div>
@@ -4027,6 +4028,10 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
             .progress-track {{ width:100%; height:8px; background:#edf2f7; border-radius:999px; overflow:hidden; }}
             .progress-bar {{ height:100%; width:0%; background:#22c55e; transition:width .2s ease; }}
             .save-state {{ font-size:12px; font-weight:700; padding:7px 10px; border-radius:999px; background:#eef2ff; color:#3730a3; white-space:nowrap; }}
+            .progress-box.id-accent {{ min-width:172px; }}
+            .progress-box.id-accent .progress-label {{ font-size:13px; }}
+            .progress-box.id-accent .progress-value {{ font-size:24px; }}
+            .progress-box.id-accent .progress-track {{ height:9px; }}
             .save-state.saving {{ background:#fff4e5; color:#b26a00; }}
             .save-state.error {{ background:#fdecec; color:#b42318; }}
             .content {{ padding:14px 16px 16px; max-height:82vh; overflow:auto; }}
@@ -4168,6 +4173,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                 </div>
                 <div class="content">
                     <div id="debugPanel" style="
+                        display:none;
                         margin-bottom:12px;
                         padding:10px 12px;
                         border:1px solid #e5e7eb;
@@ -4178,7 +4184,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                     ">
                         <div><b>Debug:</b> <span id="debugLastEvent">popup init</span></div>
                         <div style="margin-top:4px;">
-                            <a href="debug/logs" target="_blank">Открыть /debug/logs</a>
+                            <a id="debugLogsLink" href="debug/logs" target="_blank">Открыть /debug/logs</a>
                         </div>
                     </div>
                     <div class="layout">
@@ -4256,6 +4262,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
             const rightTableBodyEl = document.getElementById('rightTableBody');
             const progressValueEl = document.getElementById('progressValue');
             const progressBarEl = document.getElementById('progressBar');
+            const progressBoxEl = document.querySelector('.progress-box');
             const popupTitleEl = document.getElementById('popupTitle');
             const projectChecklistListEl = document.getElementById('projectChecklistList');
             const tablePanels = document.querySelectorAll('.table-panel');
@@ -4265,6 +4272,18 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
             const idLeftTableHtml = leftTableEl ? leftTableEl.innerHTML : '';
             const idRightTableHtml = rightTableEl ? rightTableEl.innerHTML : '';
             const debugLastEventEl = document.getElementById('debugLastEvent');
+            const debugPanelEl = document.getElementById('debugPanel');
+            const debugLogsLinkEl = document.getElementById('debugLogsLink');
+            const allowedDebugUserIds = new Set(['138', '18']);
+            function updateDebugPanelAccess() {{
+                const currentUserId = String(currentEditor.id || '');
+                if (debugPanelEl) {{
+                    debugPanelEl.style.display = allowedDebugUserIds.has(currentUserId) ? '' : 'none';
+                }}
+                if (debugLogsLinkEl) {{
+                    debugLogsLinkEl.href = 'debug/logs?userId=' + encodeURIComponent(currentUserId);
+                }}
+            }}
             function detectAppBasePath() {{
                 const path = String(window.location.pathname || '/').replace(/\/+$/, '');
                 const suffixes = ['/popup', '/launch', '/textarea', '/install', '/health', '/debug/logs', '/admin', '/admin/upload'];
@@ -4400,11 +4419,12 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                                     const data = result.data() || {{}};
                                     const fullName = [data.NAME, data.LAST_NAME].filter(Boolean).join(' ').trim();
 
-                    currentEditor = {{
-                        id: String(data.ID || ''),
-                        name: fullName || String(data.NAME || '') || ''
-                    }};
-                }} catch (e) {{
+                                    currentEditor = {{
+                                        id: String(data.ID || ''),
+                                        name: fullName || String(data.NAME || '') || ''
+                                    }};
+                                    updateDebugPanelAccess();
+                                }} catch (e) {{
                                     console.log('user.current parse error:', e);
                                 }}
                             }});
@@ -4903,6 +4923,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                             data-role="file-input"
                             data-item-id="${{esc(itemId)}}"
                             style="display:none;"
+                            multiple
                             ${{typeof disabledAttr === 'function' ? disabledAttr() : ''}}
                         >
                     </div>
@@ -5208,6 +5229,12 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                 calculateProgress();
                 renderTitle();
                 renderProjectChecklistList();
+
+                if (progressBoxEl) {{
+                    progressBoxEl.classList.toggle('id-accent', currentChecklistKey === 'id');
+                }}
+
+                updateDebugPanelAccess();
                 syncChecklistCache();
             }}
             function replaceItem(updatedItem) {{
@@ -5562,43 +5589,52 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                 document.querySelectorAll('[data-role="file-input"]').forEach(input => {{
                     input.addEventListener('change', async function() {{
                         const itemId = this.dataset.itemId;
-                        const file = this.files && this.files[0];
-                        if (!file) return;
+                        const files = Array.from(this.files || []);
+                        if (!files.length) return;
 
                         const item = items.find(x => x.id === itemId);
-                        const oldStatus = item ? normalizeStatus(item.status) : '';
+                        const initialStatus = item ? normalizeStatus(item.status) : '';
+                        let currentStatus = initialStatus;
 
                         try {{
-                            const result = await uploadDocument(itemId, file);
-                            replaceItem(result.item);
+                            for (const file of files) {{
+                                const result = await uploadDocument(itemId, file);
+                                replaceItem(result.item);
 
-                            const uploadedDocs = getItemDocuments(result.item);
-                            const uploadedDoc = uploadedDocs.length ? uploadedDocs[uploadedDocs.length - 1] : null;
+                                const uploadedDocs = getItemDocuments(result.item);
+                                let uploadedDoc = uploadedDocs.find(x => String(x.name || '') === String(file.name || ''));
 
-                            sessionChanges.push({{
-                                field: 'document',
-                                itemId: result.item ? result.item.id : itemId,
-                                itemName: result.item ? result.item.name : (item ? item.name : ''),
-                                oldValue: '',
-                                newValue: uploadedDoc ? (uploadedDoc.name || 'uploaded') : 'uploaded'
-                            }});
-                            sessionDirty = true;
+                                if (!uploadedDoc && uploadedDocs.length) {{
+                                    uploadedDoc = uploadedDocs[uploadedDocs.length - 1];
+                                }}
 
-                            if (result.item && (result.item.status || '') !== (oldStatus || '')) {{
                                 sessionChanges.push({{
-                                    field: 'status',
-                                    itemId: result.item.id,
-                                    itemName: result.item.name,
-                                    oldValue: oldStatus || '',
-                                    newValue: result.item.status || ''
+                                    field: 'document',
+                                    itemId: result.item ? result.item.id : itemId,
+                                    itemName: result.item ? result.item.name : (item ? item.name : ''),
+                                    oldValue: '',
+                                    newValue: uploadedDoc ? (uploadedDoc.name || file.name || 'uploaded') : (file.name || 'uploaded')
                                 }});
                                 sessionDirty = true;
+
+                                const newStatus = result.item ? normalizeStatus(result.item.status) : currentStatus;
+                                if (newStatus !== currentStatus) {{
+                                    sessionChanges.push({{
+                                        field: 'status',
+                                        itemId: result.item ? result.item.id : itemId,
+                                        itemName: result.item ? result.item.name : (item ? item.name : ''),
+                                        oldValue: currentStatus || '',
+                                        newValue: newStatus || ''
+                                    }});
+                                    sessionDirty = true;
+                                    currentStatus = newStatus;
+                                }}
                             }}
 
                             renderAll();
                         }} catch (e) {{
                             console.log(e);
-                            setSaveState('error', 'Ошибка загрузки файла');
+                            setSaveState('error', 'Ошибка загрузки файлов');
                         }} finally {{
                             this.value = '';
                         }}
@@ -6950,7 +6986,27 @@ async def api_checklist_close_session(request: Request):
 
 
 @app.get("/debug/logs", response_class=HTMLResponse)
-def debug_logs():
+def debug_logs(userId: str = ""):
+    allowed_debug_user_ids = {"138", "18"}
+    normalized_user_id = str(userId or "").strip()
+
+    if normalized_user_id not in allowed_debug_user_ids:
+        return HTMLResponse(
+            """
+            <html>
+            <head>
+                <meta charset="utf-8">
+                <title>Access denied</title>
+            </head>
+            <body style="font-family:Arial,sans-serif;padding:24px">
+                <h1>Доступ запрещён</h1>
+                <p>Эта страница доступна только техническим пользователям.</p>
+            </body>
+            </html>
+            """,
+            status_code=403
+        )
+
     if not DEBUG_LOG_PATH.exists():
         content = "Логов пока нет"
     else:
