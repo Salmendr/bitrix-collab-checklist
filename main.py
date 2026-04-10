@@ -634,6 +634,36 @@ def build_folder_key(checklist_key: str, item_name: str, item_id: str = "") -> s
 
     return f"{checklist_key}_{slugify_folder_part(raw_name)}"
 
+def normalize_id_builtin_name(name: str) -> str:
+    value = clean_cell_value(name)
+
+    rename_map = {
+        "ТУ ТС": "ТУ Тепловые сети",
+        "ТУ Свет": "ТУ Электроснабжение",
+        "ТУ СС": "ТУ Сети связи",
+        "ТУ Ливневка": "ТУ Ливневая канализация",
+        "ТУ Газ": "ТУ Газоснабжение",
+        "Аэропорт": "Согласование с Аэропортом",
+        "Примыкание ОДД": "Примыкание к УДС",
+        "Расположение пож гидрантов": "Расположение пожарных гидрантов",
+    }
+
+    return rename_map.get(value, value)
+
+
+def build_current_id_default_name_set() -> set[str]:
+    result = set()
+
+    for group_id, group_data in CHECKLIST_GROUPS.items():
+        if group_id == 4:
+            continue
+
+        for item_name in group_data["items"]:
+            normalized_name = clean_cell_value(item_name).lower()
+            if normalized_name:
+                result.add(normalized_name)
+
+    return result
 
 def normalize_document_record(doc: dict) -> dict:
     doc = dict(doc or {})
@@ -1039,20 +1069,25 @@ def normalize_checklist_data(data: dict, checklist_key: str = "id") -> dict:
     normalized_items = []
 
     group_order_counters = {1: 0, 2: 0, 3: 0, 4: 0}
+    current_id_default_names = build_current_id_default_name_set()
 
     for raw_item in raw_items:
         item, documents, first_doc, folder_key, folder_path, folder_url, legacy_document_url, legacy_document_name = prepare_item_common(raw_item)
 
-        item_name = clean_cell_value(item.get("name"))
+        item_name = normalize_id_builtin_name(item.get("name"))
         if not item_name:
             continue
 
+        is_custom = bool(item.get("isCustom", False))
         status = normalize_status(item.get("status"))
         target_group_id = move_item_to_required_group({
             "group": item.get("group"),
             "name": item_name,
             "status": status,
         })
+
+        if not is_custom and target_group_id != 4 and item_name.lower() not in current_id_default_names:
+            continue
 
         group_order_counters[target_group_id] += 1
         default_order = group_order_counters[target_group_id]
@@ -1072,8 +1107,23 @@ def normalize_checklist_data(data: dict, checklist_key: str = "id") -> dict:
             "documents": documents,
             "documentUrl": legacy_document_url,
             "documentName": legacy_document_name,
-            "isCustom": bool(item.get("isCustom", False)),
+            "isCustom": is_custom,
         })
+
+    deduped_items = []
+    seen_builtin_names = set()
+
+    for existing_item in normalized_items:
+        name_key = clean_cell_value(existing_item.get("name")).lower()
+
+        if not existing_item.get("isCustom") and int(existing_item.get("group") or 0) != 4:
+            if name_key in seen_builtin_names:
+                continue
+            seen_builtin_names.add(name_key)
+
+        deduped_items.append(existing_item)
+
+    normalized_items = deduped_items
 
     existing_names = {
         clean_cell_value(existing_item.get("name")).lower()
@@ -5262,10 +5312,11 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                     el.addEventListener('change', async function() {{
                         const item = items.find(x => x.id === this.dataset.itemId);
                         if (!item) return;
+
                         const oldItem = JSON.parse(JSON.stringify(item));
                         const newValue = this.value;
+                        const oldDocuments = getItemDocuments(oldItem);
 
-                        item.status = newValue;
                         pushSessionChange(item.id, item.name, 'status', oldItem.status || '', newValue || '');
                         debugLog('status_changed', {{
                             itemId: item.id,
@@ -5274,35 +5325,35 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                             newValue: newValue || ''
                         }});
 
-                        const oldDocuments = getItemDocuments(oldItem);
+                        if (newValue === 'Нет') {{
+                            if (oldDocuments.length) {{
+                                const removedNames = oldDocuments.map(x => x.name || 'uploaded').join(', ');
 
-                        if (newValue === 'Нет' && oldDocuments.length) {{
-                            const removedNames = oldDocuments.map(x => x.name || 'uploaded').join(', ');
-
-                            pushSessionChange(item.id, item.name, 'document', removedNames, 'removed');
-                            debugLog('document_removed_by_status', {{
-                                itemId: item.id,
-                                itemName: item.name,
-                                oldValue: removedNames,
-                                newValue: 'removed'
-                            }});
-
-                            item.documents = [];
-                            item.documentUrl = '';
-                            item.documentName = '';
+                                pushSessionChange(item.id, item.name, 'document', removedNames, 'removed');
+                                debugLog('document_removed_by_status', {{
+                                    itemId: item.id,
+                                    itemName: item.name,
+                                    oldValue: removedNames,
+                                    newValue: 'removed'
+                                }});
+                            }}
 
                             try {{
-                                for (const doc of oldDocuments) {{
-                                    const result = await removeDocument(item.id, String(doc.id || ''));
-                                    if (result && result.item) {{
-                                        replaceItem(result.item);
-                                    }}
+                                const result = await updateItem(item.id, 'status', newValue);
+                                if (result && result.item) {{
+                                    replaceItem(result.item);
                                 }}
                             }} catch (e) {{
-                                console.log('remove document by status error:', e);
+                                console.log('status save error:', e);
+                                setSaveState('error', 'Ошибка сохранения статуса');
+                                return;
                             }}
+
+                            renderAll();
+                            return;
                         }}
 
+                        item.status = newValue;
                         renderAll();
                     }});
                 }});
@@ -5434,7 +5485,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                         if (!folderUrl) return;
 
                         try {{
-                            window.open(folderUrl, '_blank', 'noopener,noreferrer');
+                            window.open(folderUrl, '_blank');
                         }} catch (e) {{
                             console.log('open folder error:', e);
                             setSaveState('error', 'Ошибка открытия папки');
@@ -6290,6 +6341,7 @@ async def api_checklist_remove_document(request: Request):
     item_id = str(payload.get("itemId") or "").strip()
     document_id = clean_cell_value(payload.get("documentId"))
     document_url = clean_cell_value(payload.get("documentUrl"))
+    preserve_status = bool(payload.get("preserveStatus"))
 
     if not dialog_id:
         return JSONResponse({"ok": False, "error": "dialogId is required"}, status_code=400)
@@ -6372,6 +6424,10 @@ async def api_checklist_remove_document(request: Request):
         target_item["folderUrl"] = ""
         target_item["documentUrl"] = ""
         target_item["documentName"] = ""
+
+        if checklist_key == "id" and int(target_item.get("group") or 0) != 4 and not preserve_status:
+            target_item["status"] = ""
+            target_item["priority"] = "white"
 
     data["items"] = items
     data = normalize_checklist_data(data, checklist_key)
