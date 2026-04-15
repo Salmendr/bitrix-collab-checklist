@@ -34,6 +34,7 @@ APP_BASE_PATH = (os.getenv("APP_BASE_PATH", "") or "").strip()
 PUBLIC_APP_BASE_URL = (os.getenv("PUBLIC_APP_BASE_URL", "") or "").strip()
 TECH_USER_ID = int(os.getenv("TECH_USER_ID", "138"))
 BITRIX_TECH_WEBHOOK_URL = os.getenv("BITRIX_TECH_WEBHOOK_URL", "").strip()
+N8N_SHARED_TOKEN = os.getenv("N8N_SHARED_TOKEN", "").strip()
 
 UPLOAD_ROOT = VOLUME_DIR / "uploads"
 UPLOAD_ROOT.mkdir(parents=True, exist_ok=True)
@@ -1230,7 +1231,18 @@ def init_db():
             data_json TEXT
         )
     """)
-
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS project_storage_contexts (
+            dialog_id TEXT PRIMARY KEY,
+            project_id TEXT,
+            project_name TEXT,
+            provider TEXT,
+            storage_mode_json TEXT,
+            yandex_json TEXT,
+            item_mappings_json TEXT,
+            updated_at TEXT
+        )
+    """)
     conn.commit()
     conn.close()
 
@@ -1977,6 +1989,124 @@ def save_checklist(dialog_id: str, data: dict, checklist_key: str = "id"):
     """, (dialog_id, data.get("title", "Чек-лист"), json.dumps(data, ensure_ascii=False)))
     conn.commit()
     conn.close()
+
+def save_project_storage_context(dialog_id: str, payload: dict):
+    dialog_id = normalize_dialog_id(dialog_id)
+    if not dialog_id:
+        raise ValueError("dialogId is required")
+
+    project_id = str(payload.get("projectId") or "").strip()
+    project_name = clean_cell_value(payload.get("projectName"))
+    storage_mode = payload.get("storageMode") or {}
+    yandex_disk = payload.get("yandexDisk") or {}
+    item_mappings = payload.get("itemMappings") or []
+
+    conn = get_conn()
+    conn.execute("""
+        INSERT INTO project_storage_contexts(
+            dialog_id,
+            project_id,
+            project_name,
+            provider,
+            storage_mode_json,
+            yandex_json,
+            item_mappings_json,
+            updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(dialog_id) DO UPDATE SET
+            project_id=excluded.project_id,
+            project_name=excluded.project_name,
+            provider=excluded.provider,
+            storage_mode_json=excluded.storage_mode_json,
+            yandex_json=excluded.yandex_json,
+            item_mappings_json=excluded.item_mappings_json,
+            updated_at=excluded.updated_at
+    """, (
+        dialog_id,
+        project_id,
+        project_name,
+        str(yandex_disk.get("provider") or "yandex_disk").strip(),
+        json.dumps(storage_mode, ensure_ascii=False),
+        json.dumps(yandex_disk, ensure_ascii=False),
+        json.dumps(item_mappings, ensure_ascii=False),
+        datetime.now().isoformat()
+    ))
+    conn.commit()
+    conn.close()
+
+
+def get_project_storage_context(dialog_id: str):
+    dialog_id = normalize_dialog_id(dialog_id)
+    if not dialog_id:
+        return None
+
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT * FROM project_storage_contexts WHERE dialog_id = ?",
+        (dialog_id,)
+    ).fetchone()
+    conn.close()
+
+    if not row:
+        return None
+
+    return {
+        "dialogId": row["dialog_id"],
+        "projectId": row["project_id"],
+        "projectName": row["project_name"],
+        "provider": row["provider"],
+        "storageMode": json.loads(row["storage_mode_json"] or "{}"),
+        "yandexDisk": json.loads(row["yandex_json"] or "{}"),
+        "itemMappings": json.loads(row["item_mappings_json"] or "[]"),
+        "updatedAt": row["updated_at"],
+    }
+
+
+def get_item_yandex_mapping(dialog_id: str, checklist_key: str, item_name: str):
+    context = get_project_storage_context(dialog_id)
+    if not context:
+        return None
+
+    checklist_key = normalize_checklist_key(checklist_key)
+    item_name = clean_cell_value(item_name).lower()
+
+    for mapping in context.get("itemMappings", []):
+        mapping_key = normalize_checklist_key(mapping.get("checklistKey"))
+        mapping_name = clean_cell_value(mapping.get("itemName")).lower()
+
+        if mapping_key == checklist_key and mapping_name == item_name:
+            return mapping
+
+    return None
+
+
+def get_item_yandex_folder(dialog_id: str, checklist_key: str, item_name: str):
+    context = get_project_storage_context(dialog_id)
+    if not context:
+        return None
+
+    mapping = get_item_yandex_mapping(dialog_id, checklist_key, item_name)
+    if not mapping:
+        return None
+
+    folder_alias = str(mapping.get("folderAlias") or "").strip()
+    if not folder_alias:
+        return None
+
+    yandex_disk = context.get("yandexDisk") or {}
+    folders = yandex_disk.get("folders") or {}
+    folder = folders.get(folder_alias)
+
+    if not folder:
+        return None
+
+    return {
+        "folderAlias": folder_alias,
+        "folder": folder,
+        "mapping": mapping,
+        "context": context,
+    }
 
 def extract_dialog_id_from_form(form: dict) -> str:
     def pick(value) -> str:
@@ -6128,6 +6258,69 @@ async def api_checklist_update_item(request: Request):
         "progressPercent": data.get("progressPercent", 0),
     })
 
+@app.post("/api/integrations/n8n/project-storage-context")
+async def api_project_storage_context(request: Request):
+    expected_token = N8N_SHARED_TOKEN
+    provided_token = (request.headers.get("X-N8N-Token") or "").strip()
+
+    if expected_token and provided_token != expected_token:
+        return JSONResponse({"ok": False, "error": "forbidden"}, status_code=403)
+
+    try:
+        payload = await request.json()
+    except Exception:
+        return JSONResponse({"ok": False, "error": "invalid json"}, status_code=400)
+
+    dialog_id = normalize_dialog_id(payload.get("dialogId"))
+    project_name = clean_cell_value(payload.get("projectName"))
+    yandex_disk = payload.get("yandexDisk") or {}
+    item_mappings = payload.get("itemMappings") or []
+
+    if not dialog_id:
+        return JSONResponse({"ok": False, "error": "dialogId is required"}, status_code=400)
+
+    if not project_name:
+        return JSONResponse({"ok": False, "error": "projectName is required"}, status_code=400)
+
+    if not isinstance(yandex_disk, dict) or not yandex_disk:
+        return JSONResponse({"ok": False, "error": "yandexDisk is required"}, status_code=400)
+
+    if not isinstance(item_mappings, list):
+        return JSONResponse({"ok": False, "error": "itemMappings must be a list"}, status_code=400)
+
+    try:
+        save_project_storage_context(dialog_id, payload)
+    except Exception as e:
+        return JSONResponse({
+            "ok": False,
+            "error": "failed to save storage context",
+            "details": str(e),
+        }, status_code=500)
+
+    return JSONResponse({
+        "ok": True,
+        "dialogId": dialog_id,
+        "projectId": str(payload.get("projectId") or "").strip(),
+        "projectName": project_name,
+        "provider": str(yandex_disk.get("provider") or "yandex_disk").strip(),
+        "stored": True,
+        "mappingCount": len(item_mappings),
+    })
+
+@app.get("/api/integrations/n8n/project-storage-context")
+def api_get_project_storage_context(dialogId: str = ""):
+    dialog_id = normalize_dialog_id(dialogId)
+    if not dialog_id:
+        return JSONResponse({"ok": False, "error": "dialogId is required"}, status_code=400)
+
+    context = get_project_storage_context(dialog_id)
+    if not context:
+        return JSONResponse({"ok": False, "error": "not found"}, status_code=404)
+
+    return JSONResponse({
+        "ok": True,
+        "context": context
+    })
 
 @app.post("/api/checklist/update-meta")
 async def api_checklist_update_meta(request: Request):
