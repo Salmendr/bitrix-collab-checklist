@@ -35,6 +35,8 @@ PUBLIC_APP_BASE_URL = (os.getenv("PUBLIC_APP_BASE_URL", "") or "").strip()
 TECH_USER_ID = int(os.getenv("TECH_USER_ID", "138"))
 BITRIX_TECH_WEBHOOK_URL = os.getenv("BITRIX_TECH_WEBHOOK_URL", "").strip()
 N8N_SHARED_TOKEN = os.getenv("N8N_SHARED_TOKEN", "").strip()
+YANDEX_DISK_OAUTH_TOKEN = os.getenv("YANDEX_DISK_OAUTH_TOKEN", "").strip()
+YANDEX_DISK_API_BASE = "https://cloud-api.yandex.net/v1/disk"
 
 UPLOAD_ROOT = VOLUME_DIR / "uploads"
 UPLOAD_ROOT.mkdir(parents=True, exist_ok=True)
@@ -689,6 +691,12 @@ def normalize_document_record(doc: dict) -> dict:
         "size": int(doc.get("size") or 0),
         "modifiedAt": clean_cell_value(doc.get("modifiedAt")),
         "source": clean_cell_value(doc.get("source")) or "local",
+
+        "mirrorStatus": clean_cell_value(doc.get("mirrorStatus")) or "",
+        "mirrorError": clean_cell_value(doc.get("mirrorError")) or "",
+        "yandexPath": clean_cell_value(doc.get("yandexPath")) or "",
+        "yandexFileUrl": clean_cell_value(doc.get("yandexFileUrl")) or "",
+        "yandexFolderAlias": clean_cell_value(doc.get("yandexFolderAlias")) or "",
     }
 
 
@@ -2106,6 +2114,128 @@ def get_item_yandex_folder(dialog_id: str, checklist_key: str, item_name: str):
         "folder": folder,
         "mapping": mapping,
         "context": context,
+    }
+
+def is_yandex_disk_enabled() -> bool:
+    return bool(YANDEX_DISK_OAUTH_TOKEN)
+
+
+def get_yandex_disk_headers() -> dict:
+    return {
+        "Authorization": f"OAuth {YANDEX_DISK_OAUTH_TOKEN}"
+    }
+
+
+def normalize_yandex_disk_path(path: str) -> str:
+    value = clean_cell_value(path)
+    if not value:
+        return ""
+
+    if value.startswith("disk:/"):
+        return value
+
+    if value.startswith("/"):
+        return "disk:" + value
+
+    return "disk:/" + value
+
+
+def yandex_disk_get_upload_href(target_path: str, overwrite: bool = True) -> str:
+    normalized_path = normalize_yandex_disk_path(target_path)
+    response = requests.get(
+        f"{YANDEX_DISK_API_BASE}/resources/upload",
+        headers=get_yandex_disk_headers(),
+        params={
+            "path": normalized_path,
+            "overwrite": "true" if overwrite else "false",
+        },
+        timeout=30
+    )
+    response.raise_for_status()
+    data = response.json() or {}
+    href = clean_cell_value(data.get("href"))
+    if not href:
+        raise RuntimeError("Yandex Disk upload href not found")
+    return href
+
+
+def yandex_disk_upload_bytes(target_path: str, file_bytes: bytes) -> dict:
+    upload_href = yandex_disk_get_upload_href(target_path, overwrite=True)
+    upload_response = requests.put(upload_href, data=file_bytes, timeout=120)
+    upload_response.raise_for_status()
+
+    return {
+        "ok": True,
+        "path": normalize_yandex_disk_path(target_path),
+    }
+
+
+def yandex_disk_delete_path(target_path: str, permanently: bool = True):
+    normalized_path = normalize_yandex_disk_path(target_path)
+    response = requests.delete(
+        f"{YANDEX_DISK_API_BASE}/resources",
+        headers=get_yandex_disk_headers(),
+        params={
+            "path": normalized_path,
+            "permanently": "true" if permanently else "false"
+        },
+        timeout=30
+    )
+
+    if response.status_code not in (200, 202, 204):
+        try:
+            payload = response.json()
+        except Exception:
+            payload = {"text": response.text}
+        raise RuntimeError(f"Yandex Disk delete failed: {payload}")
+
+
+def build_yandex_file_target_path(folder_path: str, filename: str) -> str:
+    folder_path = normalize_yandex_disk_path(folder_path).rstrip("/")
+    safe_name = Path(filename or "file.bin").name
+    return f"{folder_path}/{safe_name}"
+
+
+def mirror_document_to_yandex(
+    dialog_id: str,
+    checklist_key: str,
+    item_name: str,
+    filename: str,
+    file_bytes: bytes
+) -> dict:
+    if not is_yandex_disk_enabled():
+        return {
+            "ok": False,
+            "reason": "yandex token is empty"
+        }
+
+    folder_data = get_item_yandex_folder(dialog_id, checklist_key, item_name)
+    if not folder_data:
+        return {
+            "ok": False,
+            "reason": "folder mapping not found"
+        }
+
+    folder = folder_data.get("folder") or {}
+    folder_path = clean_cell_value(folder.get("path"))
+    folder_url = clean_cell_value(folder.get("url"))
+    folder_alias = clean_cell_value(folder_data.get("folderAlias"))
+
+    if not folder_path:
+        return {
+            "ok": False,
+            "reason": "folder path is empty"
+        }
+
+    target_path = build_yandex_file_target_path(folder_path, filename)
+    upload_result = yandex_disk_upload_bytes(target_path, file_bytes)
+
+    return {
+        "ok": True,
+        "folderAlias": folder_alias,
+        "folderPath": normalize_yandex_disk_path(folder_path),
+        "folderUrl": folder_url,
+        "filePath": upload_result.get("path") or normalize_yandex_disk_path(target_path),
     }
 
 def extract_dialog_id_from_form(form: dict) -> str:
@@ -6512,16 +6642,46 @@ async def api_checklist_upload_document(
     except Exception:
         folder_path = file_url.rsplit("/", 1)[0]
 
+    uploaded_name = Path(file.filename or "file.bin").name
+
     document_record = normalize_document_record({
         "id": document_id,
-        "name": Path(file.filename or "file.bin").name,
+        "name": uploaded_name,
         "path": file_url,
         "fileUrl": file_url,
         "previewUrl": document_view_url,
         "size": len(file_bytes),
         "modifiedAt": datetime.now().isoformat(timespec="seconds"),
         "source": "local",
+
+        "mirrorStatus": "",
+        "mirrorError": "",
+        "yandexPath": "",
+        "yandexFileUrl": "",
+        "yandexFolderAlias": "",
     })
+
+    try:
+        mirror_result = mirror_document_to_yandex(
+            dialog_id=dialog_id,
+            checklist_key=checklist_key,
+            item_name=clean_cell_value(target_item.get("name")),
+            filename=uploaded_name,
+            file_bytes=file_bytes
+        )
+
+        if mirror_result.get("ok"):
+            document_record["mirrorStatus"] = "synced"
+            document_record["mirrorError"] = ""
+            document_record["yandexPath"] = clean_cell_value(mirror_result.get("filePath"))
+            document_record["yandexFileUrl"] = clean_cell_value(mirror_result.get("folderUrl"))
+            document_record["yandexFolderAlias"] = clean_cell_value(mirror_result.get("folderAlias"))
+        else:
+            document_record["mirrorStatus"] = "error"
+            document_record["mirrorError"] = clean_cell_value(mirror_result.get("reason")) or "mirror failed"
+    except Exception as e:
+        document_record["mirrorStatus"] = "error"
+        document_record["mirrorError"] = str(e)
 
     existing_documents = normalize_documents_list(target_item.get("documents"))
     existing_documents.append(document_record)
@@ -6615,11 +6775,29 @@ async def api_checklist_remove_document(request: Request):
         doc_to_remove = documents[0]
 
     if doc_to_remove:
+        local_document_url = (
+            clean_cell_value(doc_to_remove.get("fileUrl"))
+            or clean_cell_value(doc_to_remove.get("previewUrl"))
+            or clean_cell_value(doc_to_remove.get("path"))
+        )
+
         remove_item_document_file({
-            "documentUrl": clean_cell_value(doc_to_remove.get("fileUrl"))
-                or clean_cell_value(doc_to_remove.get("previewUrl"))
-                or clean_cell_value(doc_to_remove.get("path"))
+            "documentUrl": local_document_url
         })
+
+        yandex_path = clean_cell_value(doc_to_remove.get("yandexPath"))
+        if yandex_path and is_yandex_disk_enabled():
+            try:
+                yandex_disk_delete_path(yandex_path, permanently=True)
+            except Exception as e:
+                write_debug_log("yandex_mirror_delete_error", {
+                    "dialogId": dialog_id,
+                    "checklistKey": checklist_key,
+                    "itemId": item_id,
+                    "documentId": clean_cell_value(doc_to_remove.get("id")),
+                    "yandexPath": yandex_path,
+                    "error": str(e),
+                })
 
     remaining_documents = []
     removed = False
@@ -6702,9 +6880,15 @@ def api_checklist_folder(dialogId: str = "", itemId: str = "", checklistKey: str
 
     if not target_item:
         return JSONResponse({"ok": False, "error": "item not found"}, status_code=404)
-
     documents = normalize_documents_list(target_item.get("documents"))
-
+    yandex_folder_data = get_item_yandex_folder(
+        dialog_id,
+        checklist_key,
+        clean_cell_value(target_item.get("name"))
+    )
+    yandex_folder = (yandex_folder_data or {}).get("folder") or {}
+    yandex_folder_url = clean_cell_value(yandex_folder.get("url"))
+    yandex_folder_path = clean_cell_value(yandex_folder.get("path"))
     rows = []
     for doc in documents:
         doc_id = str(doc.get("id") or "")
@@ -6748,6 +6932,27 @@ def api_checklist_folder(dialogId: str = "", itemId: str = "", checklistKey: str
     title = html.escape(str(target_item.get("name") or "Папка"))
     checklist_title = html.escape(str(data.get("title") or "Чек-лист"))
     remove_api_url = html.escape(f"{normalize_base_path(APP_BASE_PATH)}/api/checklist/remove-document")
+
+    yandex_button_html = ""
+    if yandex_folder_url:
+        yandex_button_html = f'''
+            <div style="margin-top:12px;">
+                <a
+                    href="{html.escape(yandex_folder_url)}"
+                    target="_blank"
+                    style="display:inline-block;padding:8px 12px;border:1px solid #d0d7de;border-radius:8px;background:#f8fafc;color:#1f2328;text-decoration:none;"
+                >
+                    Открыть папку на Яндекс Диске
+                </a>
+            </div>
+        '''
+    elif yandex_folder_path:
+        yandex_button_html = f'''
+            <div style="margin-top:12px;font-size:12px;color:#667085;">
+                Папка Яндекс Диска: {html.escape(yandex_folder_path)}
+            </div>
+        '''
+
     return f"""
     <html>
     <head>
@@ -6759,6 +6964,7 @@ def api_checklist_folder(dialogId: str = "", itemId: str = "", checklistKey: str
             <div style="padding:16px 18px;border-bottom:1px solid #edf0f2;background:#fafbfc;">
                 <div style="font-size:13px;color:#667085;margin-bottom:4px;">{checklist_title}</div>
                 <div style="font-size:22px;font-weight:700;">{title}</div>
+                {yandex_button_html}
             </div>
             <div style="padding:18px;">
                 <table style="width:100%;border-collapse:collapse;">
