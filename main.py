@@ -2762,9 +2762,10 @@ async def install_post(request: Request):
             {
                 "PLACEMENT": "IM_TEXTAREA",
                 "HANDLER": f"{base_url}/textarea",
-                "TITLE": "Чек-лист ИД",
+                "TITLE": "ТЕСТ",
                 "OPTIONS[iconName]": "fa-bars",
-                "OPTIONS[context]": "CHAT"
+                "OPTIONS[context]": "CHAT",
+                "OPTIONS[role]": "ADMIN"
             }
         )
 
