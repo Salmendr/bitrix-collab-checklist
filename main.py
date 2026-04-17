@@ -4409,6 +4409,71 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
             .add-item-btn {{ flex:0 0 100px; width:100px; min-width:100px; height:32px; border:1px solid #d0d7de; border-radius:8px; padding:6px 8px; background:#f8fafc; cursor:pointer; font-size:12px; white-space:nowrap; }}
             @media (max-width:1320px) {{ .layout {{ grid-template-columns:1fr; }} .side-panel {{ position:static; }} }}
             @media (max-width:1120px) {{ .tables-grid {{ grid-template-columns:1fr; }} }}
+            .tables-grid.id-three-cols {{
+                grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr);
+            }}
+
+            .id-table .thead {{
+                position: sticky;
+                top: 0;
+                z-index: 10;
+                background: #f8fafc;
+                border-bottom: 1px solid #e5e7eb;
+            }}
+
+            .id-grid {{
+                display: grid;
+                gap: 0;
+                align-items: stretch;
+                justify-content: start;
+            }}
+
+            .id-grid.id-grid-compact {{
+                grid-template-columns: minmax(0, 1.18fr) minmax(0, 1.02fr) 108px;
+            }}
+
+            .id-grid.id-grid-expanded {{
+                grid-template-columns: minmax(0, 1.08fr) minmax(0, 0.96fr) 108px 112px 112px;
+            }}
+
+            .id-table .thead-top,
+            .id-table .thead-bottom,
+            .id-table .row {{
+                min-height: 38px;
+            }}
+
+            .id-table .thead-bottom {{
+                border-top: 1px solid #edf0f2;
+            }}
+
+            .th-status-with-toggle {{
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 6px;
+            }}
+
+            .id-dates-toggle {{
+                border: 1px solid #d0d7de;
+                background: #fff;
+                color: #344054;
+                border-radius: 6px;
+                padding: 2px 6px;
+                font-size: 10px;
+                line-height: 1.2;
+                cursor: pointer;
+                white-space: nowrap;
+                height: 22px;
+            }}
+
+            .id-dates-toggle:hover {{
+                background: #f8fafc;
+            }}
+
+            .id-table .item-name {{
+                max-width: none;
+            }}
+
             @media (max-width:980px) {{
                 .thead-top,.thead-bottom,.row {{ grid-template-columns:1fr; }}
                 .th,.td {{ border-right:none; border-bottom:1px solid #edf0f2; }}
@@ -4452,29 +4517,51 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                         <div class="tables-grid">
                             <div class="table-panel">
                                 <div class="table">
-                            <div class="thead">
-                                <div class="thead-top">
-                                    <div class="th">ИД</div>
-                                    <div class="th">Документ</div>
-                                    <div class="th">Статус</div>
-                                    <div class="th center" style="grid-column: 4 / span 2;">Дата получения</div>
-                                </div>
-                                <div class="thead-bottom">
-                                    <div class="th"></div>
-                                    <div class="th"></div>
-                                    <div class="th"></div>
-                                    <div class="th">План</div>
-                                    <div class="th">Факт</div>
+                                    <div class="thead">
+                                        <div class="thead-top">
+                                            <div class="th">ИД</div>
+                                            <div class="th">Документ</div>
+                                            <div class="th">Статус</div>
+                                            <div class="th center" style="grid-column: 4 / span 2;">Дата получения</div>
+                                        </div>
+                                        <div class="thead-bottom">
+                                            <div class="th"></div>
+                                            <div class="th"></div>
+                                            <div class="th"></div>
+                                            <div class="th">План</div>
+                                            <div class="th">Факт</div>
+                                        </div>
+                                    </div>
+                                    <div id="leftTableBody"></div>
                                 </div>
                             </div>
-                            <div id="leftTableBody"></div>
-                                </div>
-                            </div>
+
                             <div class="table-panel">
                                 <div class="table">
                                     <div class="thead">
                                         <div class="thead-top">
-                                            <div class="th">ИД</div>
+                                            <div class="th">ТУ</div>
+                                            <div class="th">Документ</div>
+                                            <div class="th">Статус</div>
+                                            <div class="th center" style="grid-column: 4 / span 2;">Дата получения</div>
+                                        </div>
+                                        <div class="thead-bottom">
+                                            <div class="th"></div>
+                                            <div class="th"></div>
+                                            <div class="th"></div>
+                                            <div class="th">План</div>
+                                            <div class="th">Факт</div>
+                                        </div>
+                                    </div>
+                                    <div id="middleTableBody"></div>
+                                </div>
+                            </div>
+
+                            <div class="table-panel">
+                                <div class="table">
+                                    <div class="thead">
+                                        <div class="thead-top">
+                                            <div class="th">Прочее</div>
                                             <div class="th">Документ</div>
                                             <div class="th">Статус</div>
                                             <div class="th center" style="grid-column: 4 / span 2;">Дата получения</div>
@@ -4518,8 +4605,9 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                 id: "",
                 name: ""
             }};
-            const saveStateEl = document.getElementById('saveState');
+                        const saveStateEl = document.getElementById('saveState');
             const leftTableBodyEl = document.getElementById('leftTableBody');
+            const middleTableBodyEl = document.getElementById('middleTableBody');
             const rightTableBodyEl = document.getElementById('rightTableBody');
             const progressValueEl = document.getElementById('progressValue');
             const progressBarEl = document.getElementById('progressBar');
@@ -4529,9 +4617,10 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
             const tablePanels = document.querySelectorAll('.table-panel');
             const tablesGridEl = document.querySelector('.tables-grid');
             const leftTableEl = tablePanels[0] ? tablePanels[0].querySelector('.table') : null;
-            const rightTableEl = tablePanels[1] ? tablePanels[1].querySelector('.table') : null;
-            const idLeftTableHtml = leftTableEl ? leftTableEl.innerHTML : '';
-            const idRightTableHtml = rightTableEl ? rightTableEl.innerHTML : '';
+            const middleTableEl = tablePanels[1] ? tablePanels[1].querySelector('.table') : null;
+            const rightTableEl = tablePanels[2] ? tablePanels[2].querySelector('.table') : null;
+            const idTableShellHtml = leftTableEl ? leftTableEl.innerHTML : '';
+            const idDateVisibility = {{ 1: false, 2: false, 3: false }};
             const debugLastEventEl = document.getElementById('debugLastEvent');
             const debugPanelEl = document.getElementById('debugPanel');
             const debugLogsLinkEl = document.getElementById('debugLogsLink');
@@ -5424,6 +5513,141 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                 leftTableEl.innerHTML = buildConceptTableHtml(leftGroups);
                 rightTableEl.innerHTML = buildConceptTableHtml(rightGroups);
             }}
+
+            function isIdChecklist() {{
+                return currentChecklistKey === 'id';
+            }}
+
+            function isIdDatesVisible(groupId) {{
+                return !!idDateVisibility[Number(groupId)];
+            }}
+
+            function getIdGridClass(showDates) {{
+                return showDates ? 'id-grid id-grid-expanded' : 'id-grid id-grid-compact';
+            }}
+
+            function buildIdHeader(group, showDates) {{
+                const groupId = Number(group.id);
+                const toggleText = showDates ? 'Скрыть даты' : 'Показать даты';
+
+                return `
+                    <div class="thead-top ${{getIdGridClass(showDates)}}">
+                        <div class="th">${{esc(group.title)}}</div>
+                        <div class="th">Документ</div>
+                        <div class="th th-status-with-toggle">
+                            <span>Статус</span>
+                            <button
+                                type="button"
+                                class="id-dates-toggle"
+                                data-role="toggle-id-dates"
+                                data-group-id="${{esc(groupId)}}"
+                            >
+                                ${{esc(toggleText)}}
+                            </button>
+                        </div>
+                        ${{showDates ? `<div class="th center" style="grid-column: 4 / span 2;">Дата получения</div>` : ''}}
+                    </div>
+                    ${{showDates ? `
+                        <div class="thead-bottom ${{getIdGridClass(showDates)}}">
+                            <div class="th"></div>
+                            <div class="th"></div>
+                            <div class="th"></div>
+                            <div class="th">План</div>
+                            <div class="th">Факт</div>
+                        </div>
+                    ` : ''}}
+                `;
+            }}
+
+            function renderIdGroup(group, showDates) {{
+                const groupItems = getItemsByGroup(group.id);
+                const allowAdd = Number(group.id) !== 4;
+                const gridClass = getIdGridClass(showDates);
+
+                const rows = groupItems.map(item => {{
+                    const rowClass = normalizeStatus(item.status) === 'Не требуется' ? 'row not-required' : 'row';
+
+                    return `
+                        <div class="${{rowClass}} ${{gridClass}}" data-item-id="${{esc(item.id)}}">
+                            <div class="td">
+                                <div class="cell-name">
+                                    <div class="${{indicatorClass(item.status)}}"></div>
+                                    <div class="item-name">${{esc(item.name)}}</div>
+                                </div>
+                            </div>
+                            <div class="td">${{buildDocumentCell(item)}}</div>
+                            <div class="td">
+                                <select class="status-select" data-role="status" data-item-id="${{esc(item.id)}}" ${{disabledAttr()}}>
+                                    <option value="" ${{normalizeStatus(item.status) === '' ? 'selected' : ''}}></option>
+                                    <option value="Есть" ${{normalizeStatus(item.status) === 'Есть' ? 'selected' : ''}}>Есть</option>
+                                    <option value="Нет" ${{normalizeStatus(item.status) === 'Нет' ? 'selected' : ''}}>Нет</option>
+                                    <option value="Не требуется" ${{normalizeStatus(item.status) === 'Не требуется' ? 'selected' : ''}}>Не требуется</option>
+                                </select>
+                            </div>
+                            ${{showDates ? `
+                                <div class="td">
+                                    <input class="date-input" type="date" data-role="plan" data-item-id="${{esc(item.id)}}" value="${{esc(toInputDate(item.plan))}}" ${{disabledAttr()}}>
+                                </div>
+                                <div class="td">
+                                    <input class="date-input" type="date" data-role="fact" data-item-id="${{esc(item.id)}}" value="${{esc(toInputDate(item.fact))}}" ${{disabledAttr()}}>
+                                </div>
+                            ` : ''}}
+                        </div>
+                    `;
+                }}).join('');
+
+                const addBlock = allowAdd ? `
+                    <div class="add-item-row">
+                        <input class="add-item-input" id="addItemInput_${{group.id}}" type="text" placeholder="Новый пункт" ${{disabledAttr()}}>
+                        <button class="add-item-btn" type="button" data-role="add-item" data-group-id="${{group.id}}" ${{disabledAttr()}}>Добавить пункт</button>
+                    </div>
+                ` : '';
+
+                return `<div class="group-block"><div class="group-title">${{esc(group.title)}}</div>${{rows}}${{addBlock}}</div>`;
+            }}
+
+            function renderIdPanel(mainGroup, appendNotRequired = false) {{
+                const showDates = isIdDatesVisible(mainGroup.id);
+                const notRequiredGroup = appendNotRequired
+                    ? groups.find(g => Number(g.id) === 4)
+                    : null;
+
+                const panelHtml = `
+                    <div class="table id-table">
+                        <div class="thead">
+                            ${{buildIdHeader(mainGroup, showDates)}}
+                        </div>
+                        <div>
+                            ${{renderIdGroup(mainGroup, showDates)}}
+                            ${{appendNotRequired && notRequiredGroup && hasItemsInGroup(4) ? renderIdGroup(notRequiredGroup, false) : ''}}
+                        </div>
+                    </div>
+                `;
+
+                return panelHtml;
+            }}
+
+            function renderIdTables() {{
+                if (!leftTableEl || !middleTableEl || !rightTableEl || !tablesGridEl) {{
+                    throw new Error('id table containers not found');
+                }}
+
+                const idGroup = groups.find(g => Number(g.id) === 1) || {{ id: 1, title: 'ИД' }};
+                const tuGroup = groups.find(g => Number(g.id) === 2) || {{ id: 2, title: 'ТУ' }};
+                const otherGroup = groups.find(g => Number(g.id) === 3) || {{ id: 3, title: 'Прочее' }};
+
+                tablesGridEl.classList.add('id-three-cols');
+                tablesGridEl.style.gridTemplateColumns = 'minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr)';
+
+                if (tablePanels[0]) tablePanels[0].style.display = '';
+                if (tablePanels[1]) tablePanels[1].style.display = '';
+                if (tablePanels[2]) tablePanels[2].style.display = '';
+
+                leftTableEl.innerHTML = renderIdPanel(idGroup, false);
+                middleTableEl.innerHTML = renderIdPanel(tuGroup, false);
+                rightTableEl.innerHTML = renderIdPanel(otherGroup, true);
+            }}
+
             function renderGroup(group) {{
                 const groupItems = getItemsByGroup(group.id);
                 const allowAdd = group.id !== 4;
@@ -5434,22 +5658,22 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                             <div class="td"><div class="cell-name"><div class="${{indicatorClass(item.status)}}"></div><div class="item-name">${{esc(item.name)}}</div></div></div>
                             <div class="td">${{buildDocumentCell(item)}}</div>
                             <div class="td">
-                                <select class="status-select" data-role="status" data-item-id="${{esc(item.id)}}">
+                                <select class="status-select" data-role="status" data-item-id="${{esc(item.id)}}" ${{disabledAttr()}}>
                                     <option value="" ${{normalizeStatus(item.status) === '' ? 'selected' : ''}}></option>
                                     <option value="Есть" ${{normalizeStatus(item.status) === 'Есть' ? 'selected' : ''}}>Есть</option>
                                     <option value="Нет" ${{normalizeStatus(item.status) === 'Нет' ? 'selected' : ''}}>Нет</option>
                                     <option value="Не требуется" ${{normalizeStatus(item.status) === 'Не требуется' ? 'selected' : ''}}>Не требуется</option>
                                 </select>
                             </div>
-                            <div class="td"><input class="date-input" type="date" data-role="plan" data-item-id="${{esc(item.id)}}" value="${{esc(toInputDate(item.plan))}}"></div>
-                            <div class="td"><input class="date-input" type="date" data-role="fact" data-item-id="${{esc(item.id)}}" value="${{esc(toInputDate(item.fact))}}"></div>
+                            <div class="td"><input class="date-input" type="date" data-role="plan" data-item-id="${{esc(item.id)}}" value="${{esc(toInputDate(item.plan))}}" ${{disabledAttr()}}></div>
+                            <div class="td"><input class="date-input" type="date" data-role="fact" data-item-id="${{esc(item.id)}}" value="${{esc(toInputDate(item.fact))}}" ${{disabledAttr()}}></div>
                         </div>
                     `;
                 }}).join('');
                 const addBlock = allowAdd ? `
                     <div class="add-item-row">
-                        <input class="add-item-input" id="addItemInput_${{group.id}}" type="text" placeholder="Новый пункт">
-                        <button class="add-item-btn" type="button" data-role="add-item" data-group-id="${{group.id}}">Добавить пункт</button>
+                        <input class="add-item-input" id="addItemInput_${{group.id}}" type="text" placeholder="Новый пункт" ${{disabledAttr()}}>
+                        <button class="add-item-btn" type="button" data-role="add-item" data-group-id="${{group.id}}" ${{disabledAttr()}}>Добавить пункт</button>
                     </div>` : '';
                 return `<div class="group-block"><div class="group-title">${{esc(group.title)}}</div>${{rows}}${{addBlock}}</div>`;
             }}
@@ -5458,19 +5682,31 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                     renderConceptTable();
                     return;
                 }}
+
+                if (currentChecklistKey === 'id') {{
+                    renderIdTables();
+                    return;
+                }}
+
                 if (tablesGridEl) {{
+                    tablesGridEl.classList.remove('id-three-cols');
                     tablesGridEl.style.gridTemplateColumns = '1fr 1fr';
                 }}
-                if (tablePanels[1]) {{
-                    tablePanels[1].style.display = '';
-                }}
-                if (leftTableEl) leftTableEl.innerHTML = idLeftTableHtml;
-                if (rightTableEl) rightTableEl.innerHTML = idRightTableHtml;
+
+                if (tablePanels[0]) tablePanels[0].style.display = '';
+                if (tablePanels[1]) tablePanels[1].style.display = '';
+                if (tablePanels[2]) tablePanels[2].style.display = 'none';
+
+                if (leftTableEl) leftTableEl.innerHTML = idTableShellHtml;
+                if (middleTableEl) middleTableEl.innerHTML = idTableShellHtml;
+
                 const leftBody = document.getElementById('leftTableBody');
-                const rightBody = document.getElementById('rightTableBody');
-                if (!leftBody || !rightBody) {{
-                    throw new Error('leftTableBody or rightTableBody not found');
+                const middleBody = document.getElementById('middleTableBody');
+
+                if (!leftBody || !middleBody) {{
+                    throw new Error('leftTableBody or middleTableBody not found');
                 }}
+
                 const leftGroups = groups.filter(g => Number(g.id) === 1 || Number(g.id) === 3);
                 const rightGroups = groups.filter(g => Number(g.id) === 2);
 
@@ -5482,7 +5718,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                 }}
 
                 leftBody.innerHTML = leftGroups.map(renderGroup).join('');
-                rightBody.innerHTML = rightGroups.map(renderGroup).join('');
+                middleBody.innerHTML = rightGroups.map(renderGroup).join('');
             }}
             function renderAll() {{
                 renderTables();
@@ -5720,6 +5956,16 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                         }} finally {{
                             this.disabled = false;
                         }}
+                    }});
+                }});
+
+                document.querySelectorAll('[data-role="toggle-id-dates"]').forEach(btn => {{
+                    btn.addEventListener('click', function () {{
+                        const groupId = Number(this.dataset.groupId || 0);
+                        if (![1, 2, 3].includes(groupId)) return;
+
+                        idDateVisibility[groupId] = !idDateVisibility[groupId];
+                        renderAll();
                     }});
                 }});
 
