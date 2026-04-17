@@ -2268,27 +2268,40 @@ def yandex_disk_get_resource_meta(target_path: str) -> dict:
     }
 
 
-def build_custom_id_yandex_folder_paths(id_stage_root_path: str, group_id: int, item_name: str) -> dict:
+def extract_yandex_folder_number(name: str) -> int:
+    name = clean_cell_value(name)
+    match = re.match(r"^(\d+)_", name)
+    if not match:
+        return 0
+    try:
+        return int(match.group(1))
+    except Exception:
+        return 0
+
+
+def get_next_id_stage_folder_number(yandex_disk: dict) -> int:
+    folders = dict((yandex_disk or {}).get("folders") or {})
+    max_number = 0
+
+    for folder in folders.values():
+        folder_name = clean_cell_value((folder or {}).get("name"))
+        current_number = extract_yandex_folder_number(folder_name)
+        if current_number > max_number:
+            max_number = current_number
+
+    return max_number + 1 if max_number > 0 else 9
+
+
+def build_custom_id_yandex_folder_paths(id_stage_root_path: str, yandex_disk: dict, item_name: str) -> dict:
     base_path = normalize_yandex_disk_path(id_stage_root_path).rstrip("/")
-
-    group_title_map = {
-        1: "ИД",
-        2: "ТУ",
-        3: "Прочее",
-    }
-
-    group_title = group_title_map.get(int(group_id or 0), "Прочее")
-    custom_root_path = f"{base_path}/90_Пользовательские пункты"
-    group_root_path = f"{custom_root_path}/{group_title}"
-    folder_name = sanitize_yandex_folder_name(item_name)
-    item_folder_path = f"{group_root_path}/{folder_name}"
+    next_number = get_next_id_stage_folder_number(yandex_disk)
+    folder_name = f"{next_number:02d}_{sanitize_yandex_folder_name(item_name)}"
+    item_folder_path = f"{base_path}/{folder_name}"
 
     return {
-        "customRootPath": custom_root_path,
-        "groupRootPath": group_root_path,
         "itemPath": item_folder_path,
         "folderName": folder_name,
-        "groupTitle": group_title,
+        "folderNumber": next_number,
     }
 
 
@@ -2391,10 +2404,8 @@ def ensure_yandex_folder_for_custom_item(
     if not id_stage_root_path:
         raise RuntimeError("idStageRootPath is empty in project storage context")
 
-    paths = build_custom_id_yandex_folder_paths(id_stage_root_path, group_id, item_name)
+    paths = build_custom_id_yandex_folder_paths(id_stage_root_path, yandex_disk, item_name)
 
-    yandex_disk_ensure_folder(paths["customRootPath"])
-    yandex_disk_ensure_folder(paths["groupRootPath"])
     yandex_disk_ensure_folder(paths["itemPath"])
     yandex_disk_publish_path(paths["itemPath"])
 
@@ -2470,6 +2481,247 @@ def mirror_document_to_yandex(
         "folderPath": normalize_yandex_disk_path(folder_path),
         "folderUrl": folder_url,
         "filePath": upload_result.get("path") or normalize_yandex_disk_path(target_path),
+    }
+
+def yandex_disk_get_download_href(target_path: str) -> str:
+    normalized_path = normalize_yandex_disk_path(target_path)
+    response = requests.get(
+        f"{YANDEX_DISK_API_BASE}/resources/download",
+        headers=get_yandex_disk_headers(),
+        params={"path": normalized_path},
+        timeout=30
+    )
+    response.raise_for_status()
+    data = response.json() or {}
+    href = clean_cell_value(data.get("href"))
+    if not href:
+        raise RuntimeError("Yandex Disk download href not found")
+    return href
+
+
+def yandex_disk_download_bytes(target_path: str) -> bytes:
+    href = yandex_disk_get_download_href(target_path)
+    response = requests.get(href, timeout=120)
+    response.raise_for_status()
+    return response.content
+
+
+def yandex_disk_list_files_recursive(folder_path: str) -> list[dict]:
+    normalized_folder = normalize_yandex_disk_path(folder_path)
+    result = []
+
+    def walk(path: str):
+        response = requests.get(
+            f"{YANDEX_DISK_API_BASE}/resources",
+            headers=get_yandex_disk_headers(),
+            params={
+                "path": path,
+                "fields": "path,name,type,_embedded.items.path,_embedded.items.name,_embedded.items.type",
+                "limit": 1000
+            },
+            timeout=30
+        )
+        response.raise_for_status()
+        data = response.json() or {}
+        embedded = ((data.get("_embedded") or {}).get("items") or [])
+
+        for item in embedded:
+            item_type = clean_cell_value(item.get("type"))
+            item_name = clean_cell_value(item.get("name"))
+            item_path = clean_cell_value(item.get("path"))
+
+            if item_type == "file":
+                result.append({
+                    "name": item_name,
+                    "path": item_path,
+                    "source": "yandex",
+                })
+            elif item_type == "dir" and item_path:
+                walk(item_path)
+
+    walk(normalized_folder)
+    return result
+
+
+def build_sync_compare_key(filename: str) -> str:
+    return clean_cell_value(filename).strip().lower()
+
+
+def get_local_item_documents_map(item: dict) -> dict:
+    documents = normalize_documents_list(item.get("documents"))
+    result = {}
+
+    for doc in documents:
+        name = clean_cell_value(doc.get("name"))
+        key = build_sync_compare_key(name)
+        if not key:
+            continue
+        result[key] = doc
+
+    return result
+
+
+def get_yandex_item_documents_map(dialog_id: str, checklist_key: str, item_name: str) -> tuple[dict, dict]:
+    folder_data = get_item_yandex_folder(dialog_id, checklist_key, item_name)
+    if not folder_data:
+        return {}, {}
+
+    folder = folder_data.get("folder") or {}
+    folder_path = clean_cell_value(folder.get("path"))
+    if not folder_path:
+        return folder_data, {}
+
+    files = yandex_disk_list_files_recursive(folder_path)
+    result = {}
+
+    for file_info in files:
+        name = clean_cell_value(file_info.get("name"))
+        key = build_sync_compare_key(name)
+        if not key:
+            continue
+        result[key] = file_info
+
+    return folder_data, result
+
+
+def calculate_item_sync_status(dialog_id: str, checklist_key: str, item: dict) -> dict:
+    item_name = clean_cell_value(item.get("name"))
+    local_map = get_local_item_documents_map(item)
+    folder_data, yandex_map = get_yandex_item_documents_map(dialog_id, checklist_key, item_name)
+
+    only_local = sorted([key for key in local_map.keys() if key not in yandex_map])
+    only_yandex = sorted([key for key in yandex_map.keys() if key not in local_map])
+
+    return {
+        "folderAlias": clean_cell_value((folder_data or {}).get("folderAlias")),
+        "hasMapping": bool(folder_data),
+        "onlyLocal": only_local,
+        "onlyYandex": only_yandex,
+        "syncNeeded": bool(only_local or only_yandex),
+    }
+
+
+def import_yandex_file_to_local(
+    dialog_id: str,
+    checklist_key: str,
+    item_id: str,
+    item: dict,
+    yandex_file: dict
+) -> dict:
+    file_name = clean_cell_value(yandex_file.get("name")) or "file.bin"
+    file_path = clean_cell_value(yandex_file.get("path"))
+    file_bytes = yandex_disk_download_bytes(file_path)
+
+    rel_path = build_upload_rel_path(dialog_id, item_id, file_name)
+    abs_path = UPLOAD_ROOT / rel_path
+    abs_path.parent.mkdir(parents=True, exist_ok=True)
+
+    with open(abs_path, "wb") as f:
+        f.write(file_bytes)
+
+    file_url = "/uploads/" + rel_path.replace("\\", "/")
+    document_id = uuid.uuid4().hex
+    document_view_url = build_document_view_url(dialog_id, checklist_key, item_id, document_id)
+
+    document_record = normalize_document_record({
+        "id": document_id,
+        "name": file_name,
+        "path": file_url,
+        "fileUrl": file_url,
+        "previewUrl": document_view_url,
+        "size": len(file_bytes),
+        "modifiedAt": datetime.now().isoformat(timespec="seconds"),
+        "source": "local",
+        "mirrorStatus": "synced",
+        "mirrorError": "",
+        "yandexPath": file_path,
+        "yandexFileUrl": "",
+        "yandexFolderAlias": "",
+    })
+
+    existing_documents = normalize_documents_list(item.get("documents"))
+    existing_documents.append(document_record)
+    normalized_documents = normalize_documents_list(existing_documents)
+
+    item["documents"] = normalized_documents
+    item["folderUrl"] = build_folder_view_url(dialog_id, checklist_key, item_id)
+    first_doc = normalized_documents[0] if normalized_documents else {}
+    item["documentUrl"] = clean_cell_value(first_doc.get("fileUrl"))
+    item["documentName"] = clean_cell_value(first_doc.get("name"))
+
+    return document_record
+
+
+def sync_item_documents(dialog_id: str, checklist_key: str, item: dict) -> dict:
+    item_id = str(item.get("id") or "").strip()
+    item_name = clean_cell_value(item.get("name"))
+    if not item_id or not item_name:
+        return {"ok": False, "error": "item id/name is empty"}
+
+    local_map = get_local_item_documents_map(item)
+    folder_data, yandex_map = get_yandex_item_documents_map(dialog_id, checklist_key, item_name)
+
+    if not folder_data:
+        return {"ok": False, "error": "folder mapping not found"}
+
+    uploaded_to_yandex = []
+    downloaded_to_local = []
+
+    for key, doc in local_map.items():
+        if key in yandex_map:
+            continue
+
+        file_url = clean_cell_value(doc.get("fileUrl")) or clean_cell_value(doc.get("path"))
+        file_path = get_upload_file_path_from_url(file_url)
+        if not file_path or not file_path.exists():
+            continue
+
+        with open(file_path, "rb") as f:
+            file_bytes = f.read()
+
+        result = mirror_document_to_yandex(
+            dialog_id=dialog_id,
+            checklist_key=checklist_key,
+            item_name=item_name,
+            filename=clean_cell_value(doc.get("name")),
+            file_bytes=file_bytes
+        )
+
+        if result.get("ok"):
+            doc["mirrorStatus"] = "synced"
+            doc["mirrorError"] = ""
+            doc["yandexPath"] = clean_cell_value(result.get("filePath"))
+            doc["yandexFileUrl"] = clean_cell_value(result.get("folderUrl"))
+            doc["yandexFolderAlias"] = clean_cell_value(result.get("folderAlias"))
+            uploaded_to_yandex.append(clean_cell_value(doc.get("name")))
+
+    for key, yandex_file in yandex_map.items():
+        if key in local_map:
+            continue
+
+        imported_doc = import_yandex_file_to_local(
+            dialog_id=dialog_id,
+            checklist_key=checklist_key,
+            item_id=item_id,
+            item=item,
+            yandex_file=yandex_file
+        )
+        downloaded_to_local.append(clean_cell_value(imported_doc.get("name")))
+
+    item["documents"] = normalize_documents_list(item.get("documents"))
+    first_doc = item["documents"][0] if item["documents"] else {}
+    item["documentUrl"] = clean_cell_value(first_doc.get("fileUrl"))
+    item["documentName"] = clean_cell_value(first_doc.get("name"))
+    item["folderUrl"] = build_folder_view_url(dialog_id, checklist_key, item_id) if item["documents"] else ""
+
+    sync_status = calculate_item_sync_status(dialog_id, checklist_key, item)
+
+    return {
+        "ok": True,
+        "uploadedToYandex": uploaded_to_yandex,
+        "downloadedToLocal": downloaded_to_local,
+        "syncStatus": sync_status,
+        "item": item,
     }
 
 def extract_dialog_id_from_form(form: dict) -> str:
@@ -3850,141 +4102,6 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                 releaseChecklistLock(currentChecklistKey, true);
             };
 
-            loadChecklistByKey = async function (checklistKey) {
-                const targetKey = String(checklistKey || '').trim() || 'id';
-                if (targetKey === currentChecklistKey) {
-                    return;
-                }
-
-                syncChecklistCache();
-                await releaseChecklistLock(currentChecklistKey, false);
-                setSaveState('saving', 'Загружаем...');
-
-                try {
-                    const cachedData = checklistCache[targetKey];
-                    if (cachedData) {
-                        applyChecklistData(deepClone(cachedData));
-                        renderAll();
-                        await acquireChecklistLock(targetKey, true);
-                        startLockHeartbeat();
-                        return;
-                    }
-
-                    const response = await fetch(
-                        appUrl('api/checklist') +
-                        '?dialogId=' + encodeURIComponent(dialogId) +
-                        '&checklistKey=' + encodeURIComponent(targetKey)
-                    );
-                    const result = await response.json();
-                    if (!response.ok) {
-                        throw new Error(result.error || 'load checklist failed');
-                    }
-
-                    applyChecklistData(result);
-                    renderAll();
-                    await acquireChecklistLock(targetKey, true);
-                    startLockHeartbeat();
-                } catch (e) {
-                    console.log('loadChecklistByKey enhanced error:', e);
-                    setSaveState('error', 'Ошибка загрузки чек-листа');
-                }
-            };
-
-            buildDocumentCell = function (item) {
-                const documents = getItemDocuments(item);
-                const itemId = String(item && item.id || '');
-                const folderViewUrl = String(item.folderUrl || '').trim() || (documents.length ? (
-                    appUrl('api/checklist/folder') +
-                    '?dialogId=' + encodeURIComponent(dialogId) +
-                    '&checklistKey=' + encodeURIComponent(currentChecklistKey) +
-                    '&itemId=' + encodeURIComponent(itemId)
-                ) : '');
-                const showViewFolder = documents.length > 0 && !!folderViewUrl;
-
-                const filesHtml = documents.map(doc => {
-                    const docId = String(doc.id || '');
-                    const docName = String(doc.name || 'Файл');
-                    const openUrl = appUrl('api/checklist/file') +
-                        '?dialogId=' + encodeURIComponent(dialogId) +
-                        '&checklistKey=' + encodeURIComponent(currentChecklistKey) +
-                        '&itemId=' + encodeURIComponent(itemId) +
-                        '&documentId=' + encodeURIComponent(docId);
-                    const sizeText = formatFileSize(doc.size || 0);
-
-                    return `
-                        <div class="doc-file-row">
-                            <a
-                                href="javascript:void(0)"
-                                class="doc-file-link"
-                                data-role="view-file"
-                                data-item-id="${esc(itemId)}"
-                                data-document-id="${esc(docId)}"
-                                data-open-url="${esc(openUrl)}"
-                                title="${esc(docName)}"
-                            >
-                                ${esc(docName)}
-                            </a>
-                            <button
-                                type="button"
-                                class="doc-file-remove"
-                                data-role="remove-file"
-                                data-item-id="${esc(itemId)}"
-                                data-document-id="${esc(docId)}"
-                                data-document-name="${esc(docName)}"
-                                title="Удалить файл"
-                                ${typeof disabledAttr === 'function' ? disabledAttr() : ''}
-                            >
-                                ×
-                            </button>
-                            ${sizeText ? `<span class="doc-file-meta">${esc(sizeText)}</span>` : ''}
-                        </div>
-                    `;
-                }).join('');
-
-                return `
-                    <div class="doc-cell">
-                        <div class="doc-actions">
-                            <button
-                                class="upload-btn"
-                                type="button"
-                                data-role="upload"
-                                data-item-id="${esc(itemId)}"
-                                ${typeof disabledAttr === 'function' ? disabledAttr() : ''}
-                            >
-                                Загрузить
-                            </button>
-
-                            ${showViewFolder ? `
-                                <button
-                                    class="doc-btn"
-                                    type="button"
-                                    data-role="view-folder"
-                                    data-item-id="${esc(itemId)}"
-                                    data-folder-url="${esc(folderViewUrl)}"
-                                >
-                                    Посмотреть
-                                </button>
-                            ` : ''}
-                        </div>
-
-                        ${documents.length ? `
-                            <div class="doc-files">
-                                ${filesHtml}
-                            </div>
-                        ` : ''}
-
-                        <input
-                            type="file"
-                            data-role="file-input"
-                            data-item-id="${esc(itemId)}"
-                            style="display:none;"
-                            multiple
-                            ${typeof disabledAttr === 'function' ? disabledAttr() : ''}
-                        >
-                    </div>
-                `;
-            };
-
             renderGroup = function (group) {
                 const groupItems = getItemsByGroup(group.id);
                 const allowAdd = Number(group.id) !== 4;
@@ -4894,6 +5011,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
             }}
             let closeSummarySent = false;
             let sessionDirty = false;
+            let syncStatusByItemId = {{}};
 
             function setSaveState(mode, text) {{
                 saveStateEl.classList.remove('saving', 'error');
@@ -5167,6 +5285,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                     const cachedData = checklistCache[targetKey];
                     if (cachedData) {{
                         applyChecklistData(deepClone(cachedData));
+                        await fetchSyncStatuses();
                         renderAll();
                         debugLog('checklist_switched_cached', {{
                             checklistKey: targetKey
@@ -5189,6 +5308,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                     }}
 
                     applyChecklistData(result);
+                    await fetchSyncStatuses();
                     renderAll();
                     debugLog('checklist_switched', {{
                         checklistKey: targetKey
@@ -5244,6 +5364,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                     if (!response.ok) throw new Error(result.error || 'reload after folder remove failed');
 
                     applyChecklistData(result);
+                    await fetchSyncStatuses();
                     renderAll();
                 }} catch (e) {{
                     console.log('folder remove sync error:', e);
@@ -5394,6 +5515,37 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                 setSaveState('', 'Сохранено');
                 return result;
             }}
+            function getItemSyncState(itemId) {{
+                return syncStatusByItemId[String(itemId || '')] || {{
+                    syncNeeded: false,
+                    onlyLocal: [],
+                    onlyYandex: [],
+                    hasMapping: false
+                }};
+            }}
+
+            async function fetchSyncStatuses() {{
+                try {{
+                    const response = await fetch(
+                        appUrl('api/checklist/sync-status') +
+                        '?dialogId=' + encodeURIComponent(dialogId) +
+                        '&checklistKey=' + encodeURIComponent(currentChecklistKey)
+                    );
+                    const result = await response.json();
+                    if (!response.ok || !result.ok) {{
+                        throw new Error(result.error || 'sync-status failed');
+                    }}
+
+                    const map = {{}};
+                    (result.items || []).forEach(row => {{
+                        map[String(row.itemId || '')] = row;
+                    }});
+                    syncStatusByItemId = map;
+                }} catch (e) {{
+                    console.log('fetchSyncStatuses error:', e);
+                    syncStatusByItemId = {{}};
+                }}
+            }}
             function getItemsByGroup(groupId) {{
                 return items
                     .filter(item => Number(item.group) === Number(groupId))
@@ -5423,9 +5575,10 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                     }});
                 }});
             }}
-            function buildDocumentCell(item) {{
+            buildDocumentCell = function (item) {{
                 const documents = getItemDocuments(item);
                 const itemId = String(item && item.id || '');
+                const syncState = getItemSyncState(itemId);
                 const folderViewUrl = String(item.folderUrl || '').trim() || (documents.length ? (
                     appUrl('api/checklist/folder') +
                     '?dialogId=' + encodeURIComponent(dialogId) +
@@ -5433,6 +5586,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                     '&itemId=' + encodeURIComponent(itemId)
                 ) : '');
                 const showViewFolder = documents.length > 0 && !!folderViewUrl;
+                const showSyncButton = !!syncState.syncNeeded;
 
                 const filesHtml = documents.map(doc => {{
                     const docId = String(doc.id || '');
@@ -5498,6 +5652,18 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                                     Посмотреть
                                 </button>
                             ` : ''}}
+
+                            ${{showSyncButton ? `
+                                <button
+                                    class="doc-btn"
+                                    type="button"
+                                    data-role="sync-item"
+                                    data-item-id="${{esc(itemId)}}"
+                                    title="Синхронизировать"
+                                >
+                                    🔄
+                                </button>
+                            ` : ''}}
                         </div>
 
                         ${{documents.length ? `
@@ -5516,7 +5682,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                         >
                     </div>
                 `;
-            }}
+            }};
             function pushSessionChange(itemId, itemName, field, oldValue, newValue) {{
                 if (String(oldValue || '') === String(newValue || '')) {{
                     return;
@@ -6253,7 +6419,42 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                         if (input) input.click();
                     }});
                 }});
+                document.querySelectorAll('[data-role="sync-item"]').forEach(btn => {{
+                    btn.addEventListener('click', async function () {{
+                        const itemId = String(this.dataset.itemId || '').trim();
+                        if (!itemId) return;
 
+                        this.disabled = true;
+                        setSaveState('saving', 'Синхронизируем...');
+
+                        try {{
+                            const response = await fetch(appUrl('api/checklist/sync-item'), {{
+                                method: 'POST',
+                                headers: {{ 'Content-Type': 'application/json' }},
+                                body: JSON.stringify({{
+                                    dialogId,
+                                    checklistKey: currentChecklistKey,
+                                    itemId
+                                }})
+                            }});
+
+                            const result = await response.json();
+                            if (!response.ok || !result.ok) {{
+                                throw new Error(result.error || 'sync-item failed');
+                            }}
+
+                            replaceItem(result.item);
+                            await fetchSyncStatuses();
+                            renderAll();
+                            setSaveState('', 'Сохранено');
+                        }} catch (e) {{
+                            console.log('sync-item error:', e);
+                            setSaveState('error', 'Ошибка синхронизации');
+                        }} finally {{
+                            this.disabled = false;
+                        }}
+                    }});
+                }});
                 document.querySelectorAll('[data-role="view-folder"]').forEach(btn => {{
                     btn.addEventListener('click', function () {{
                         const folderUrl = this.dataset.folderUrl || '';
@@ -6324,6 +6525,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                                 'removed'
                             );
 
+                            await fetchSyncStatuses();
                             renderAll();
                         }} catch (e) {{
                             console.log('remove file error:', e);
@@ -6378,7 +6580,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                                     currentStatus = newStatus;
                                 }}
                             }}
-
+                            await fetchSyncStatuses();
                             renderAll();
                         }} catch (e) {{
                             console.log(e);
@@ -6656,6 +6858,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                     const cachedData = checklistCache[targetKey];
                     if (cachedData) {{
                         applyChecklistData(deepClone(cachedData));
+                        await fetchSyncStatuses();
                         renderAll();
                         debugLog('checklist_switched_cached', {{
                             checklistKey: targetKey
@@ -6676,6 +6879,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                     }}
 
                     applyChecklistData(result);
+                    await fetchSyncStatuses();
                     renderAll();
                     debugLog('checklist_switched', {{
                         checklistKey: targetKey
@@ -6714,18 +6918,21 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                     console.log('BX24.init skipped:', e);
                 }}
             }}
-            try {{
-                logRenderState('before_renderAll');
-                renderAll();
-                logRenderState('after_renderAll');
+            (async function initPopupRender() {{
+                try {{
+                    logRenderState('before_renderAll');
+                    await fetchSyncStatuses();
+                    renderAll();
+                    logRenderState('after_renderAll');
 
-                debugLog('popup_loaded', {{
-                    href: window.location.href,
-                    hasDialogId: !!dialogId
-                }});
-            }} catch (e) {{
-                logRenderError('renderAll', e);
-            }}
+                    debugLog('popup_loaded', {{
+                        href: window.location.href,
+                        hasDialogId: !!dialogId
+                    }});
+                }} catch (e) {{
+                    logRenderError('renderAll', e);
+                }}
+            }})();
 
             try {{
                 fetchChatTitleIfMissing();
@@ -7357,6 +7564,98 @@ async def api_checklist_remove_document(request: Request):
         "dialogId": dialog_id,
         "checklistKey": checklist_key,
         "item": updated_item,
+        "progressPercent": data.get("progressPercent", 0),
+    })
+
+@app.get("/api/checklist/sync-status")
+def api_checklist_sync_status(dialogId: str = "", checklistKey: str = "id"):
+    dialog_id = normalize_dialog_id(dialogId)
+    checklist_key = normalize_checklist_key(checklistKey)
+
+    if not dialog_id:
+        return JSONResponse({"ok": False, "error": "dialogId is required"}, status_code=400)
+
+    data = get_checklist(dialog_id, checklist_key)
+    items = data.get("items", []) or []
+
+    result = []
+
+    for item in items:
+        migrated_item = migrate_legacy_document_fields(item)
+        sync_status = calculate_item_sync_status(dialog_id, checklist_key, migrated_item)
+
+        result.append({
+            "itemId": str(migrated_item.get("id") or ""),
+            "itemName": clean_cell_value(migrated_item.get("name")),
+            "syncNeeded": bool(sync_status.get("syncNeeded")),
+            "onlyLocal": sync_status.get("onlyLocal") or [],
+            "onlyYandex": sync_status.get("onlyYandex") or [],
+            "hasMapping": bool(sync_status.get("hasMapping")),
+        })
+
+    return JSONResponse({
+        "ok": True,
+        "dialogId": dialog_id,
+        "checklistKey": checklist_key,
+        "items": result,
+    })
+
+@app.post("/api/checklist/sync-item")
+async def api_checklist_sync_item(request: Request):
+    payload = await request.json()
+
+    dialog_id = normalize_dialog_id(payload.get("dialogId"))
+    checklist_key = normalize_checklist_key(payload.get("checklistKey"))
+    item_id = str(payload.get("itemId") or "").strip()
+
+    if not dialog_id:
+        return JSONResponse({"ok": False, "error": "dialogId is required"}, status_code=400)
+
+    if not item_id:
+        return JSONResponse({"ok": False, "error": "itemId is required"}, status_code=400)
+
+    data = get_checklist(dialog_id, checklist_key)
+    items = data.get("items", []) or []
+
+    target_item = None
+    for index, item in enumerate(items):
+        if str(item.get("id") or "") == item_id:
+            target_item = migrate_legacy_document_fields(item)
+            items[index] = target_item
+            break
+
+    if not target_item:
+        return JSONResponse({"ok": False, "error": "item not found"}, status_code=404)
+
+    try:
+        sync_result = sync_item_documents(dialog_id, checklist_key, target_item)
+        if not sync_result.get("ok"):
+            return JSONResponse(sync_result, status_code=400)
+    except Exception as e:
+        return JSONResponse({
+            "ok": False,
+            "error": "sync failed",
+            "details": str(e),
+        }, status_code=500)
+
+    data["items"] = items
+    data = normalize_checklist_data(data, checklist_key)
+    save_checklist(dialog_id, data, checklist_key)
+
+    updated_item = None
+    for item in data.get("items", []):
+        if str(item.get("id") or "") == item_id:
+            updated_item = item
+            break
+
+    return JSONResponse({
+        "ok": True,
+        "dialogId": dialog_id,
+        "checklistKey": checklist_key,
+        "item": updated_item,
+        "uploadedToYandex": sync_result.get("uploadedToYandex") or [],
+        "downloadedToLocal": sync_result.get("downloadedToLocal") or [],
+        "syncStatus": sync_result.get("syncStatus") or {},
         "progressPercent": data.get("progressPercent", 0),
     })
 
