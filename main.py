@@ -107,6 +107,129 @@ CHECKLIST_GROUPS = {
     },
 }
 
+STANDARD_ID_YANDEX_FOLDER_SPECS = {
+    "ППТ": {
+        "alias": "ppt",
+        "folderName": "06_ППТ",
+        "relativePath": "06_ППТ",
+    },
+    "Выписка ЕГРН": {
+        "alias": "egrn_extract",
+        "folderName": "01_Выписка ЕГРН",
+        "relativePath": "02_Градплан/01_Выписка ЕГРН",
+    },
+    "ГПЗУ": {
+        "alias": "gpzu",
+        "folderName": "02_ГПЗУ",
+        "relativePath": "02_Градплан/02_ГПЗУ",
+    },
+    "Тех задание": {
+        "alias": "tz_design",
+        "folderName": "01_ТЗ на проектирование",
+        "relativePath": "01_ТЗ на проектирование",
+    },
+    "ИГДИ": {
+        "alias": "survey_igdi",
+        "folderName": "01_ИГДИ",
+        "relativePath": "04_Изыскания/01_ИГДИ",
+    },
+    "ИГИ": {
+        "alias": "survey_igi",
+        "folderName": "02_ИГИ",
+        "relativePath": "04_Изыскания/02_ИГИ",
+    },
+    "ИЭИ": {
+        "alias": "survey_iei",
+        "folderName": "03_ИЭИ",
+        "relativePath": "04_Изыскания/03_ИЭИ",
+    },
+    "ИГМИ": {
+        "alias": "survey_igmi",
+        "folderName": "04_ИГМИ",
+        "relativePath": "04_Изыскания/04_ИГМИ",
+    },
+    "ИГИ СМР": {
+        "alias": "survey_igi_smr",
+        "folderName": "05_ИГИ СМР",
+        "relativePath": "04_Изыскания/05_ИГИ СМР",
+    },
+    "ТУ Тепловые сети": {
+        "alias": "tu_heat",
+        "folderName": "01_ТУ Тепловые сети",
+        "relativePath": "03_ТУ/01_ТУ Тепловые сети",
+    },
+    "ТУ Водоснабжение": {
+        "alias": "tu_water",
+        "folderName": "02_ТУ Водоснабжение",
+        "relativePath": "03_ТУ/02_ТУ Водоснабжение",
+    },
+    "ТУ Бытовая канализация": {
+        "alias": "tu_sewer",
+        "folderName": "03_ТУ Бытовая канализация",
+        "relativePath": "03_ТУ/03_ТУ Бытовая канализация",
+    },
+    "ТУ Электроснабжение": {
+        "alias": "tu_power",
+        "folderName": "04_ТУ Электроснабжение",
+        "relativePath": "03_ТУ/04_ТУ Электроснабжение",
+    },
+    "ТУ Сети связи": {
+        "alias": "tu_comm",
+        "folderName": "05_ТУ Сети связи",
+        "relativePath": "03_ТУ/05_ТУ Сети связи",
+    },
+    "ТУ Наружное освещение": {
+        "alias": "tu_light",
+        "folderName": "06_ТУ Наружное освещение",
+        "relativePath": "03_ТУ/06_ТУ Наружное освещение",
+    },
+    "ТУ Ливневая канализация": {
+        "alias": "tu_storm",
+        "folderName": "07_ТУ Ливневая канализация",
+        "relativePath": "03_ТУ/07_ТУ Ливневая канализация",
+    },
+    "ТУ Газоснабжение": {
+        "alias": "tu_gas",
+        "folderName": "08_ТУ Газоснабжение",
+        "relativePath": "03_ТУ/08_ТУ Газоснабжение",
+    },
+    "Согласование с Аэропортом": {
+        "alias": "ref_airport",
+        "folderName": "01_Согласование с аэропортом",
+        "relativePath": "05_Справки/01_Согласование с аэропортом",
+    },
+    "Примыкание к УДС": {
+        "alias": "ref_uds",
+        "folderName": "02_Примыкание к УДС",
+        "relativePath": "05_Справки/02_Примыкание к УДС",
+    },
+    "Порубочный лист": {
+        "alias": "ref_cutting",
+        "folderName": "03_Порубочный лист",
+        "relativePath": "05_Справки/03_Порубочный лист",
+    },
+    "Справка вывоза мусора": {
+        "alias": "ref_waste",
+        "folderName": "04_Справка вывоза мусора",
+        "relativePath": "05_Справки/04_Справка вывоза мусора",
+    },
+    "Расположение пожарных гидрантов": {
+        "alias": "ref_hydrants",
+        "folderName": "05_Расположение пожарных гидрантов",
+        "relativePath": "05_Справки/05_Расположение пожарных гидрантов",
+    },
+    "Сокращение ОКН": {
+        "alias": "okn",
+        "folderName": "07_ОКН",
+        "relativePath": "07_ОКН",
+    },
+    "СТУ": {
+        "alias": "stu",
+        "folderName": "08_СТУ",
+        "relativePath": "08_СТУ",
+    },
+}
+
 CONCEPT_GROUPS = [
     {
         "id": 1,
@@ -2435,6 +2558,166 @@ def ensure_yandex_folder_for_custom_item(
         "folderUrl": folder_url,
     }
 
+def get_standard_id_yandex_spec(item_name: str):
+    item_name = clean_cell_value(item_name)
+    return STANDARD_ID_YANDEX_FOLDER_SPECS.get(item_name)
+
+
+def get_id_stage_root_path_from_context(dialog_id: str) -> str:
+    context = get_project_storage_context(dialog_id)
+    if not context:
+        return ""
+
+    yandex_disk = context.get("yandexDisk") or {}
+    return clean_cell_value(yandex_disk.get("idStageRootPath"))
+
+
+def build_standard_id_yandex_folder_path(id_stage_root_path: str, relative_path: str) -> str:
+    base_path = normalize_yandex_disk_path(id_stage_root_path).rstrip("/")
+    relative_path = str(relative_path or "").strip().strip("/")
+    if not base_path or not relative_path:
+        return ""
+    return f"{base_path}/{relative_path}"
+
+
+def ensure_standard_yandex_folder_for_item(
+    dialog_id: str,
+    checklist_key: str,
+    item_name: str,
+) -> dict:
+    dialog_id = normalize_dialog_id(dialog_id)
+    checklist_key = normalize_checklist_key(checklist_key)
+    item_name = clean_cell_value(item_name)
+
+    if checklist_key != "id":
+        raise RuntimeError("standard yandex folder restore is supported only for checklist id")
+
+    if not is_yandex_disk_enabled():
+        raise RuntimeError("yandex token is empty")
+
+    spec = get_standard_id_yandex_spec(item_name)
+    if not spec:
+        raise RuntimeError("standard folder spec not found")
+
+    id_stage_root_path = get_id_stage_root_path_from_context(dialog_id)
+    if not id_stage_root_path:
+        raise RuntimeError("idStageRootPath is empty in project storage context")
+
+    full_folder_path = build_standard_id_yandex_folder_path(
+        id_stage_root_path,
+        spec.get("relativePath") or ""
+    )
+    if not full_folder_path:
+        raise RuntimeError("full standard folder path is empty")
+
+    path_parts = [part for part in str(spec.get("relativePath") or "").split("/") if part]
+    current_path = normalize_yandex_disk_path(id_stage_root_path).rstrip("/")
+
+    for part in path_parts:
+        current_path = f"{current_path}/{part}"
+        yandex_disk_ensure_folder(current_path)
+
+    yandex_disk_publish_path(full_folder_path)
+    meta = yandex_disk_get_resource_meta(full_folder_path)
+
+    folder_alias = clean_cell_value(spec.get("alias"))
+    folder_name = clean_cell_value(meta.get("name")) or clean_cell_value(spec.get("folderName"))
+    folder_path = clean_cell_value(meta.get("path")) or full_folder_path
+    folder_url = clean_cell_value(meta.get("public_url"))
+
+    upsert_item_yandex_mapping(
+        dialog_id=dialog_id,
+        checklist_key=checklist_key,
+        item_name=item_name,
+        folder_alias=folder_alias,
+        folder_name=folder_name,
+        folder_path=folder_path,
+        folder_url=folder_url,
+    )
+
+    return {
+        "folderAlias": folder_alias,
+        "folderName": folder_name,
+        "folderPath": folder_path,
+        "folderUrl": folder_url,
+    }
+
+
+def ensure_item_yandex_folder_for_upload(
+    dialog_id: str,
+    checklist_key: str,
+    item_name: str,
+    item_id: str = "",
+    item_group: int = 0,
+    is_custom: bool = False,
+) -> dict:
+    existing = get_item_yandex_folder(dialog_id, checklist_key, item_name)
+    if existing:
+        folder = existing.get("folder") or {}
+        folder_path = clean_cell_value(folder.get("path"))
+        if folder_path:
+            try:
+                yandex_disk_ensure_folder(folder_path)
+                yandex_disk_publish_path(folder_path)
+                meta = yandex_disk_get_resource_meta(folder_path)
+
+                folder_alias = clean_cell_value(existing.get("folderAlias"))
+                upsert_item_yandex_mapping(
+                    dialog_id=dialog_id,
+                    checklist_key=checklist_key,
+                    item_name=item_name,
+                    folder_alias=folder_alias,
+                    folder_name=clean_cell_value(meta.get("name")) or clean_cell_value(folder.get("name")),
+                    folder_path=clean_cell_value(meta.get("path")) or folder_path,
+                    folder_url=clean_cell_value(meta.get("public_url")),
+                )
+
+                return get_item_yandex_folder(dialog_id, checklist_key, item_name) or existing
+            except Exception:
+                pass
+
+    if checklist_key == "id" and not is_custom:
+        restored = ensure_standard_yandex_folder_for_item(dialog_id, checklist_key, item_name)
+        return get_item_yandex_folder(dialog_id, checklist_key, item_name) or {
+            "folderAlias": restored.get("folderAlias"),
+            "folder": {
+                "name": restored.get("folderName"),
+                "path": restored.get("folderPath"),
+                "url": restored.get("folderUrl"),
+            },
+            "mapping": {
+                "checklistKey": checklist_key,
+                "itemName": item_name,
+                "folderAlias": restored.get("folderAlias"),
+            },
+            "context": get_project_storage_context(dialog_id),
+        }
+
+    if checklist_key == "id" and is_custom:
+        restored = ensure_yandex_folder_for_custom_item(
+            dialog_id=dialog_id,
+            checklist_key=checklist_key,
+            group_id=int(item_group or 0),
+            item_name=item_name,
+            item_id=item_id,
+        )
+        return get_item_yandex_folder(dialog_id, checklist_key, item_name) or {
+            "folderAlias": restored.get("folderAlias"),
+            "folder": {
+                "name": restored.get("folderName"),
+                "path": restored.get("folderPath"),
+                "url": restored.get("folderUrl"),
+            },
+            "mapping": {
+                "checklistKey": checklist_key,
+                "itemName": item_name,
+                "folderAlias": restored.get("folderAlias"),
+            },
+            "context": get_project_storage_context(dialog_id),
+        }
+
+    return None
+
 def build_yandex_file_target_path(folder_path: str, filename: str) -> str:
     folder_path = normalize_yandex_disk_path(folder_path).rstrip("/")
     safe_name = Path(filename or "file.bin").name
@@ -2446,7 +2729,10 @@ def mirror_document_to_yandex(
     checklist_key: str,
     item_name: str,
     filename: str,
-    file_bytes: bytes
+    file_bytes: bytes,
+    item_id: str = "",
+    item_group: int = 0,
+    is_custom: bool = False,
 ) -> dict:
     if not is_yandex_disk_enabled():
         return {
@@ -2454,7 +2740,14 @@ def mirror_document_to_yandex(
             "reason": "yandex token is empty"
         }
 
-    folder_data = get_item_yandex_folder(dialog_id, checklist_key, item_name)
+    folder_data = ensure_item_yandex_folder_for_upload(
+        dialog_id=dialog_id,
+        checklist_key=checklist_key,
+        item_name=item_name,
+        item_id=item_id,
+        item_group=item_group,
+        is_custom=is_custom,
+    )
     if not folder_data:
         return {
             "ok": False,
@@ -7180,7 +7473,10 @@ async def api_checklist_upload_document(
             checklist_key=checklist_key,
             item_name=clean_cell_value(target_item.get("name")),
             filename=uploaded_name,
-            file_bytes=file_bytes
+            file_bytes=file_bytes,
+            item_id=str(target_item.get("id") or ""),
+            item_group=int(target_item.get("group") or 0),
+            is_custom=bool(target_item.get("isCustom", False)),
         )
 
         if mirror_result.get("ok"):
