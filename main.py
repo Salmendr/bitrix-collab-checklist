@@ -2189,6 +2189,240 @@ def yandex_disk_delete_path(target_path: str, permanently: bool = True):
             payload = {"text": response.text}
         raise RuntimeError(f"Yandex Disk delete failed: {payload}")
 
+def sanitize_yandex_folder_name(value: str) -> str:
+    value = clean_cell_value(value)
+    if not value:
+        return "Новый пункт"
+
+    value = re.sub(r'[\\\\/:*?"<>|]+', " ", value)
+    value = re.sub(r"\s+", " ", value).strip()
+    return value or "Новый пункт"
+
+
+def yandex_disk_ensure_folder(target_path: str) -> dict:
+    normalized_path = normalize_yandex_disk_path(target_path)
+
+    response = requests.put(
+        f"{YANDEX_DISK_API_BASE}/resources",
+        headers=get_yandex_disk_headers(),
+        params={"path": normalized_path},
+        timeout=30
+    )
+
+    if response.status_code not in (201, 409):
+        try:
+            payload = response.json()
+        except Exception:
+            payload = {"text": response.text}
+        raise RuntimeError(f"Yandex Disk create folder failed: {payload}")
+
+    return {
+        "ok": True,
+        "path": normalized_path,
+        "alreadyExists": response.status_code == 409,
+    }
+
+
+def yandex_disk_publish_path(target_path: str) -> dict:
+    normalized_path = normalize_yandex_disk_path(target_path)
+
+    response = requests.put(
+        f"{YANDEX_DISK_API_BASE}/resources/publish",
+        headers=get_yandex_disk_headers(),
+        params={"path": normalized_path},
+        timeout=30
+    )
+
+    if response.status_code not in (200, 201, 202):
+        try:
+            payload = response.json()
+        except Exception:
+            payload = {"text": response.text}
+        raise RuntimeError(f"Yandex Disk publish failed: {payload}")
+
+    return {
+        "ok": True,
+        "path": normalized_path,
+    }
+
+
+def yandex_disk_get_resource_meta(target_path: str) -> dict:
+    normalized_path = normalize_yandex_disk_path(target_path)
+
+    response = requests.get(
+        f"{YANDEX_DISK_API_BASE}/resources",
+        headers=get_yandex_disk_headers(),
+        params={
+            "path": normalized_path,
+            "fields": "name,path,public_url"
+        },
+        timeout=30
+    )
+    response.raise_for_status()
+
+    data = response.json() or {}
+    return {
+        "name": clean_cell_value(data.get("name")),
+        "path": clean_cell_value(data.get("path")) or normalized_path,
+        "public_url": clean_cell_value(data.get("public_url")),
+    }
+
+
+def build_custom_id_yandex_folder_paths(id_stage_root_path: str, group_id: int, item_name: str) -> dict:
+    base_path = normalize_yandex_disk_path(id_stage_root_path).rstrip("/")
+
+    group_title_map = {
+        1: "ИД",
+        2: "ТУ",
+        3: "Прочее",
+    }
+
+    group_title = group_title_map.get(int(group_id or 0), "Прочее")
+    custom_root_path = f"{base_path}/90_Пользовательские пункты"
+    group_root_path = f"{custom_root_path}/{group_title}"
+    folder_name = sanitize_yandex_folder_name(item_name)
+    item_folder_path = f"{group_root_path}/{folder_name}"
+
+    return {
+        "customRootPath": custom_root_path,
+        "groupRootPath": group_root_path,
+        "itemPath": item_folder_path,
+        "folderName": folder_name,
+        "groupTitle": group_title,
+    }
+
+
+def upsert_item_yandex_mapping(
+    dialog_id: str,
+    checklist_key: str,
+    item_name: str,
+    folder_alias: str,
+    folder_name: str,
+    folder_path: str,
+    folder_url: str,
+):
+    dialog_id = normalize_dialog_id(dialog_id)
+    checklist_key = normalize_checklist_key(checklist_key)
+    item_name = clean_cell_value(item_name)
+    folder_alias = clean_cell_value(folder_alias)
+    folder_name = clean_cell_value(folder_name)
+    folder_path = normalize_yandex_disk_path(folder_path)
+    folder_url = clean_cell_value(folder_url)
+
+    if not dialog_id:
+        raise ValueError("dialogId is required")
+    if not item_name:
+        raise ValueError("itemName is required")
+    if not folder_alias:
+        raise ValueError("folderAlias is required")
+    if not folder_path:
+        raise ValueError("folderPath is required")
+
+    context = get_project_storage_context(dialog_id)
+    if not context:
+        raise RuntimeError("project storage context not found")
+
+    yandex_disk = dict(context.get("yandexDisk") or {})
+    folders = dict(yandex_disk.get("folders") or {})
+    item_mappings = list(context.get("itemMappings") or [])
+
+    folders[folder_alias] = {
+        "name": folder_name,
+        "path": folder_path,
+        "url": folder_url,
+    }
+    yandex_disk["folders"] = folders
+
+    normalized_item_name = item_name.lower()
+    filtered_mappings = []
+
+    for mapping in item_mappings:
+        mapping_key = normalize_checklist_key(mapping.get("checklistKey"))
+        mapping_name = clean_cell_value(mapping.get("itemName")).lower()
+
+        if mapping_key == checklist_key and mapping_name == normalized_item_name:
+            continue
+
+        filtered_mappings.append(mapping)
+
+    filtered_mappings.append({
+        "checklistKey": checklist_key,
+        "itemName": item_name,
+        "folderAlias": folder_alias,
+    })
+
+    payload = {
+        "dialogId": dialog_id,
+        "projectId": context.get("projectId") or "",
+        "projectName": context.get("projectName") or "",
+        "storageMode": context.get("storageMode") or {},
+        "yandexDisk": yandex_disk,
+        "itemMappings": filtered_mappings,
+    }
+
+    save_project_storage_context(dialog_id, payload)
+    return payload
+
+
+def ensure_yandex_folder_for_custom_item(
+    dialog_id: str,
+    checklist_key: str,
+    group_id: int,
+    item_name: str,
+    item_id: str,
+) -> dict:
+    dialog_id = normalize_dialog_id(dialog_id)
+    checklist_key = normalize_checklist_key(checklist_key)
+    item_name = clean_cell_value(item_name)
+    item_id = str(item_id or "").strip()
+
+    if checklist_key != "id":
+        raise RuntimeError("custom yandex folder is supported only for checklist id")
+
+    if not is_yandex_disk_enabled():
+        raise RuntimeError("yandex token is empty")
+
+    context = get_project_storage_context(dialog_id)
+    if not context:
+        raise RuntimeError("project storage context not found")
+
+    yandex_disk = context.get("yandexDisk") or {}
+    id_stage_root_path = clean_cell_value(yandex_disk.get("idStageRootPath"))
+    if not id_stage_root_path:
+        raise RuntimeError("idStageRootPath is empty in project storage context")
+
+    paths = build_custom_id_yandex_folder_paths(id_stage_root_path, group_id, item_name)
+
+    yandex_disk_ensure_folder(paths["customRootPath"])
+    yandex_disk_ensure_folder(paths["groupRootPath"])
+    yandex_disk_ensure_folder(paths["itemPath"])
+    yandex_disk_publish_path(paths["itemPath"])
+
+    meta = yandex_disk_get_resource_meta(paths["itemPath"])
+
+    suffix = re.sub(r"[^a-zA-Z0-9]+", "", item_id)[-8:].lower() or uuid.uuid4().hex[:8]
+    folder_alias = f"id_custom_g{int(group_id)}_{slugify_folder_part(item_name)}_{suffix}"
+
+    folder_name = clean_cell_value(meta.get("name")) or paths["folderName"]
+    folder_path = clean_cell_value(meta.get("path")) or paths["itemPath"]
+    folder_url = clean_cell_value(meta.get("public_url"))
+
+    upsert_item_yandex_mapping(
+        dialog_id=dialog_id,
+        checklist_key=checklist_key,
+        item_name=item_name,
+        folder_alias=folder_alias,
+        folder_name=folder_name,
+        folder_path=folder_path,
+        folder_url=folder_url,
+    )
+
+    return {
+        "folderAlias": folder_alias,
+        "folderName": folder_name,
+        "folderPath": folder_path,
+        "folderUrl": folder_url,
+    }
 
 def build_yandex_file_target_path(folder_path: str, filename: str) -> str:
     folder_path = normalize_yandex_disk_path(folder_path).rstrip("/")
@@ -4454,16 +4688,20 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
             }}
 
             .id-dates-toggle {{
+                width: 22px;
+                min-width: 22px;
+                height: 22px;
                 border: 1px solid #d0d7de;
                 background: #fff;
                 color: #344054;
                 border-radius: 6px;
-                padding: 2px 6px;
-                font-size: 10px;
-                line-height: 1.2;
+                padding: 0;
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 12px;
+                line-height: 1;
                 cursor: pointer;
-                white-space: nowrap;
-                height: 22px;
             }}
 
             .id-dates-toggle:hover {{
@@ -5528,7 +5766,8 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
 
             function buildIdHeader(group, showDates) {{
                 const groupId = Number(group.id);
-                const toggleText = showDates ? 'Скрыть даты' : 'Показать даты';
+                const toggleTitle = showDates ? 'Скрыть даты' : 'Показать даты';
+                const toggleIcon = '📅';
 
                 return `
                     <div class="thead-top ${{getIdGridClass(showDates)}}">
@@ -5541,8 +5780,10 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                                 class="id-dates-toggle"
                                 data-role="toggle-id-dates"
                                 data-group-id="${{esc(groupId)}}"
+                                title="${{esc(toggleTitle)}}"
+                                aria-label="${{esc(toggleTitle)}}"
                             >
-                                ${{esc(toggleText)}}
+                                ${{toggleIcon}}
                             </button>
                         </div>
                         ${{showDates ? `<div class="th center" style="grid-column: 4 / span 2;">Дата получения</div>` : ''}}
@@ -6820,10 +7061,26 @@ async def api_checklist_add_item(request: Request):
             "isCustom": True,
         }
 
+        try:
+            ensure_yandex_folder_for_custom_item(
+                dialog_id=dialog_id,
+                checklist_key=checklist_key,
+                group_id=group_id,
+                item_name=name,
+                item_id=new_item_id,
+            )
+        except Exception as e:
+            return JSONResponse({
+                "ok": False,
+                "error": "failed to create yandex folder for custom item",
+                "details": str(e),
+            }, status_code=500)
+
     items.append(new_item)
     data["items"] = items
     data = normalize_checklist_data(data, checklist_key)
     save_checklist(dialog_id, data, checklist_key)
+
     created_item = None
     for item in data.get("items", []):
         if str(item.get("id")) == new_item["id"]:
@@ -6836,7 +7093,6 @@ async def api_checklist_add_item(request: Request):
         "item": created_item or new_item,
         "progressPercent": data.get("progressPercent", 0),
     })
-
 
 @app.post("/api/checklist/upload-document")
 async def api_checklist_upload_document(
