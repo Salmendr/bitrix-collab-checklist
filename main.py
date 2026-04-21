@@ -57,8 +57,8 @@ app.mount("/uploads", StaticFiles(directory=str(UPLOAD_ROOT)), name="uploads")
 
 PROJECT_CHECKLISTS = [
     {"key": "id", "title": "Чек-лист ИД"},
-    {"key": "concept", "title": "Чек-лист Концепция"},
     {"key": "opr", "title": "Чек-лист ОПР"},
+    {"key": "concept", "title": "Чек-лист Концепция"},
 ]
 
 CHECKLIST_GROUPS = {
@@ -230,6 +230,44 @@ STANDARD_ID_YANDEX_FOLDER_SPECS = {
     },
 }
 
+STANDARD_OPR_YANDEX_FOLDER_SPECS = {
+    "ОПР.ГП": {
+        "alias": "opr_gp",
+        "folderName": "01_ОПР.ГП",
+        "relativePath": "01_ОПР.ГП",
+    },
+    "ОПР.АР": {
+        "alias": "opr_ar",
+        "folderName": "02_ОПР.АР",
+        "relativePath": "02_ОПР.АР",
+    },
+    "ИОС 1": {
+        "alias": "opr_ios_1",
+        "folderName": "ИОС_1",
+        "relativePath": "03_ИОС/ИОС_1",
+    },
+    "ИОС 2": {
+        "alias": "opr_ios_2",
+        "folderName": "ИОС_2",
+        "relativePath": "03_ИОС/ИОС_2",
+    },
+    "ИОС 3": {
+        "alias": "opr_ios_3",
+        "folderName": "ИОС_3",
+        "relativePath": "03_ИОС/ИОС_3",
+    },
+    "ИОС 4": {
+        "alias": "opr_ios_4",
+        "folderName": "ИОС_4",
+        "relativePath": "03_ИОС/ИОС_4",
+    },
+    "ИОС 5": {
+        "alias": "opr_ios_5",
+        "folderName": "ИОС_5",
+        "relativePath": "03_ИОС/ИОС_5",
+    },
+}
+
 CONCEPT_GROUPS = [
     {
         "id": 1,
@@ -335,98 +373,19 @@ CONCEPT_GROUPS = [
 OPR_GROUPS = [
     {
         "id": 1,
-        "title": "Генеральный план",
+        "title": "ОПР",
         "items": [
-            "схема генплана с указанием проектируемых и существующих зданий, сооружений, площадок, парковок, технико-экономическими показателями (расчетными и нормативными)",
-            "схема существующих СЗЗ, водоохранных зон, приаэродромных территорий, территорий и зон ОКН, зон ЗСО водозаборов, оползнеопасных зон, подтопления и затопления и т.д.",
-            "схема зонирования территории по функционалу",
-            "схема пешеходно-транспортных связей",
-            "схема пожарных проездов",
-            "принципиальная схема благоустройства",
-            "принципиальная схема вертикальной планировки",
-            "принципиальная схема сводного плана сетей",
+            "ОПР.ГП",
+            "ОПР.АР",
+            "ИОС 1",
+            "ИОС 2",
+            "ИОС 3",
+            "ИОС 4",
+            "ИОС 5",
         ],
     },
     {
         "id": 2,
-        "title": "Архитектурные решения",
-        "items": [
-            "схемы функционального зонирования",
-            "планировки",
-            "разрезы",
-            "схема вертикальных связей и потоков",
-            "технико-экономические показатели",
-        ],
-    },
-    {
-        "id": 3,
-        "title": "Конструктивные решения",
-        "items": [
-            "принципиальные схемы несущих конструкций",
-            "блок-схема разделения зданий на блоки (при необходимости)",
-        ],
-    },
-    {
-        "id": 4,
-        "title": "Технологические решения",
-        "items": [
-            "принципиальные технологические решения с указанием наименований помещений, потоков",
-            "количество сотрудников/посетителей",
-            "режим работы",
-        ],
-    },
-    {
-        "id": 5,
-        "title": "Электроснабжение",
-        "items": [
-            "принципиальный план наружных сетей электроснабжения",
-            "принципиальная схема электроснабжения",
-            "места расстановки основного щитового оборудования на планах (ВРУ, ГРЩ)",
-            "сбор укрупненных нагрузок, категории электроснабжения",
-        ],
-    },
-    {
-        "id": 6,
-        "title": "Водоснабжение и водоотведение",
-        "items": [
-            "принципиальный план наружных сетей водоснабжения и водоотведения",
-            "принципиальные схемы водоснабжения и водоотведения",
-            "места прохода основных стояков сетей",
-            "сбор укрупненных нагрузок",
-        ],
-    },
-    {
-        "id": 7,
-        "title": "Отопление, вентиляция и кондиционирование",
-        "items": [
-            "блок-схема теплоснабжения",
-            "планы принципиального размещения вентоборудования и кондиционирования",
-            "план-схема с размещением вертикальных шахт размещения вентиляции и трубопроводов",
-            "принципиальные схемы системы вентиляции",
-            "принципиальные схемы системы отопления",
-            "принципиальные схемы системы кондиционирования",
-            "принципиальные схемы тепловой сети",
-        ],
-    },
-    {
-        "id": 8,
-        "title": "Противопожарные системы",
-        "items": [
-            "схемы путей эвакуации",
-            "схема разделения на пожарные отсеки",
-            "схемы противопожарных преград",
-            "схема противопожарного водопровода",
-        ],
-    },
-    {
-        "id": 9,
-        "title": "Карточка согласования основных материалов и оборудования",
-        "items": [
-            "карточка согласования основных материалов и оборудования",
-        ],
-    },
-    {
-        "id": 10,
         "title": "Не требуется",
         "items": [],
     },
@@ -498,17 +457,17 @@ def resolve_opr_group_id_by_item_id_or_name(item: dict) -> int:
     name = str(item.get("name") or "").strip()
 
     if item_id.startswith("opr_g"):
-        match = item_id.split("_", 2)
-        if len(match) > 1 and match[1].startswith("g"):
+        parts = item_id.split("_", 2)
+        if len(parts) > 1 and parts[1].startswith("g"):
             try:
-                group_id = int(match[1][1:])
-                if group_id != 10:
-                    return group_id
+                group_id = int(parts[1][1:])
+                if group_id == 2:
+                    return 2
             except Exception:
                 pass
 
     for group in OPR_GROUPS:
-        if group["id"] == 10:
+        if group["id"] == 2:
             continue
 
         for order, item_name in enumerate(group["items"], start=1):
@@ -517,7 +476,7 @@ def resolve_opr_group_id_by_item_id_or_name(item: dict) -> int:
                 return group["id"]
 
     current_group = int(item.get("group") or 1)
-    return 1 if current_group == 10 else current_group
+    return 1 if current_group == 2 else current_group
 
 
 def clean_cell_value(value):
@@ -911,7 +870,7 @@ def build_default_checklist_template(dialog_id: str = "", checklist_key: str = "
 
     if checklist_key == "opr":
         for group in OPR_GROUPS:
-            if group["id"] == 10:
+            if group["id"] == 2:
                 continue
 
             for order, name in enumerate(group["items"], start=1):
@@ -924,12 +883,14 @@ def build_default_checklist_template(dialog_id: str = "", checklist_key: str = "
                     "name": name,
                     "priority": "white",
                     "status": "",
-                    "plannedDate": "",
-                    "extraInfo": "",
+                    "plan": "",
+                    "fact": "",
                     "folderKey": build_folder_key("opr", name, item_id),
                     "folderPath": "",
                     "folderUrl": "",
                     "documents": [],
+                    "documentUrl": "",
+                    "documentName": "",
                     "isCustom": False,
                 })
 
@@ -943,7 +904,7 @@ def build_default_checklist_template(dialog_id: str = "", checklist_key: str = "
             "items": items,
             "notice": "",
         }, "opr")
-
+    
     for group_id, group_data in CHECKLIST_GROUPS.items():
         if group_id == 4:
             continue
@@ -1146,9 +1107,10 @@ def normalize_checklist_data(data: dict, checklist_key: str = "id") -> dict:
 
             status = normalize_status(item.get("status"))
             group_id = int(item.get("group") or 0)
+
             if status == "Не требуется":
-                group_id = 10
-            elif group_id == 10 or not group_id:
+                group_id = 2
+            elif group_id == 2 or not group_id:
                 group_id = resolve_opr_group_id_by_item_id_or_name(item)
 
             normalized_items.append({
@@ -1158,8 +1120,8 @@ def normalize_checklist_data(data: dict, checklist_key: str = "id") -> dict:
                 "name": name,
                 "priority": derive_indicator_from_status(status),
                 "status": status,
-                "plannedDate": normalize_date_string(item.get("plannedDate")),
-                "extraInfo": clean_cell_value(item.get("extraInfo")),
+                "plan": normalize_date_string(item.get("plan") or item.get("plannedDate")),
+                "fact": normalize_date_string(item.get("fact")),
                 "folderKey": folder_key,
                 "folderPath": folder_path,
                 "folderUrl": folder_url,
@@ -1168,6 +1130,43 @@ def normalize_checklist_data(data: dict, checklist_key: str = "id") -> dict:
                 "documentName": legacy_document_name,
                 "isCustom": bool(item.get("isCustom", False)),
             })
+
+        existing_names = {
+            clean_cell_value(existing_item.get("name")).lower()
+            for existing_item in normalized_items
+            if clean_cell_value(existing_item.get("name"))
+        }
+
+        for group in OPR_GROUPS:
+            if group["id"] == 2:
+                continue
+
+            for default_order, default_name in enumerate(group["items"], start=1):
+                normalized_name = clean_cell_value(default_name).lower()
+                if not normalized_name or normalized_name in existing_names:
+                    continue
+
+                migrated_item_id = f"opr_g{group['id']}_{default_order}_migrated_{slugify_folder_part(default_name)}"
+
+                normalized_items.append({
+                    "id": migrated_item_id,
+                    "group": group["id"],
+                    "order": default_order,
+                    "name": default_name,
+                    "priority": "white",
+                    "status": "",
+                    "plan": "",
+                    "fact": "",
+                    "folderKey": build_folder_key("opr", default_name, migrated_item_id),
+                    "folderPath": "",
+                    "folderUrl": "",
+                    "documents": [],
+                    "documentUrl": "",
+                    "documentName": "",
+                    "isCustom": False,
+                })
+
+                existing_names.add(normalized_name)
 
         normalized_items.sort(key=lambda x: (x["group"], x["order"], x["name"]))
 
@@ -1623,7 +1622,7 @@ def status_emoji(status: str) -> str:
 
 MESSAGE_ALIGNMENT_SPACE = " "
 MESSAGE_ALIGNMENT_SPACE_FACTOR = 2
-MESSAGE_CHECKLIST_ORDER = ["concept", "id", "opr"]
+MESSAGE_CHECKLIST_ORDER = ["id", "opr", "concept"]
 MESSAGE_CHECKLIST_TITLES = {
     "id": "Чек-лист ИД",
     "concept": "Чек-лист Концепция",
@@ -1684,7 +1683,7 @@ def split_changes(changes: list) -> dict:
         field = str(change.get("field") or "").strip()
         if field == "status":
             groups["status"].append(change)
-        elif field in {"plan", "plannedDate"}:
+        elif field in {"plan", "plannedDate", "fact"}:
             groups["date"].append(change)
         elif field == "extraInfo":
             groups["extraInfo"].append(change)
@@ -1768,8 +1767,10 @@ def normalize_message_value(field: str, value, checklist_key: str) -> str:
 def build_change_left_label(field: str, checklist_key: str) -> str:
     if field == "status":
         return "Статус"
-    if field == "date":
-        return "Планируемая дата" if normalize_checklist_key(checklist_key) == "opr" else "План"
+    if field in {"date", "plan", "plannedDate"}:
+        return "План"
+    if field == "fact":
+        return "Факт"
     if field == "extraInfo":
         return "Доп информация"
     if field == "source":
@@ -1786,7 +1787,7 @@ def build_change_left_label(field: str, checklist_key: str) -> str:
 def build_change_emoji(field: str, new_value: str, checklist_key: str) -> str:
     if field == "status":
         return status_emoji(new_value)
-    if field == "date":
+    if field in {"date", "plan", "plannedDate", "fact"}:
         return "📆"
     if field == "extraInfo":
         return "📝"
@@ -2642,6 +2643,197 @@ def ensure_standard_yandex_folder_for_item(
         "folderUrl": folder_url,
     }
 
+def get_standard_opr_yandex_spec(item_name: str):
+    item_name = clean_cell_value(item_name)
+    return STANDARD_OPR_YANDEX_FOLDER_SPECS.get(item_name)
+
+
+def get_opr_root_path_from_context(dialog_id: str) -> str:
+    context = get_project_storage_context(dialog_id)
+    if not context:
+        return ""
+
+    yandex_disk = context.get("yandexDisk") or {}
+    project_root_path = clean_cell_value(yandex_disk.get("projectRootPath"))
+    if not project_root_path:
+        return ""
+
+    return normalize_yandex_disk_path(project_root_path).rstrip("/") + "/02_Выдача документации/02_ОПР"
+
+
+def ensure_opr_root_path(dialog_id: str) -> str:
+    context = get_project_storage_context(dialog_id)
+    if not context:
+        raise RuntimeError("project storage context not found")
+
+    yandex_disk = context.get("yandexDisk") or {}
+    project_root_path = clean_cell_value(yandex_disk.get("projectRootPath"))
+    if not project_root_path:
+        raise RuntimeError("projectRootPath is empty in project storage context")
+
+    current_path = normalize_yandex_disk_path(project_root_path).rstrip("/")
+    for part in ["02_Выдача документации", "02_ОПР"]:
+        current_path = f"{current_path}/{part}"
+        yandex_disk_ensure_folder(current_path)
+
+    return current_path
+
+
+def build_standard_opr_yandex_folder_path(opr_root_path: str, relative_path: str) -> str:
+    base_path = normalize_yandex_disk_path(opr_root_path).rstrip("/")
+    relative_path = str(relative_path or "").strip().strip("/")
+    if not base_path or not relative_path:
+        return ""
+    return f"{base_path}/{relative_path}"
+
+
+def ensure_standard_yandex_folder_for_opr_item(
+    dialog_id: str,
+    checklist_key: str,
+    item_name: str,
+) -> dict:
+    dialog_id = normalize_dialog_id(dialog_id)
+    checklist_key = normalize_checklist_key(checklist_key)
+    item_name = clean_cell_value(item_name)
+
+    if checklist_key != "opr":
+        raise RuntimeError("standard yandex folder restore is supported only for checklist opr")
+
+    if not is_yandex_disk_enabled():
+        raise RuntimeError("yandex token is empty")
+
+    spec = get_standard_opr_yandex_spec(item_name)
+    if not spec:
+        raise RuntimeError("standard OPR folder spec not found")
+
+    opr_root_path = ensure_opr_root_path(dialog_id)
+    full_folder_path = build_standard_opr_yandex_folder_path(
+        opr_root_path,
+        spec.get("relativePath") or ""
+    )
+    if not full_folder_path:
+        raise RuntimeError("full OPR folder path is empty")
+
+    path_parts = [part for part in str(spec.get("relativePath") or "").split("/") if part]
+    current_path = normalize_yandex_disk_path(opr_root_path).rstrip("/")
+
+    for part in path_parts:
+        current_path = f"{current_path}/{part}"
+        yandex_disk_ensure_folder(current_path)
+
+    yandex_disk_publish_path(full_folder_path)
+    meta = yandex_disk_get_resource_meta(full_folder_path)
+
+    folder_alias = clean_cell_value(spec.get("alias"))
+    folder_name = clean_cell_value(meta.get("name")) or clean_cell_value(spec.get("folderName"))
+    folder_path = clean_cell_value(meta.get("path")) or full_folder_path
+    folder_url = clean_cell_value(meta.get("public_url"))
+
+    upsert_item_yandex_mapping(
+        dialog_id=dialog_id,
+        checklist_key=checklist_key,
+        item_name=item_name,
+        folder_alias=folder_alias,
+        folder_name=folder_name,
+        folder_path=folder_path,
+        folder_url=folder_url,
+    )
+
+    return {
+        "folderAlias": folder_alias,
+        "folderName": folder_name,
+        "folderPath": folder_path,
+        "folderUrl": folder_url,
+    }
+
+
+def get_next_opr_root_folder_number(yandex_disk: dict, opr_root_path: str) -> int:
+    opr_root_path = normalize_yandex_disk_path(opr_root_path).rstrip("/")
+    folders = dict((yandex_disk or {}).get("folders") or {})
+    max_number = 0
+
+    for folder in folders.values():
+        folder_path = normalize_yandex_disk_path((folder or {}).get("path"))
+        if not folder_path.startswith(opr_root_path + "/"):
+            continue
+
+        relative = folder_path[len(opr_root_path) + 1:]
+        first_part = relative.split("/", 1)[0]
+        current_number = extract_yandex_folder_number(first_part)
+
+        if current_number > max_number:
+            max_number = current_number
+
+    return max_number + 1 if max_number > 0 else 4
+
+
+def build_custom_opr_yandex_folder_paths(opr_root_path: str, yandex_disk: dict, item_name: str) -> dict:
+    base_path = normalize_yandex_disk_path(opr_root_path).rstrip("/")
+    next_number = get_next_opr_root_folder_number(yandex_disk, base_path)
+    folder_name = f"{next_number:02d}_{sanitize_yandex_folder_name(item_name)}"
+    item_folder_path = f"{base_path}/{folder_name}"
+
+    return {
+        "itemPath": item_folder_path,
+        "folderName": folder_name,
+        "folderNumber": next_number,
+    }
+
+
+def ensure_yandex_folder_for_custom_opr_item(
+    dialog_id: str,
+    checklist_key: str,
+    group_id: int,
+    item_name: str,
+    item_id: str,
+) -> dict:
+    dialog_id = normalize_dialog_id(dialog_id)
+    checklist_key = normalize_checklist_key(checklist_key)
+    item_name = clean_cell_value(item_name)
+    item_id = str(item_id or "").strip()
+
+    if checklist_key != "opr":
+        raise RuntimeError("custom yandex folder is supported only for checklist opr")
+
+    if not is_yandex_disk_enabled():
+        raise RuntimeError("yandex token is empty")
+
+    context = get_project_storage_context(dialog_id)
+    if not context:
+        raise RuntimeError("project storage context not found")
+
+    yandex_disk = context.get("yandexDisk") or {}
+    opr_root_path = ensure_opr_root_path(dialog_id)
+    paths = build_custom_opr_yandex_folder_paths(opr_root_path, yandex_disk, item_name)
+
+    yandex_disk_ensure_folder(paths["itemPath"])
+    yandex_disk_publish_path(paths["itemPath"])
+
+    meta = yandex_disk_get_resource_meta(paths["itemPath"])
+
+    suffix = re.sub(r"[^a-zA-Z0-9]+", "", item_id)[-8:].lower() or uuid.uuid4().hex[:8]
+    folder_alias = f"opr_custom_g{int(group_id)}_{slugify_folder_part(item_name)}_{suffix}"
+
+    folder_name = clean_cell_value(meta.get("name")) or paths["folderName"]
+    folder_path = clean_cell_value(meta.get("path")) or paths["itemPath"]
+    folder_url = clean_cell_value(meta.get("public_url"))
+
+    upsert_item_yandex_mapping(
+        dialog_id=dialog_id,
+        checklist_key=checklist_key,
+        item_name=item_name,
+        folder_alias=folder_alias,
+        folder_name=folder_name,
+        folder_path=folder_path,
+        folder_url=folder_url,
+    )
+
+    return {
+        "folderAlias": folder_alias,
+        "folderName": folder_name,
+        "folderPath": folder_path,
+        "folderUrl": folder_url,
+    }
 
 def ensure_item_yandex_folder_for_upload(
     dialog_id: str,
@@ -2695,6 +2887,46 @@ def ensure_item_yandex_folder_for_upload(
 
     if checklist_key == "id" and is_custom:
         restored = ensure_yandex_folder_for_custom_item(
+            dialog_id=dialog_id,
+            checklist_key=checklist_key,
+            group_id=int(item_group or 0),
+            item_name=item_name,
+            item_id=item_id,
+        )
+        return get_item_yandex_folder(dialog_id, checklist_key, item_name) or {
+            "folderAlias": restored.get("folderAlias"),
+            "folder": {
+                "name": restored.get("folderName"),
+                "path": restored.get("folderPath"),
+                "url": restored.get("folderUrl"),
+            },
+            "mapping": {
+                "checklistKey": checklist_key,
+                "itemName": item_name,
+                "folderAlias": restored.get("folderAlias"),
+            },
+            "context": get_project_storage_context(dialog_id),
+        }
+
+    if checklist_key == "opr" and not is_custom:
+        restored = ensure_standard_yandex_folder_for_opr_item(dialog_id, checklist_key, item_name)
+        return get_item_yandex_folder(dialog_id, checklist_key, item_name) or {
+            "folderAlias": restored.get("folderAlias"),
+            "folder": {
+                "name": restored.get("folderName"),
+                "path": restored.get("folderPath"),
+                "url": restored.get("folderUrl"),
+            },
+            "mapping": {
+                "checklistKey": checklist_key,
+                "itemName": item_name,
+                "folderAlias": restored.get("folderAlias"),
+            },
+            "context": get_project_storage_context(dialog_id),
+        }
+
+    if checklist_key == "opr" and is_custom:
+        restored = ensure_yandex_folder_for_custom_opr_item(
             dialog_id=dialog_id,
             checklist_key=checklist_key,
             group_id=int(item_group or 0),
@@ -4524,6 +4756,49 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                 return 'status-indicator';
             };
 
+            function resolveOprGroupIdByItemIdOrName(item) {
+                const itemId = String(item && item.id || '');
+                if (itemId.startsWith('opr_g')) {
+                    const match = itemId.match(/^opr_g(\d+)_/);
+                    if (match) {
+                        const groupId = Number(match[1]);
+                        if (groupId && groupId !== 2) {
+                            return groupId;
+                        }
+                    }
+                }
+
+                const name = String(item && item.name || '').trim();
+                const matchedGroup = (Array.isArray(groups) ? groups : []).find(group => {
+                    const gid = Number(group && group.id);
+                    if (gid === 2) return false;
+
+                    return Array.isArray(items) && items.some(existing =>
+                        existing !== item &&
+                        Number(existing.group) === gid &&
+                        String(existing.name || '').trim() === name
+                    );
+                });
+
+                return matchedGroup ? Number(matchedGroup.id) : 1;
+            }
+
+            function buildOprDatesToggle() {
+                const active = !!oprDateVisibility[1];
+                return `
+                    <button
+                        type="button"
+                        class="id-dates-toggle"
+                        data-role="opr-toggle-dates"
+                        title="${active ? 'Скрыть даты' : 'Показать даты'}"
+                        aria-label="${active ? 'Скрыть даты' : 'Показать даты'}"
+                        ${disabledAttr()}
+                    >
+                        📅
+                    </button>
+                `;
+            }
+
             function buildOprStatusCellUi(item) {
                 return `
                     <select class="status-select" data-role="opr-status" data-item-id="${esc(item.id)}" ${disabledAttr()}>
@@ -4535,29 +4810,38 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                 `;
             }
 
-            function buildOprExtraCellUi(item) {
-                return `<textarea class="concept-extra-textarea" data-role="opr-extra" data-item-id="${esc(item.id)}" placeholder="Доп информация" ${disabledAttr()}>${esc(item.extraInfo || '')}</textarea>`;
-            }
-
             function renderOprGroupUi(group) {
                 const groupItems = getItemsByGroup(group.id);
-                const allowAdd = Number(group.id) !== 10;
-                const rows = groupItems.map(item => `
-                    <div class="row" style="grid-template-columns: 1.05fr 110px 130px 136px 1.25fr;" data-item-id="${esc(item.id)}">
-                        <div class="td">
-                            <div class="cell-name">
-                                <div class="${oprIndicatorClass(item)}"></div>
-                                <div class="item-name" style="${normalizeStatus(item.status) === 'Не требуется' ? 'text-decoration:line-through;color:#98a2b3;' : ''}">
-                                    ${esc(item.name)}
+                const allowAdd = Number(group.id) !== 2;
+                const showDates = !!oprDateVisibility[1];
+                const gridClass = showDates ? 'id-grid id-grid-expanded' : 'id-grid id-grid-compact';
+
+                const rows = groupItems.map(item => {
+                    const rowClass = normalizeStatus(item.status) === 'Не требуется'
+                        ? `row not-required ${gridClass}`
+                        : `row ${gridClass}`;
+
+                    return `
+                        <div class="${rowClass}" data-item-id="${esc(item.id)}">
+                            <div class="td">
+                                <div class="cell-name">
+                                    <div class="${oprIndicatorClass(item)}"></div>
+                                    <div class="item-name">${esc(item.name)}</div>
                                 </div>
                             </div>
+                            <div class="td">${buildDocumentCell(item)}</div>
+                            <div class="td">${buildOprStatusCellUi(item)}</div>
+                            ${showDates ? `
+                                <div class="td">
+                                    <input class="date-input" type="date" data-role="opr-plan" data-item-id="${esc(item.id)}" value="${esc(toInputDate(item.plan || ''))}" ${disabledAttr()}>
+                                </div>
+                                <div class="td">
+                                    <input class="date-input" type="date" data-role="opr-fact" data-item-id="${esc(item.id)}" value="${esc(toInputDate(item.fact || ''))}" ${disabledAttr()}>
+                                </div>
+                            ` : ''}
                         </div>
-                        <div class="td">${buildDocumentCell(item)}</div>
-                        <div class="td">${buildOprStatusCellUi(item)}</div>
-                        <div class="td"><input class="date-input" type="date" data-role="opr-planned-date" data-item-id="${esc(item.id)}" value="${esc(toInputDate(item.plannedDate || ''))}" ${disabledAttr()}></div>
-                        <div class="td">${buildOprExtraCellUi(item)}</div>
-                    </div>
-                `).join('');
+                    `;
+                }).join('');
 
                 const addBlock = allowAdd ? `
                     <div class="add-item-row">
@@ -4574,43 +4858,50 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                     throw new Error('opr table containers not found');
                 }
 
-                tablesGridEl.style.gridTemplateColumns = '1fr 1fr';
-                if (tablePanels[1]) {
-                    tablePanels[1].style.display = '';
-                }
+                const showDates = !!oprDateVisibility[1];
+                const gridClass = showDates ? 'id-grid id-grid-expanded' : 'id-grid id-grid-compact';
+
+                tablesGridEl.style.gridTemplateColumns = '1fr';
+
+                if (tablePanels[1]) tablePanels[1].style.display = 'none';
+                if (tablePanels[2]) tablePanels[2].style.display = 'none';
 
                 const visibleGroups = groups.filter(group => {
-                    if (Number(group.id) !== 10) return true;
-                    return items.some(x => Number(x.group) === 10);
+                    if (Number(group.id) !== 2) return true;
+                    return items.some(x => Number(x.group) === 2);
                 });
-                const leftGroups = visibleGroups.filter(group => [1, 3, 5, 7, 9].includes(Number(group.id)));
-                const rightGroups = visibleGroups.filter(group => [2, 4, 6, 8, 10].includes(Number(group.id)));
 
+                leftTableEl.classList.add('id-table');
                 leftTableEl.innerHTML = `
                     <div class="thead">
-                        <div class="thead-top" style="grid-template-columns: 1.05fr 110px 130px 136px 1.25fr;">
-                            <div class="th">Пункт</div>
+                        <div class="thead-top ${gridClass}">
+                            <div class="th">ОПР</div>
                             <div class="th">Документ</div>
-                            <div class="th">Статус</div>
-                            <div class="th">Планируемая дата</div>
-                            <div class="th">Доп информация</div>
+                            <div class="th">
+                                <div class="th-status-with-toggle">
+                                    <span>Статус</span>
+                                    ${buildOprDatesToggle()}
+                                </div>
+                            </div>
+                            ${showDates ? `<div class="th center" style="grid-column: 4 / span 2;">Даты</div>` : ''}
                         </div>
+                        ${showDates ? `
+                            <div class="thead-bottom ${gridClass}">
+                                <div class="th"></div>
+                                <div class="th"></div>
+                                <div class="th"></div>
+                                <div class="th">План</div>
+                                <div class="th">Факт</div>
+                            </div>
+                        ` : ''}
                     </div>
-                    <div>${leftGroups.map(renderOprGroupUi).join('')}</div>
+                    <div>
+                        ${visibleGroups.map(renderOprGroupUi).join('')}
+                    </div>
                 `;
 
-                rightTableEl.innerHTML = `
-                    <div class="thead">
-                        <div class="thead-top" style="grid-template-columns: 1.05fr 110px 130px 136px 1.25fr;">
-                            <div class="th">Пункт</div>
-                            <div class="th">Документ</div>
-                            <div class="th">Статус</div>
-                            <div class="th">Планируемая дата</div>
-                            <div class="th">Доп информация</div>
-                        </div>
-                    </div>
-                    <div>${rightGroups.map(renderOprGroupUi).join('')}</div>
-                `;
+                if (middleTableEl) middleTableEl.innerHTML = '';
+                if (rightTableEl) rightTableEl.innerHTML = '';
             };
 
             const previousRenderAll = renderAll;
@@ -4624,7 +4915,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
             bindEvents = function () {
                 previousBindEventsEnhanced();
 
-                document.querySelectorAll('[data-role="concept-extra"], [data-role="opr-extra"], [data-role="concept-name-edit"], [data-role="concept-source-edit"]').forEach(el => {
+                document.querySelectorAll('[data-role="concept-extra"], [data-role="concept-name-edit"], [data-role="concept-source-edit"]').forEach(el => {
                     el.dataset.initialValue = String(el.value || '');
                     el.dataset.baseHeight = '32';
                     el.style.height = '32px';
@@ -4717,47 +5008,58 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                     });
                 });
 
+                document.querySelectorAll('[data-role="opr-toggle-dates"]').forEach(btn => {
+                    btn.addEventListener('click', function () {
+                        oprDateVisibility[1] = !oprDateVisibility[1];
+                        renderAll();
+                    });
+                });
+
                 document.querySelectorAll('[data-role="opr-status"]').forEach(el => {
                     el.addEventListener('change', function() {
                         const item = items.find(x => x.id === this.dataset.itemId);
                         if (!item) return;
+
                         const oldValue = item.status || '';
                         const newValue = this.value;
+
                         item.status = newValue;
                         if (newValue === 'Не требуется') {
-                            item.group = 10;
-                        } else if (Number(item.group) === 10) {
-                            item.group = resolveOprGroupId(item);
+                            item.group = 2;
+                        } else if (Number(item.group) === 2) {
+                            item.group = resolveOprGroupIdByItemIdOrName ? resolveOprGroupIdByItemIdOrName(item) : 1;
+                            if (Number(item.group) === 2) {
+                                item.group = 1;
+                            }
                         }
+
                         pushSessionChange(item.id, item.name, 'status', oldValue, newValue);
                         renderAll();
                     });
                 });
 
-                document.querySelectorAll('[data-role="opr-planned-date"]').forEach(el => {
+                document.querySelectorAll('[data-role="opr-plan"]').forEach(el => {
                     el.addEventListener('change', function() {
                         const item = items.find(x => x.id === this.dataset.itemId);
                         if (!item) return;
-                        const oldValue = item.plannedDate || '';
+                        const oldValue = item.plan || '';
                         const newValue = fromInputDate(this.value);
-                        item.plannedDate = newValue;
-                        pushSessionChange(item.id, item.name, 'plannedDate', oldValue, newValue);
+                        item.plan = newValue;
+                        pushSessionChange(item.id, item.name, 'plan', oldValue, newValue);
                         renderAll();
                     });
                 });
 
-                document.querySelectorAll('[data-role="opr-extra"]').forEach(el => {
-                    const handler = function () {
+                document.querySelectorAll('[data-role="opr-fact"]').forEach(el => {
+                    el.addEventListener('change', function() {
                         const item = items.find(x => x.id === this.dataset.itemId);
                         if (!item) return;
-                        const oldValue = item.extraInfo || '';
-                        const newValue = this.value;
-                        item.extraInfo = newValue;
-                        pushSessionChange(item.id, item.name, 'extraInfo', oldValue, newValue);
+                        const oldValue = item.fact || '';
+                        const newValue = fromInputDate(this.value);
+                        item.fact = newValue;
+                        pushSessionChange(item.id, item.name, 'fact', oldValue, newValue);
                         renderAll();
-                    };
-                    el.addEventListener('change', handler);
-                    el.addEventListener('blur', handler);
+                    });
                 });
 
                 document.querySelectorAll('[data-role="opr-add-item"]').forEach(btn => {
@@ -5163,6 +5465,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
             const rightTableEl = tablePanels[2] ? tablePanels[2].querySelector('.table') : null;
             const idTableShellHtml = leftTableEl ? leftTableEl.innerHTML : '';
             const idDateVisibility = {{ 1: false, 2: false, 3: false }};
+            const oprDateVisibility = {{ 1: false }};
             const debugLastEventEl = document.getElementById('debugLastEvent');
             const debugPanelEl = document.getElementById('debugPanel');
             const debugLogsLinkEl = document.getElementById('debugLogsLink');
@@ -6693,256 +6996,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                     }});
                 }});
             }}
-            function resolveOprGroupId(item) {{
-                const itemId = String(item && item.id || '');
-                if (itemId.startsWith('opr_g')) {{
-                    const match = itemId.match(/^opr_g(\\d+)_/);
-                    if (match) {{
-                        const groupId = Number(match[1]);
-                        if (groupId && groupId !== 10) {{
-                            return groupId;
-                        }}
-                    }}
-                }}
 
-                const name = String(item && item.name || '').trim();
-                const byName = groups.find(group => Number(group.id) !== 10 && Array.isArray(items) && items.some(existing =>
-                    existing !== item &&
-                    Number(existing.group) === Number(group.id) &&
-                    String(existing.name || '').trim() === name
-                ));
-                if (byName) {{
-                    return Number(byName.id);
-                }}
-
-                return 1;
-            }}
-            function oprIndicatorClass(item) {{
-                const status = normalizeStatus(item && item.status);
-                if (status === 'Есть') return 'status-indicator green';
-                if (status === 'Нет' || status === 'Не требуется') return 'status-indicator gray';
-                return 'status-indicator';
-            }}
-            function buildOprStatusCell(item) {{
-                return `
-                    <select class="status-select" data-role="opr-status" data-item-id="${{esc(item.id)}}">
-                        <option value="" ${{normalizeStatus(item.status) === '' ? 'selected' : ''}}></option>
-                        <option value="Есть" ${{normalizeStatus(item.status) === 'Есть' ? 'selected' : ''}}>Есть</option>
-                        <option value="Нет" ${{normalizeStatus(item.status) === 'Нет' ? 'selected' : ''}}>Нет</option>
-                        <option value="Не требуется" ${{normalizeStatus(item.status) === 'Не требуется' ? 'selected' : ''}}>Не требуется</option>
-                    </select>
-                `;
-            }}
-            function buildOprExtraCell(item) {{
-                return `<textarea class="concept-extra-textarea" data-role="opr-extra" data-item-id="${{esc(item.id)}}" placeholder="Доп информация">${{esc(item.extraInfo || '')}}</textarea>`;
-            }}
-            function renderOprGroup(group) {{
-                const groupItems = getItemsByGroup(group.id);
-                const allowAdd = Number(group.id) !== 10;
-                const rows = groupItems.map(item => `
-                    <div class="row" style="grid-template-columns: 1.05fr 110px 130px 136px 1.25fr;" data-item-id="${{esc(item.id)}}">
-                        <div class="td">
-                            <div class="cell-name">
-                                <div class="${{oprIndicatorClass(item)}}"></div>
-                                <div class="item-name" style="${{normalizeStatus(item.status) === 'Не требуется' ? 'text-decoration:line-through;color:#98a2b3;' : ''}}">
-                                    ${{esc(item.name)}}
-                                </div>
-                            </div>
-                        </div>
-                        <div class="td">${{buildDocumentCell(item)}}</div>
-                        <div class="td">${{buildOprStatusCell(item)}}</div>
-                        <div class="td"><input class="date-input" type="date" data-role="opr-planned-date" data-item-id="${{esc(item.id)}}" value="${{esc(toInputDate(item.plannedDate || ''))}}"></div>
-                        <div class="td">${{buildOprExtraCell(item)}}</div>
-                    </div>
-                `).join('');
-
-                const addBlock = allowAdd ? `
-                    <div class="add-item-row">
-                        <input class="add-item-input" id="oprAddItemInput_${{group.id}}" type="text" placeholder="Новый пункт">
-                        <button class="add-item-btn" type="button" data-role="opr-add-item" data-group-id="${{group.id}}">Добавить пункт</button>
-                    </div>
-                ` : '';
-
-                return `<div class="group-block"><div class="group-title">${{esc(group.title)}}</div>${{rows}}${{addBlock}}</div>`;
-            }}
-            function buildOprTableHtml(oprGroups) {{
-                return `
-                    <div class="thead">
-                        <div class="thead-top" style="grid-template-columns: 1.05fr 110px 130px 136px 1.25fr;">
-                            <div class="th">Пункт</div>
-                            <div class="th">Документ</div>
-                            <div class="th">Статус</div>
-                            <div class="th">Планируемая дата</div>
-                            <div class="th">Доп информация</div>
-                        </div>
-                    </div>
-                    <div>${{oprGroups.map(renderOprGroup).join('')}}</div>
-                `;
-            }}
-            function renderOprTables() {{
-                if (!leftTableEl || !rightTableEl || !tablesGridEl) {{
-                    throw new Error('opr table containers not found');
-                }}
-
-                tablesGridEl.style.gridTemplateColumns = '1fr 1fr';
-                if (tablePanels[1]) {{
-                    tablePanels[1].style.display = '';
-                }}
-
-                const visibleGroups = groups.filter(group => {{
-                    if (Number(group.id) !== 10) return true;
-                    return items.some(x => Number(x.group) === 10);
-                }});
-
-                const leftGroups = visibleGroups.filter(group => [1, 3, 5, 7, 9].includes(Number(group.id)));
-                const rightGroups = visibleGroups.filter(group => [2, 4, 6, 8, 10].includes(Number(group.id)));
-
-                leftTableEl.innerHTML = buildOprTableHtml(leftGroups);
-                rightTableEl.innerHTML = buildOprTableHtml(rightGroups);
-            }}
-            const baseCreateLocalItem = createLocalItem;
-            createLocalItem = function (groupId, name, checklistKey) {{
-                if (checklistKey === 'opr') {{
-                    const groupItems = getItemsByGroup(groupId);
-                    const nextOrder = groupItems.length + 1;
-                    return {{
-                        id: buildClientItemId('opr_g' + groupId + '_custom'),
-                        group: groupId,
-                        order: nextOrder,
-                        name,
-                        priority: 'white',
-                        status: '',
-                        plannedDate: '',
-                        extraInfo: '',
-                        documentUrl: '',
-                        documentName: '',
-                        isCustom: true
-                    }};
-                }}
-                return baseCreateLocalItem(groupId, name, checklistKey);
-            }};
-            const baseCalculateProgress = calculateProgress;
-            calculateProgress = function () {{
-                if (currentChecklistKey === 'opr') {{
-                    if (!progressValueEl || !progressBarEl) {{
-                        return;
-                    }}
-                    const activeItems = items.filter(x => normalizeStatus(x.status) !== 'Не требуется');
-                    const completedItems = activeItems.filter(x => normalizeStatus(x.status) === 'Есть');
-                    const activeCount = activeItems.length;
-                    const completedCount = completedItems.length;
-                    const percent = activeCount ? Math.round((completedCount / activeCount) * 100) : 0;
-                    progressValueEl.textContent = percent + '%';
-                    progressBarEl.style.width = percent + '%';
-                    return;
-                }}
-                return baseCalculateProgress();
-            }};
-            const baseRenderTables = renderTables;
-            renderTables = function () {{
-                if (currentChecklistKey === 'opr') {{
-                    renderOprTables();
-                    return;
-                }}
-                return baseRenderTables();
-            }};
-            const baseBindEvents = bindEvents;
-            bindEvents = function () {{
-                baseBindEvents();
-
-                document.querySelectorAll('[data-role="opr-status"]').forEach(el => {{
-                    el.addEventListener('change', function() {{
-                        const item = items.find(x => x.id === this.dataset.itemId);
-                        if (!item) return;
-
-                        const oldValue = item.status || '';
-                        const newValue = this.value;
-                        item.status = newValue;
-
-                        if (newValue === 'Не требуется') {{
-                            item.group = 10;
-                        }} else if (Number(item.group) === 10) {{
-                            item.group = resolveOprGroupId(item);
-                        }}
-
-                        pushSessionChange(item.id, item.name, 'status', oldValue, newValue);
-                        debugLog('opr_status_changed', {{
-                            itemId: item.id,
-                            itemName: item.name,
-                            oldValue: oldValue || '',
-                            newValue: newValue || ''
-                        }});
-                        renderAll();
-                    }});
-                }});
-
-                document.querySelectorAll('[data-role="opr-planned-date"]').forEach(el => {{
-                    el.addEventListener('change', function() {{
-                        const item = items.find(x => x.id === this.dataset.itemId);
-                        if (!item) return;
-
-                        const oldValue = item.plannedDate || '';
-                        const newValue = fromInputDate(this.value);
-                        item.plannedDate = newValue;
-                        pushSessionChange(item.id, item.name, 'plannedDate', oldValue, newValue);
-                        debugLog('opr_planned_date_changed', {{
-                            itemId: item.id,
-                            itemName: item.name,
-                            oldValue: oldValue || '',
-                            newValue: newValue || ''
-                        }});
-                        renderAll();
-                    }});
-                }});
-
-                document.querySelectorAll('[data-role="opr-extra"]').forEach(el => {{
-                    el.dataset.initialValue = String(el.value || '');
-                    el.dataset.baseHeight = '32';
-                    el.style.height = '32px';
-                    el.addEventListener('input', function () {{
-                        autoGrowTextarea(this);
-                    }});
-
-                    const handler = function () {{
-                        const item = items.find(x => x.id === this.dataset.itemId);
-                        if (!item) return;
-
-                        const oldValue = item.extraInfo || '';
-                        const newValue = this.value;
-                        item.extraInfo = newValue;
-                        pushSessionChange(item.id, item.name, 'extraInfo', oldValue, newValue);
-                        debugLog('opr_extra_changed', {{
-                            itemId: item.id,
-                            itemName: item.name
-                        }});
-                        renderAll();
-                    }};
-
-                    el.addEventListener('change', handler);
-                    el.addEventListener('blur', handler);
-                }});
-
-                document.querySelectorAll('[data-role="opr-add-item"]').forEach(btn => {{
-                    btn.addEventListener('click', function() {{
-                        const groupId = Number(this.dataset.groupId);
-                        const input = document.getElementById('oprAddItemInput_' + groupId);
-                        if (!input) return;
-                        const name = (input.value || '').trim();
-                        if (!name) return;
-
-                        const newItem = createLocalItem(groupId, name, 'opr');
-                        items.push(newItem);
-                        pushSessionChange(newItem.id, newItem.name, 'add-item', '', newItem.name);
-                        debugLog('opr_item_added', {{
-                            itemId: newItem.id,
-                            itemName: newItem.name,
-                            groupId: groupId
-                        }});
-                        input.value = '';
-                        renderAll();
-                    }});
-                }});
-            }};
             const baseLoadChecklistByKey = loadChecklistByKey;
             loadChecklistByKey = async function (checklistKey) {{
                 const targetKey = String(checklistKey || '').trim() || 'id';
@@ -7076,7 +7130,13 @@ async def api_checklist_update_item(request: Request):
     if not item_id:
         return JSONResponse({"ok": False, "error": "itemId is required"}, status_code=400)
 
-    allowed_fields = {"priority", "status", "plan", "fact", "extraInfo", "plannedDate"}
+    if checklist_key == "concept":
+        allowed_fields = {"priority", "status", "extraInfo"}
+    elif checklist_key == "opr":
+        allowed_fields = {"priority", "status", "plan", "fact"}
+    else:
+        allowed_fields = {"priority", "status", "plan", "fact"}
+
     if field not in allowed_fields:
         return JSONResponse({"ok": False, "error": "invalid field"}, status_code=400)
 
@@ -7126,8 +7186,8 @@ async def api_checklist_update_item(request: Request):
             target_item["priority"] = derive_indicator_from_status(new_status)
 
             if new_status == "Не требуется":
-                target_item["group"] = 10
-            elif int(target_item.get("group") or 0) == 10:
+                target_item["group"] = 2
+            elif int(target_item.get("group") or 0) == 2:
                 target_item["group"] = resolve_opr_group_id_by_item_id_or_name(target_item)
         else:
             new_status = normalize_status(value)
@@ -7157,8 +7217,6 @@ async def api_checklist_update_item(request: Request):
         target_item["plan"] = normalize_date_string(value)
     elif field == "fact":
         target_item["fact"] = normalize_date_string(value)
-    elif field == "plannedDate":
-        target_item["plannedDate"] = normalize_date_string(value)
     elif field == "extraInfo":
         target_item["extraInfo"] = clean_cell_value(value)
 
@@ -7291,7 +7349,7 @@ async def api_checklist_add_item(request: Request):
     if checklist_key == "concept" and group_id not in [group["id"] for group in CONCEPT_GROUPS if group["id"] != 10]:
         return JSONResponse({"ok": False, "error": "invalid groupId"}, status_code=400)
 
-    if checklist_key == "opr" and group_id not in [group["id"] for group in OPR_GROUPS if group["id"] != 10]:
+    if checklist_key == "opr" and group_id not in [group["id"] for group in OPR_GROUPS if group["id"] != 2]:
         return JSONResponse({"ok": False, "error": "invalid groupId"}, status_code=400)
 
     if not name:
@@ -7335,28 +7393,9 @@ async def api_checklist_add_item(request: Request):
             "name": name,
             "priority": "white",
             "status": "",
-            "plannedDate": "",
-            "extraInfo": "",
-            "folderKey": build_folder_key("opr", name, new_item_id),
-            "folderPath": "",
-            "folderUrl": "",
-            "documents": [],
-            "documentUrl": "",
-            "documentName": "",
-            "isCustom": True,
-        }
-    else:
-        new_item_id = build_item_id(group_id, next_order) + "_custom"
-        new_item = {
-            "id": new_item_id,
-            "group": group_id,
-            "order": next_order,
-            "name": name,
-            "priority": "white",
-            "status": "",
             "plan": "",
             "fact": "",
-            "folderKey": build_folder_key("id", name, new_item_id),
+            "folderKey": build_folder_key("opr", name, new_item_id),
             "folderPath": "",
             "folderUrl": "",
             "documents": [],
@@ -7366,7 +7405,7 @@ async def api_checklist_add_item(request: Request):
         }
 
         try:
-            ensure_yandex_folder_for_custom_item(
+            ensure_yandex_folder_for_custom_opr_item(
                 dialog_id=dialog_id,
                 checklist_key=checklist_key,
                 group_id=group_id,
@@ -7376,7 +7415,7 @@ async def api_checklist_add_item(request: Request):
         except Exception as e:
             return JSONResponse({
                 "ok": False,
-                "error": "failed to create yandex folder for custom item",
+                "error": "failed to create yandex folder for custom OPR item",
                 "details": str(e),
             }, status_code=500)
 
@@ -7506,6 +7545,9 @@ async def api_checklist_upload_document(
 
     actual_group = int(target_item.get("group") or item_group or 0)
     if checklist_key == "id" and actual_group != 4:
+        target_item["status"] = "Есть"
+        target_item["priority"] = derive_indicator_from_status("Есть")
+    elif checklist_key == "opr" and actual_group != 2:
         target_item["status"] = "Есть"
         target_item["priority"] = derive_indicator_from_status("Есть")
 
@@ -7643,6 +7685,9 @@ async def api_checklist_remove_document(request: Request):
         target_item["documentName"] = ""
 
         if checklist_key == "id" and int(target_item.get("group") or 0) != 4 and not preserve_status:
+            target_item["status"] = ""
+            target_item["priority"] = "white"
+        elif checklist_key == "opr" and int(target_item.get("group") or 0) != 2 and not preserve_status:
             target_item["status"] = ""
             target_item["priority"] = "white"
 
