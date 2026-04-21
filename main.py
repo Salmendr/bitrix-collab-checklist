@@ -4864,13 +4864,14 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                 const showDates = !!oprDateVisibility[1];
                 const gridClass = showDates ? 'id-grid id-grid-expanded' : 'id-grid id-grid-compact';
 
-                tablesGridEl.style.gridTemplateColumns = 'minmax(0, 37%)';
+                tablesGridEl.style.gridTemplateColumns = 'clamp(620px, 37vw, 760px)';
                 tablesGridEl.style.justifyContent = 'start';
 
                 if (tablePanels[0]) {
                     tablePanels[0].style.display = '';
-                    tablePanels[0].style.flex = '0 0 37%';
-                    tablePanels[0].style.maxWidth = '37%';
+                    tablePanels[0].style.flex = '0 0 auto';
+                    tablePanels[0].style.width = 'clamp(620px, 37vw, 760px)';
+                    tablePanels[0].style.maxWidth = 'clamp(620px, 37vw, 760px)';
                 }
                 if (tablePanels[1]) {
                     tablePanels[1].style.display = 'none';
@@ -6372,6 +6373,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                 if (tablePanels[0]) {{
                     tablePanels[0].style.display = '';
                     tablePanels[0].style.flex = '';
+                    tablePanels[0].style.width = '';
                     tablePanels[0].style.maxWidth = '';
                 }}
                 if (tablePanels[1]) {{
@@ -6534,6 +6536,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                 if (tablePanels[0]) {{
                     tablePanels[0].style.display = '';
                     tablePanels[0].style.flex = '';
+                    tablePanels[0].style.width = '';
                     tablePanels[0].style.maxWidth = '';
                 }}
                 if (tablePanels[1]) {{
