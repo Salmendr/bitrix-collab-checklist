@@ -4861,10 +4861,27 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                 const showDates = !!oprDateVisibility[1];
                 const gridClass = showDates ? 'id-grid id-grid-expanded' : 'id-grid id-grid-compact';
 
-                tablesGridEl.style.gridTemplateColumns = '1fr';
+                tablesGridEl.style.gridTemplateColumns = 'minmax(0, 37%)';
+                tablesGridEl.style.justifyContent = 'start';
 
-                if (tablePanels[1]) tablePanels[1].style.display = 'none';
-                if (tablePanels[2]) tablePanels[2].style.display = 'none';
+                if (tablePanels[0]) {
+                    tablePanels[0].style.display = '';
+                    tablePanels[0].style.flex = '0 0 37%';
+                    tablePanels[0].style.maxWidth = '37%';
+                }
+                if (tablePanels[1]) {
+                    tablePanels[1].style.display = 'none';
+                    tablePanels[1].style.flex = '';
+                    tablePanels[1].style.maxWidth = '';
+                }
+                if (tablePanels[2]) {
+                    tablePanels[2].style.display = 'none';
+                    tablePanels[2].style.flex = '';
+                    tablePanels[2].style.maxWidth = '';
+                }
+
+                leftTableEl.style.width = '100%';
+                leftTableEl.style.maxWidth = '100%';
 
                 const visibleGroups = groups.filter(group => {
                     if (Number(group.id) !== 2) return true;
@@ -4872,7 +4889,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                 });
 
                 leftTableEl.classList.add('id-table');
-                leftTableEl.innerHTML = `
+                leftTableEl.innerHTML = ``
                     <div class="thead">
                         <div class="thead-top ${gridClass}">
                             <div class="th">ОПР</div>
@@ -6031,6 +6048,10 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                 }});
             }}
             function buildDocumentCell(item) {{
+                if (normalizeStatus(item && item.status) === 'Не требуется') {{
+                    return '';
+                }}
+
                 const documents = getItemDocuments(item);
                 const itemId = String(item && item.id || '');
                 const folderViewUrl = String(item.folderUrl || '').trim() || (documents.length ? (
@@ -6343,9 +6364,28 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                 }}
 
                 tablesGridEl.style.gridTemplateColumns = '1fr 1fr';
+                tablesGridEl.style.justifyContent = '';
+
+                if (tablePanels[0]) {{
+                    tablePanels[0].style.display = '';
+                    tablePanels[0].style.flex = '';
+                    tablePanels[0].style.maxWidth = '';
+                }}
                 if (tablePanels[1]) {{
                     tablePanels[1].style.display = '';
+                    tablePanels[1].style.flex = '';
+                    tablePanels[1].style.maxWidth = '';
                 }}
+                if (tablePanels[2]) {{
+                    tablePanels[2].style.display = 'none';
+                    tablePanels[2].style.flex = '';
+                    tablePanels[2].style.maxWidth = '';
+                }}
+
+                leftTableEl.style.width = '';
+                leftTableEl.style.maxWidth = '';
+                rightTableEl.style.width = '';
+                rightTableEl.style.maxWidth = '';
 
                 const visibleGroups = groups.filter(group => {{
                     if (Number(group.id) !== 10) return true;
@@ -6486,10 +6526,30 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
 
                 tablesGridEl.classList.add('id-three-cols');
                 tablesGridEl.style.gridTemplateColumns = 'minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr)';
+                tablesGridEl.style.justifyContent = '';
 
-                if (tablePanels[0]) tablePanels[0].style.display = '';
-                if (tablePanels[1]) tablePanels[1].style.display = '';
-                if (tablePanels[2]) tablePanels[2].style.display = '';
+                if (tablePanels[0]) {{
+                    tablePanels[0].style.display = '';
+                    tablePanels[0].style.flex = '';
+                    tablePanels[0].style.maxWidth = '';
+                }}
+                if (tablePanels[1]) {{
+                    tablePanels[1].style.display = '';
+                    tablePanels[1].style.flex = '';
+                    tablePanels[1].style.maxWidth = '';
+                }}
+                if (tablePanels[2]) {{
+                    tablePanels[2].style.display = '';
+                    tablePanels[2].style.flex = '';
+                    tablePanels[2].style.maxWidth = '';
+                }}
+
+                leftTableEl.style.width = '';
+                leftTableEl.style.maxWidth = '';
+                middleTableEl.style.width = '';
+                middleTableEl.style.maxWidth = '';
+                rightTableEl.style.width = '';
+                rightTableEl.style.maxWidth = '';
 
                 leftTableEl.innerHTML = renderIdPanel(idGroup, false);
                 middleTableEl.innerHTML = renderIdPanel(tuGroup, false);
@@ -6581,7 +6641,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                 renderProjectChecklistList();
 
                 if (progressBoxEl) {{
-                    progressBoxEl.classList.toggle('id-accent', currentChecklistKey === 'id');
+                    progressBoxEl.classList.toggle('id-accent', currentChecklistKey === 'id' || currentChecklistKey === 'opr');
                 }}
 
                 updateDebugPanelAccess();
