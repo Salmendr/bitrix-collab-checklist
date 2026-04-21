@@ -4427,6 +4427,9 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
             };
 
             buildDocumentCell = function (item) {
+                if (normalizeStatus(item && item.status) === 'Не требуется') {
+                    return '';
+                }
                 const documents = getItemDocuments(item);
                 const itemId = String(item && item.id || '');
                 const folderViewUrl = String(item.folderUrl || '').trim() || (documents.length ? (
@@ -4889,7 +4892,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                 });
 
                 leftTableEl.classList.add('id-table');
-                leftTableEl.innerHTML = ``
+                leftTableEl.innerHTML = `
                     <div class="thead">
                         <div class="thead-top ${gridClass}">
                             <div class="th">ОПР</div>
