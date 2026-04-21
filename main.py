@@ -6536,6 +6536,11 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                     return;
                 }}
 
+                if (currentChecklistKey === 'opr') {{
+                    renderOprTables();
+                    return;
+                }}
+
                 if (tablesGridEl) {{
                     tablesGridEl.classList.remove('id-three-cols');
                     tablesGridEl.style.gridTemplateColumns = '1fr 1fr';
