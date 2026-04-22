@@ -1098,11 +1098,28 @@ def normalize_checklist_data(data: dict, checklist_key: str = "id") -> dict:
         raw_items = data.get("items", []) or []
         normalized_items = []
 
+        current_opr_default_names = {
+            clean_cell_value(item_name).lower()
+            for group in OPR_GROUPS
+            if group["id"] != 2
+            for item_name in group["items"]
+            if clean_cell_value(item_name)
+        }
+
         for raw_item in raw_items:
             item, documents, first_doc, folder_key, folder_path, folder_url, legacy_document_url, legacy_document_name = prepare_item_common(raw_item)
 
             name = clean_cell_value(item.get("name"))
             if not name:
+                continue
+
+            is_custom = bool(item.get("isCustom", False))
+            normalized_name = name.lower()
+
+            # Для OPR оставляем только:
+            # 1) текущие стандартные пункты новой архитектуры
+            # 2) кастомные пункты, добавленные пользователем вручную
+            if not is_custom and normalized_name not in current_opr_default_names:
                 continue
 
             status = normalize_status(item.get("status"))
@@ -1128,8 +1145,23 @@ def normalize_checklist_data(data: dict, checklist_key: str = "id") -> dict:
                 "documents": documents,
                 "documentUrl": legacy_document_url,
                 "documentName": legacy_document_name,
-                "isCustom": bool(item.get("isCustom", False)),
+                "isCustom": is_custom,
             })
+
+        deduped_items = []
+        seen_builtin_names = set()
+
+        for existing_item in normalized_items:
+            name_key = clean_cell_value(existing_item.get("name")).lower()
+
+            if not existing_item.get("isCustom"):
+                if name_key in seen_builtin_names:
+                    continue
+                seen_builtin_names.add(name_key)
+
+            deduped_items.append(existing_item)
+
+        normalized_items = deduped_items
 
         existing_names = {
             clean_cell_value(existing_item.get("name")).lower()
