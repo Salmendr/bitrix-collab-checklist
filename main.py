@@ -2370,6 +2370,30 @@ def get_item_yandex_folder(dialog_id: str, checklist_key: str, item_name: str):
         "context": context,
     }
 
+def can_create_custom_item_yandex_folder(dialog_id: str, checklist_key: str) -> bool:
+    dialog_id = normalize_dialog_id(dialog_id)
+    checklist_key = normalize_checklist_key(checklist_key)
+
+    if not dialog_id:
+        return False
+
+    if not is_yandex_disk_enabled():
+        return False
+
+    context = get_project_storage_context(dialog_id)
+    if not context:
+        return False
+
+    yandex_disk = context.get("yandexDisk") or {}
+
+    if checklist_key == "id":
+        return bool(clean_cell_value(yandex_disk.get("idStageRootPath")))
+
+    if checklist_key == "opr":
+        return bool(clean_cell_value(yandex_disk.get("projectRootPath")))
+
+    return False
+
 def is_yandex_disk_enabled() -> bool:
     return bool(YANDEX_DISK_OAUTH_TOKEN)
 
@@ -7603,10 +7627,12 @@ async def api_checklist_add_item(request: Request):
         return JSONResponse({"ok": False, "error": "name is required"}, status_code=400)
 
     data = get_checklist(dialog_id, checklist_key)
-    items = data.get("items", [])
+    items = data.get("items", []) or []
 
-    group_items = [x for x in items if x.get("group") == group_id]
+    group_items = [x for x in items if int(x.get("group") or 0) == group_id]
     next_order = len(group_items) + 1
+
+    yandex_folder_warning = ""
 
     if checklist_key == "concept":
         new_item_id = f"concept_g{group_id}_custom_{uuid.uuid4().hex[:8]}"
@@ -7631,6 +7657,7 @@ async def api_checklist_add_item(request: Request):
             "isCustom": True,
             "priority": "white",
         }
+
     elif checklist_key == "opr":
         new_item_id = f"opr_g{group_id}_custom_{uuid.uuid4().hex[:8]}"
         new_item = {
@@ -7651,20 +7678,77 @@ async def api_checklist_add_item(request: Request):
             "isCustom": True,
         }
 
-        try:
-            ensure_yandex_folder_for_custom_opr_item(
-                dialog_id=dialog_id,
-                checklist_key=checklist_key,
-                group_id=group_id,
-                item_name=name,
-                item_id=new_item_id,
-            )
-        except Exception as e:
-            return JSONResponse({
-                "ok": False,
-                "error": "failed to create yandex folder for custom OPR item",
-                "details": str(e),
-            }, status_code=500)
+        if can_create_custom_item_yandex_folder(dialog_id, checklist_key):
+            try:
+                ensure_yandex_folder_for_custom_opr_item(
+                    dialog_id=dialog_id,
+                    checklist_key=checklist_key,
+                    group_id=group_id,
+                    item_name=name,
+                    item_id=new_item_id,
+                )
+
+                folder_info = get_item_yandex_folder(dialog_id, checklist_key, name)
+                if folder_info:
+                    folder = folder_info.get("folder") or {}
+                    new_item["folderPath"] = clean_cell_value(folder.get("path"))
+                    new_item["folderUrl"] = clean_cell_value(folder.get("url"))
+            except Exception as e:
+                yandex_folder_warning = str(e)
+                write_debug_log("custom_opr_folder_create_failed", {
+                    "dialogId": dialog_id,
+                    "checklistKey": checklist_key,
+                    "groupId": group_id,
+                    "itemId": new_item_id,
+                    "itemName": name,
+                    "error": str(e),
+                })
+
+    else:
+        new_item_id = f"id_g{group_id}_custom_{uuid.uuid4().hex[:8]}"
+        new_item = {
+            "id": new_item_id,
+            "group": group_id,
+            "order": next_order,
+            "name": name,
+            "priority": "white",
+            "status": "",
+            "plan": "",
+            "fact": "",
+            "folderKey": build_folder_key("id", name, new_item_id),
+            "folderPath": "",
+            "folderUrl": "",
+            "documents": [],
+            "documentUrl": "",
+            "documentName": "",
+            "isCustom": True,
+        }
+
+        if can_create_custom_item_yandex_folder(dialog_id, checklist_key):
+            try:
+                ensure_yandex_folder_for_custom_item(
+                    dialog_id=dialog_id,
+                    checklist_key=checklist_key,
+                    group_id=group_id,
+                    item_name=name,
+                    item_id=new_item_id,
+                )
+
+                folder_info = get_item_yandex_folder(dialog_id, checklist_key, name)
+                if folder_info:
+                    folder = folder_info.get("folder") or {}
+                    new_item["folderPath"] = clean_cell_value(folder.get("path"))
+                    new_item["folderUrl"] = clean_cell_value(folder.get("url"))
+            except Exception as e:
+                yandex_folder_warning = str(e)
+                write_debug_log("custom_id_folder_create_failed", {
+                    "dialogId": dialog_id,
+                    "checklistKey": checklist_key,
+                    "groupId": group_id,
+                    "itemId": new_item_id,
+                    "itemName": name,
+                    "error": str(e),
+                })
 
     items.append(new_item)
     data["items"] = items
@@ -7677,12 +7761,17 @@ async def api_checklist_add_item(request: Request):
             created_item = item
             break
 
-    return JSONResponse({
+    response_payload = {
         "ok": True,
         "dialogId": dialog_id,
         "item": created_item or new_item,
         "progressPercent": data.get("progressPercent", 0),
-    })
+    }
+
+    if yandex_folder_warning:
+        response_payload["yandexFolderWarning"] = yandex_folder_warning
+
+    return JSONResponse(response_payload)
 
 @app.post("/api/checklist/upload-document")
 async def api_checklist_upload_document(
