@@ -1545,15 +1545,45 @@ def acquire_checklist_lock(
         _cleanup_expired_checklist_locks(now_ts)
         existing = ACTIVE_CHECKLIST_LOCKS.get(lock_key)
 
-        if existing and existing.get("lockId") != lock_id:
+        if existing:
+            existing_user_id = str(existing.get("userId") or "").strip()
+            existing_lock_id = str(existing.get("lockId") or "").strip()
+
+            # Тот же пользователь может безопасно продолжить свою сессию
+            if existing_user_id and existing_user_id == user_id:
+                effective_lock_id = existing_lock_id or lock_id or uuid.uuid4().hex
+
+                ACTIVE_CHECKLIST_LOCKS[lock_key] = {
+                    "lockId": effective_lock_id,
+                    "dialogId": dialog_id,
+                    "checklistKey": checklist_key,
+                    "userId": user_id,
+                    "userName": user_name or str(existing.get("userName") or "Неизвестный пользователь"),
+                    "updatedAt": now.isoformat(),
+                    "updatedAtTs": now_ts,
+                }
+
+                return {
+                    "ok": True,
+                    "owned": True,
+                    "lockedByOther": False,
+                    "lockId": effective_lock_id,
+                    "dialogId": dialog_id,
+                    "checklistKey": checklist_key,
+                    "userId": user_id,
+                    "userName": user_name or str(existing.get("userName") or "Неизвестный пользователь"),
+                    "updatedAt": now.isoformat(),
+                }
+
+            # Чужой lockId наружу не отдаём
             return {
                 "ok": True,
                 "owned": False,
                 "lockedByOther": True,
-                "lockId": str(existing.get("lockId") or ""),
+                "lockId": "",
                 "dialogId": dialog_id,
                 "checklistKey": checklist_key,
-                "userId": str(existing.get("userId") or ""),
+                "userId": existing_user_id,
                 "userName": str(existing.get("userName") or "Другой сотрудник"),
                 "updatedAt": str(existing.get("updatedAt") or ""),
             }
@@ -1591,7 +1621,72 @@ def heartbeat_checklist_lock(
     user_name: str,
     lock_id: str,
 ) -> dict:
-    return acquire_checklist_lock(dialog_id, checklist_key, user_id, user_name, lock_id)
+    dialog_id = normalize_dialog_id(dialog_id)
+    checklist_key = normalize_checklist_key(checklist_key)
+    user_id = str(user_id or "").strip()
+    user_name = str(user_name or "").strip()
+    lock_id = str(lock_id or "").strip()
+    now = datetime.now()
+    now_ts = now.timestamp()
+    lock_key = make_checklist_lock_key(dialog_id, checklist_key)
+
+    with ACTIVE_CHECKLIST_LOCKS_GUARD:
+        _cleanup_expired_checklist_locks(now_ts)
+        existing = ACTIVE_CHECKLIST_LOCKS.get(lock_key)
+
+        if not existing:
+            return {
+                "ok": True,
+                "owned": False,
+                "lockedByOther": False,
+                "lockExpired": True,
+                "lockId": "",
+                "dialogId": dialog_id,
+                "checklistKey": checklist_key,
+                "userId": "",
+                "userName": "",
+                "updatedAt": "",
+            }
+
+        existing_user_id = str(existing.get("userId") or "").strip()
+        existing_lock_id = str(existing.get("lockId") or "").strip()
+
+        if not lock_id or existing_lock_id != lock_id or existing_user_id != user_id:
+            return {
+                "ok": True,
+                "owned": False,
+                "lockedByOther": existing_user_id != user_id,
+                "lockExpired": existing_user_id == user_id and existing_lock_id != lock_id,
+                "lockId": "",
+                "dialogId": dialog_id,
+                "checklistKey": checklist_key,
+                "userId": existing_user_id,
+                "userName": str(existing.get("userName") or "Другой сотрудник"),
+                "updatedAt": str(existing.get("updatedAt") or ""),
+            }
+
+        ACTIVE_CHECKLIST_LOCKS[lock_key] = {
+            "lockId": existing_lock_id,
+            "dialogId": dialog_id,
+            "checklistKey": checklist_key,
+            "userId": user_id,
+            "userName": user_name or str(existing.get("userName") or "Неизвестный пользователь"),
+            "updatedAt": now.isoformat(),
+            "updatedAtTs": now_ts,
+        }
+
+        return {
+            "ok": True,
+            "owned": True,
+            "lockedByOther": False,
+            "lockExpired": False,
+            "lockId": existing_lock_id,
+            "dialogId": dialog_id,
+            "checklistKey": checklist_key,
+            "userId": user_id,
+            "userName": user_name or str(existing.get("userName") or "Неизвестный пользователь"),
+            "updatedAt": now.isoformat(),
+        }
 
 
 def release_checklist_lock(dialog_id: str, checklist_key: str, lock_id: str = "", user_id: str = "") -> dict:
@@ -1612,7 +1707,10 @@ def release_checklist_lock(dialog_id: str, checklist_key: str, lock_id: str = ""
                 "checklistKey": checklist_key,
             }
 
-        if lock_id and existing.get("lockId") != lock_id:
+        existing_user_id = str(existing.get("userId") or "").strip()
+        existing_lock_id = str(existing.get("lockId") or "").strip()
+
+        if not lock_id or not user_id:
             return {
                 "ok": True,
                 "released": False,
@@ -1622,7 +1720,7 @@ def release_checklist_lock(dialog_id: str, checklist_key: str, lock_id: str = ""
                 "userName": str(existing.get("userName") or ""),
             }
 
-        if not lock_id and user_id and str(existing.get("userId") or "") != user_id:
+        if existing_lock_id != lock_id or existing_user_id != user_id:
             return {
                 "ok": True,
                 "released": False,
@@ -3986,6 +4084,11 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                 };
             }
 
+            async function ensureCurrentEditorReady() {
+                await fetchCurrentUserIfPossible();
+                return getCurrentEditorIdentity();
+            }
+
             function isChecklistLockedByOther() {
                 return !!(currentChecklistLock.lockedByOther && currentChecklistLock.checklistKey === currentChecklistKey);
             }
@@ -4188,7 +4291,9 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                     checklistKey: targetKey,
                     userId: editorIdentity.userId,
                     userName: editorIdentity.userName,
-                    lockId: currentChecklistLock.checklistKey === targetKey ? currentChecklistLock.lockId : ''
+                    lockId: (currentChecklistLock.checklistKey === targetKey && currentChecklistLock.owned)
+                        ? currentChecklistLock.lockId
+                        : ''
                 };
 
                 try {
@@ -4212,10 +4317,12 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                     const prevOwned = currentChecklistLock.owned;
                     const prevBlocked = currentChecklistLock.lockedByOther;
                     const prevLockId = currentChecklistLock.lockId;
+                    const nextOwned = !!result.owned;
+
                     currentChecklistLock = {
-                        owned: !!result.owned,
+                        owned: nextOwned,
                         lockedByOther: !!result.lockedByOther,
-                        lockId: String(result.lockId || ''),
+                        lockId: nextOwned ? String(result.lockId || '') : '',
                         userId: String(result.userId || ''),
                         userName: String(result.userName || ''),
                         checklistKey: targetKey
@@ -4235,7 +4342,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
             }
 
             async function heartbeatChecklistLock(silent = true) {
-                if (!currentChecklistLock.lockId || currentChecklistLock.checklistKey !== currentChecklistKey) {
+                if (!currentChecklistLock.owned || !currentChecklistLock.lockId || currentChecklistLock.checklistKey !== currentChecklistKey) {
                     return null;
                 }
 
@@ -4259,10 +4366,12 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                     if (!response.ok) {
                         throw new Error(result.error || 'lock heartbeat failed');
                     }
+
+                    const nextOwned = !!result.owned;
                     currentChecklistLock = {
-                        owned: !!result.owned,
+                        owned: nextOwned,
                         lockedByOther: !!result.lockedByOther,
-                        lockId: String(result.lockId || ''),
+                        lockId: nextOwned ? String(result.lockId || '') : '',
                         userId: String(result.userId || ''),
                         userName: String(result.userName || ''),
                         checklistKey: currentChecklistKey
@@ -4280,6 +4389,10 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
             function startLockHeartbeat() {
                 stopLockHeartbeat();
                 lockHeartbeatTimer = setInterval(async function () {
+                    if (!currentEditorReady) {
+                        return;
+                    }
+
                     if (currentChecklistLock.owned) {
                         await heartbeatChecklistLock(true);
                     } else {
@@ -4290,20 +4403,23 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
 
             async function releaseChecklistLock(checklistKey = currentChecklistKey, useBeacon = false) {
                 const targetKey = String(checklistKey || '').trim() || 'id';
-                const lockId = currentChecklistLock.checklistKey === targetKey ? currentChecklistLock.lockId : '';
+                const isOwner = currentChecklistLock.checklistKey === targetKey && currentChecklistLock.owned;
+                const lockId = isOwner ? currentChecklistLock.lockId : '';
                 const editorIdentity = getCurrentEditorIdentity();
                 stopLockHeartbeat();
 
-                if (!lockId && currentChecklistLock.checklistKey === targetKey) {
-                    currentChecklistLock = {
-                        owned: false,
-                        lockedByOther: false,
-                        lockId: '',
-                        userId: '',
-                        userName: '',
-                        checklistKey: targetKey
-                    };
-                    updateLockNotice();
+                if (!isOwner || !lockId) {
+                    if (currentChecklistLock.checklistKey === targetKey) {
+                        currentChecklistLock = {
+                            owned: false,
+                            lockedByOther: false,
+                            lockId: '',
+                            userId: '',
+                            userName: '',
+                            checklistKey: targetKey
+                        };
+                        updateLockNotice();
+                    }
                     return;
                 }
 
@@ -4424,6 +4540,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                     return;
                 }
 
+                await ensureCurrentEditorReady();
                 syncChecklistCache();
                 await releaseChecklistLock(currentChecklistKey, false);
                 setSaveState('saving', 'Загружаем...');
@@ -5153,8 +5270,9 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                 });
             };
 
-            setTimeout(function () {
-                acquireChecklistLock(currentChecklistKey, true);
+            setTimeout(async function () {
+                await ensureCurrentEditorReady();
+                await acquireChecklistLock(currentChecklistKey, true);
                 startLockHeartbeat();
                 updateLockNotice();
             }, 0);
@@ -5502,6 +5620,8 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                 id: "",
                 name: ""
             }};
+            let currentEditorReady = false;
+            let currentEditorReadyPromise = null;
                         const saveStateEl = document.getElementById('saveState');
             const leftTableBodyEl = document.getElementById('leftTableBody');
             const middleTableBodyEl = document.getElementById('middleTableBody');
@@ -5651,38 +5771,62 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                 }}
             }}
             function fetchCurrentUserIfPossible() {{
-                try {{
-                    if (!(window.BX24 && typeof window.BX24.init === 'function')) {{
-                        return;
-                    }}
-
-                    window.BX24.init(function () {{
-                        try {{
-                            window.BX24.callMethod('user.current', {{}}, function(result) {{
-                                try {{
-                                    if (result.error()) {{
-                                        return;
-                                    }}
-
-                                    const data = result.data() || {{}};
-                                    const fullName = [data.NAME, data.LAST_NAME].filter(Boolean).join(' ').trim();
-
-                                    currentEditor = {{
-                                        id: String(data.ID || ''),
-                                        name: fullName || String(data.NAME || '') || ''
-                                    }};
-                                    updateDebugPanelAccess();
-                                }} catch (e) {{
-                                    console.log('user.current parse error:', e);
-                                }}
-                            }});
-                        }} catch (e) {{
-                            console.log('user.current call error:', e);
-                        }}
-                    }});
-                }} catch (e) {{
-                    console.log('fetchCurrentUserIfPossible skipped:', e);
+                if (currentEditorReadyPromise) {{
+                    return currentEditorReadyPromise;
                 }}
+
+                currentEditorReadyPromise = new Promise(function(resolve) {{
+                    try {{
+                        if (!(window.BX24 && typeof window.BX24.init === 'function')) {{
+                            currentEditorReady = true;
+                            updateDebugPanelAccess();
+                            resolve(currentEditor);
+                            return;
+                        }}
+
+                        let resolved = false;
+
+                        function finish() {{
+                            if (resolved) return;
+                            resolved = true;
+                            currentEditorReady = true;
+                            updateDebugPanelAccess();
+                            resolve(currentEditor);
+                        }}
+
+                        window.BX24.init(function () {{
+                            try {{
+                                window.BX24.callMethod('user.current', {{}}, function(result) {{
+                                    try {{
+                                        if (!result.error()) {{
+                                            const data = result.data() || {{}};
+                                            const fullName = [data.NAME, data.LAST_NAME].filter(Boolean).join(' ').trim();
+
+                                            currentEditor = {{
+                                                id: String(data.ID || ''),
+                                                name: fullName || String(data.NAME || '') || ''
+                                            }};
+                                        }}
+                                    }} catch (e) {{
+                                        console.log('user.current parse error:', e);
+                                    }} finally {{
+                                        finish();
+                                    }}
+                                }});
+                            }} catch (e) {{
+                                console.log('user.current call error:', e);
+                                finish();
+                            }}
+                        }});
+                    }} catch (e) {{
+                        console.log('fetchCurrentUserIfPossible skipped:', e);
+                        currentEditorReady = true;
+                        updateDebugPanelAccess();
+                        resolve(currentEditor);
+                    }}
+                }});
+
+                return currentEditorReadyPromise;
             }}
             function setDebugText(text) {{
                 if (debugLastEventEl) {{
