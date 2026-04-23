@@ -566,7 +566,6 @@ def build_upload_rel_path(dialog_id: str, item_id: str, filename: str) -> str:
     unique_name = f"{uuid.uuid4().hex}_{safe_name}"
     return f"checklists/{dialog_id}/{item_id}/{unique_name}"
 
-
 def remove_item_document_file(item: dict):
     doc_url = str(item.get("documentUrl") or "").strip()
     if not doc_url.startswith("/uploads/"):
@@ -580,6 +579,42 @@ def remove_item_document_file(item: dict):
             file_path.unlink()
     except Exception:
         pass
+
+def remove_all_item_documents(dialog_id: str, checklist_key: str, item_id: str, item: dict) -> dict:
+    cleaned_item = migrate_legacy_document_fields(dict(item or {}))
+    documents = normalize_documents_list(cleaned_item.get("documents"))
+
+    for doc in documents:
+        local_document_url = (
+            clean_cell_value(doc.get("fileUrl"))
+            or clean_cell_value(doc.get("previewUrl"))
+            or clean_cell_value(doc.get("path"))
+        )
+
+        remove_item_document_file({
+            "documentUrl": local_document_url
+        })
+
+        yandex_path = clean_cell_value(doc.get("yandexPath"))
+        if yandex_path and is_yandex_disk_enabled():
+            try:
+                yandex_disk_delete_path(yandex_path, permanently=True)
+            except Exception as e:
+                write_debug_log("yandex_mirror_delete_error", {
+                    "dialogId": dialog_id,
+                    "checklistKey": checklist_key,
+                    "itemId": item_id,
+                    "documentId": clean_cell_value(doc.get("id")),
+                    "yandexPath": yandex_path,
+                    "error": str(e),
+                })
+
+    cleaned_item["documents"] = []
+    cleaned_item["documentUrl"] = ""
+    cleaned_item["documentName"] = ""
+    cleaned_item["folderPath"] = ""
+    cleaned_item["folderUrl"] = ""
+    return cleaned_item
 
 def format_file_size(size_bytes: int) -> str:
     try:
@@ -5275,12 +5310,43 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                 });
 
                 document.querySelectorAll('[data-role="opr-status"]').forEach(el => {
-                    el.addEventListener('change', function() {
+                    el.addEventListener('change', async function() {
                         const item = items.find(x => x.id === this.dataset.itemId);
                         if (!item) return;
 
+                        const oldItem = JSON.parse(JSON.stringify(item));
                         const oldValue = item.status || '';
                         const newValue = this.value;
+                        const oldDocuments = getItemDocuments(oldItem);
+
+                        if (newValue === 'Нет' && oldDocuments.length && !confirmStatusNoWithFiles(item.name, oldDocuments)) {
+                            this.value = normalizeStatus(oldItem.status);
+                            return;
+                        }
+
+                        if (newValue === 'Нет') {
+                            try {
+                                const result = await updateItem(item.id, 'status', newValue, 'opr');
+                                if (!result || !result.item) {
+                                    throw new Error('opr status save failed');
+                                }
+
+                                replaceItem(result.item);
+                                pushSessionChange(item.id, item.name, 'status', oldValue, newValue);
+
+                                if (oldDocuments.length) {
+                                    const removedNames = oldDocuments.map(x => x.name || 'uploaded').join(', ');
+                                    pushSessionChange(item.id, item.name, 'document', removedNames, 'removed');
+                                }
+
+                                renderAll();
+                            } catch (e) {
+                                console.log('opr status save error:', e);
+                                setSaveState('error', 'Ошибка сохранения статуса');
+                                this.value = normalizeStatus(oldItem.status);
+                            }
+                            return;
+                        }
 
                         item.status = newValue;
                         if (newValue === 'Не требуется') {
@@ -5854,9 +5920,19 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                 return current.toFixed(2) + ' ' + units[unitIndex];
             }}
 
-            function confirmFileRemoval(fileName) {{
-                const safeName = String(fileName || 'файл').trim() || 'файл';
-                return window.confirm('Удалить файл "' + safeName + '"?');
+            function confirmStatusNoWithFiles(itemName, documents) {{
+                const docs = Array.isArray(documents) ? documents : [];
+                if (!docs.length) {{
+                    return true;
+                }}
+
+                const safeItemName = String(itemName || 'пункт').trim() || 'пункт';
+
+                return window.confirm(
+                    'В пункте "' + safeItemName + '" уже загружены файлы.\\n\\n' +
+                    'При выборе статуса "Нет" эти файлы будут удалены.\\n\\n' +
+                    'Продолжить?'
+                );
             }}
 
             function renderTitle() {{
@@ -6130,7 +6206,9 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
 
             window.addEventListener('message', async function (event) {{
                 const data = event && event.data ? event.data : {{}};
-                if (!data || data.type !== 'checklist-document-removed') return;
+                const messageType = String(data && data.type || '');
+
+                if (!['checklist-document-removed', 'checklist-document-uploaded', 'checklist-document-changed'].includes(messageType)) return;
                 if (String(data.dialogId || '') !== String(dialogId || '')) return;
                 if (String(data.checklistKey || '') !== String(currentChecklistKey || '')) return;
 
@@ -6141,12 +6219,12 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                         '&checklistKey=' + encodeURIComponent(currentChecklistKey)
                     );
                     const result = await response.json();
-                    if (!response.ok) throw new Error(result.error || 'reload after folder remove failed');
+                    if (!response.ok) throw new Error(result.error || 'reload after folder sync failed');
 
                     applyChecklistData(result);
                     renderAll();
                 }} catch (e) {{
-                    console.log('folder remove sync error:', e);
+                    console.log('folder sync error:', e);
                 }}
             }});
 
@@ -7072,6 +7150,48 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                         const newValue = this.value;
                         const oldDocuments = getItemDocuments(oldItem);
 
+                        if (newValue === 'Нет' && oldDocuments.length && !confirmStatusNoWithFiles(item.name, oldDocuments)) {{
+                            this.value = normalizeStatus(oldItem.status);
+                            return;
+                        }}
+
+                        if (newValue === 'Нет') {{
+                            try {{
+                                const result = await updateItem(item.id, 'status', newValue);
+                                if (!result || !result.item) {{
+                                    throw new Error('status save failed');
+                                }}
+
+                                replaceItem(result.item);
+
+                                pushSessionChange(item.id, item.name, 'status', oldItem.status || '', newValue || '');
+                                debugLog('status_changed', {{
+                                    itemId: item.id,
+                                    itemName: item.name,
+                                    oldValue: oldItem.status || '',
+                                    newValue: newValue || ''
+                                }});
+
+                                if (oldDocuments.length) {{
+                                    const removedNames = oldDocuments.map(x => x.name || 'uploaded').join(', ');
+                                    pushSessionChange(item.id, item.name, 'document', removedNames, 'removed');
+                                    debugLog('document_removed_by_status', {{
+                                        itemId: item.id,
+                                        itemName: item.name,
+                                        oldValue: removedNames,
+                                        newValue: 'removed'
+                                    }});
+                                }}
+
+                                renderAll();
+                            }} catch (e) {{
+                                console.log('status save error:', e);
+                                setSaveState('error', 'Ошибка сохранения статуса');
+                                this.value = normalizeStatus(oldItem.status);
+                            }}
+                            return;
+                        }}
+
                         pushSessionChange(item.id, item.name, 'status', oldItem.status || '', newValue || '');
                         debugLog('status_changed', {{
                             itemId: item.id,
@@ -7079,34 +7199,6 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                             oldValue: oldItem.status || '',
                             newValue: newValue || ''
                         }});
-
-                        if (newValue === 'Нет') {{
-                            if (oldDocuments.length) {{
-                                const removedNames = oldDocuments.map(x => x.name || 'uploaded').join(', ');
-
-                                pushSessionChange(item.id, item.name, 'document', removedNames, 'removed');
-                                debugLog('document_removed_by_status', {{
-                                    itemId: item.id,
-                                    itemName: item.name,
-                                    oldValue: removedNames,
-                                    newValue: 'removed'
-                                }});
-                            }}
-
-                            try {{
-                                const result = await updateItem(item.id, 'status', newValue);
-                                if (result && result.item) {{
-                                    replaceItem(result.item);
-                                }}
-                            }} catch (e) {{
-                                console.log('status save error:', e);
-                                setSaveState('error', 'Ошибка сохранения статуса');
-                                return;
-                            }}
-
-                            renderAll();
-                            return;
-                        }}
 
                         item.status = newValue;
                         renderAll();
@@ -7568,6 +7660,11 @@ async def api_checklist_update_item(request: Request):
             target_item["status"] = new_status
             target_item["priority"] = derive_indicator_from_status(new_status)
 
+            if new_status == "Нет":
+                cleared_item = remove_all_item_documents(dialog_id, checklist_key, item_id, target_item)
+                target_item.clear()
+                target_item.update(cleared_item)
+
             if new_status == "Не требуется":
                 target_item["group"] = 2
             elif int(target_item.get("group") or 0) == 2:
@@ -7578,24 +7675,9 @@ async def api_checklist_update_item(request: Request):
             target_item["priority"] = derive_indicator_from_status(new_status)
 
             if new_status == "Нет":
-                migrated_item = migrate_legacy_document_fields(target_item)
+                cleared_item = remove_all_item_documents(dialog_id, checklist_key, item_id, target_item)
                 target_item.clear()
-                target_item.update(migrated_item)
-
-                existing_documents = normalize_documents_list(target_item.get("documents"))
-
-                for doc in existing_documents:
-                    remove_item_document_file({
-                        "documentUrl": clean_cell_value(doc.get("fileUrl"))
-                            or clean_cell_value(doc.get("previewUrl"))
-                            or clean_cell_value(doc.get("path"))
-                    })
-
-                target_item["documents"] = []
-                target_item["documentUrl"] = ""
-                target_item["documentName"] = ""
-                target_item["folderPath"] = ""
-                target_item["folderUrl"] = ""
+                target_item.update(cleared_item)
     elif field == "plan":
         target_item["plan"] = normalize_date_string(value)
     elif field == "fact":
@@ -8234,11 +8316,28 @@ def api_checklist_folder(dialogId: str = "", itemId: str = "", checklistKey: str
     title = html.escape(str(target_item.get("name") or "Папка"))
     checklist_title = html.escape(str(data.get("title") or "Чек-лист"))
     remove_api_url = html.escape(f"{normalize_base_path(APP_BASE_PATH)}/api/checklist/remove-document")
+    upload_api_url = html.escape(f"{normalize_base_path(APP_BASE_PATH)}/api/checklist/upload-document")
+    folder_item_group = html.escape(str(target_item.get("group") or ""))
 
-    yandex_button_html = ""
-    if yandex_folder_url:
-        yandex_button_html = f'''
-            <div style="margin-top:12px;">
+    yandex_folder_path_html = ""
+    if yandex_folder_path and not yandex_folder_url:
+        yandex_folder_path_html = f'''
+            <div style="margin-top:12px;font-size:12px;color:#667085;">
+                Папка Яндекс Диска: {html.escape(yandex_folder_path)}
+            </div>
+        '''
+
+    folder_actions_html = f'''
+        <div style="display:flex;gap:10px;align-items:center;justify-content:flex-end;flex-wrap:wrap;">
+            <button
+                type="button"
+                id="folderUploadBtn"
+                style="display:inline-block;padding:8px 12px;border:1px solid #d0d7de;border-radius:8px;background:#f8fafc;color:#1f2328;text-decoration:none;cursor:pointer;"
+            >
+                Загрузить файлы в папку пункта
+            </button>
+            <input type="file" id="folderUploadInput" style="display:none;" multiple>
+            {f'''
                 <a
                     href="{html.escape(yandex_folder_url)}"
                     target="_blank"
@@ -8246,14 +8345,9 @@ def api_checklist_folder(dialogId: str = "", itemId: str = "", checklistKey: str
                 >
                     Открыть папку на Яндекс Диске
                 </a>
-            </div>
-        '''
-    elif yandex_folder_path:
-        yandex_button_html = f'''
-            <div style="margin-top:12px;font-size:12px;color:#667085;">
-                Папка Яндекс Диска: {html.escape(yandex_folder_path)}
-            </div>
-        '''
+            ''' if yandex_folder_url else ''}
+        </div>
+    '''
 
     return f"""
     <html>
@@ -8264,9 +8358,14 @@ def api_checklist_folder(dialogId: str = "", itemId: str = "", checklistKey: str
     <body style="font-family:Arial,sans-serif;background:#f8fafc;margin:0;padding:24px;color:#1f2328;">
         <div style="max-width:960px;margin:0 auto;background:#fff;border:1px solid #e5e7eb;border-radius:14px;overflow:hidden;">
             <div style="padding:16px 18px;border-bottom:1px solid #edf0f2;background:#fafbfc;">
-                <div style="font-size:13px;color:#667085;margin-bottom:4px;">{checklist_title}</div>
-                <div style="font-size:22px;font-weight:700;">{title}</div>
-                {yandex_button_html}
+                <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap;">
+                    <div>
+                        <div style="font-size:13px;color:#667085;margin-bottom:4px;">{checklist_title}</div>
+                        <div style="font-size:22px;font-weight:700;">{title}</div>
+                        {yandex_folder_path_html}
+                    </div>
+                    {folder_actions_html}
+                </div>
             </div>
             <div style="padding:18px;">
                 <table style="width:100%;border-collapse:collapse;">
@@ -8285,6 +8384,26 @@ def api_checklist_folder(dialogId: str = "", itemId: str = "", checklistKey: str
         </div>
         <script>
             const folderRemoveApiUrl = "{remove_api_url}";
+            const folderUploadApiUrl = "{upload_api_url}";
+            const folderDialogId = "{html.escape(dialog_id)}";
+            const folderChecklistKey = "{html.escape(checklist_key)}";
+            const folderItemId = "{html.escape(item_id)}";
+            const folderItemGroup = "{folder_item_group}";
+
+            function notifyParentChecklistDocumentChanged(messageType = 'checklist-document-changed') {{
+                try {{
+                    if (window.opener && typeof window.opener.postMessage === 'function') {{
+                        window.opener.postMessage({{
+                            type: messageType,
+                            dialogId: folderDialogId,
+                            checklistKey: folderChecklistKey,
+                            itemId: folderItemId
+                        }}, '*');
+                    }}
+                }} catch (e) {{
+                    console.log('opener sync error:', e);
+                }}
+            }}
 
             document.querySelectorAll('[data-role="folder-remove-file"]').forEach(btn => {{
                 btn.addEventListener('click', async function () {{
@@ -8312,19 +8431,7 @@ def api_checklist_folder(dialogId: str = "", itemId: str = "", checklistKey: str
                             throw new Error(result.error || 'remove document failed');
                         }}
 
-                        try {{
-                            if (window.opener && typeof window.opener.postMessage === 'function') {{
-                                window.opener.postMessage({{
-                                    type: 'checklist-document-removed',
-                                    dialogId: this.dataset.dialogId,
-                                    checklistKey: this.dataset.checklistKey,
-                                    itemId: this.dataset.itemId
-                                }}, '*');
-                            }}
-                        }} catch (e) {{
-                            console.log('opener sync error:', e);
-                        }}
-
+                        notifyParentChecklistDocumentChanged('checklist-document-removed');
                         window.location.reload();
                     }} catch (e) {{
                         console.log('folder remove error:', e);
@@ -8334,6 +8441,54 @@ def api_checklist_folder(dialogId: str = "", itemId: str = "", checklistKey: str
                     }}
                 }});
             }});
+
+            const folderUploadBtn = document.getElementById('folderUploadBtn');
+            const folderUploadInput = document.getElementById('folderUploadInput');
+
+            if (folderUploadBtn && folderUploadInput) {{
+                folderUploadBtn.addEventListener('click', function () {{
+                    folderUploadInput.click();
+                }});
+
+                folderUploadInput.addEventListener('change', async function () {{
+                    const files = Array.from(this.files || []);
+                    if (!files.length) {{
+                        return;
+                    }}
+
+                    folderUploadBtn.disabled = true;
+
+                    try {{
+                        for (const file of files) {{
+                            const formData = new FormData();
+                            formData.append('dialogId', folderDialogId);
+                            formData.append('itemId', folderItemId);
+                            formData.append('file', file);
+                            formData.append('checklistKey', folderChecklistKey);
+                            formData.append('itemGroup', folderItemGroup);
+
+                            const response = await fetch(folderUploadApiUrl, {{
+                                method: 'POST',
+                                body: formData
+                            }});
+
+                            const result = await response.json();
+                            if (!response.ok || !result.ok) {{
+                                throw new Error(result.error || 'upload document failed');
+                            }}
+                        }}
+
+                        notifyParentChecklistDocumentChanged('checklist-document-uploaded');
+                        window.location.reload();
+                    }} catch (e) {{
+                        console.log('folder upload error:', e);
+                        alert('Ошибка загрузки файлов');
+                    }} finally {{
+                        this.value = '';
+                        folderUploadBtn.disabled = false;
+                    }}
+                }});
+            }}
         </script>
     </body>
     </html>
