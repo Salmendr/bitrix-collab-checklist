@@ -2419,34 +2419,10 @@ def get_project_root_yandex_folder_info(dialog_id: str) -> dict:
     if not project_root_path:
         return {"path": "", "url": ""}
 
-    normalized_root_path = normalize_yandex_disk_path(project_root_path)
-
-    project_root_url = clean_cell_value(yandex_disk.get("projectRootUrl"))
-    if project_root_url:
-        return {
-            "path": normalized_root_path,
-            "url": project_root_url,
-        }
-
-    if not is_yandex_disk_enabled():
-        return {
-            "path": normalized_root_path,
-            "url": "",
-        }
-
-    try:
-        yandex_disk_ensure_folder(normalized_root_path)
-        yandex_disk_publish_path(normalized_root_path)
-        meta = yandex_disk_get_resource_meta(normalized_root_path)
-        return {
-            "path": clean_cell_value(meta.get("path")) or normalized_root_path,
-            "url": clean_cell_value(meta.get("public_url")),
-        }
-    except Exception:
-        return {
-            "path": normalized_root_path,
-            "url": "",
-        }
+    return {
+        "path": normalize_yandex_disk_path(project_root_path),
+        "url": clean_cell_value(yandex_disk.get("projectRootUrl")),
+    }
 
 def can_create_custom_item_yandex_folder(dialog_id: str, checklist_key: str) -> bool:
     dialog_id = normalize_dialog_id(dialog_id)
@@ -4095,6 +4071,74 @@ async def textarea_post(request: Request):
 
     return textarea_html(dialog_id, raw_context)
 
+@app.get("/api/project-root-folder")
+def api_project_root_folder(dialogId: str = ""):
+    dialog_id = normalize_dialog_id(dialogId)
+    if not dialog_id:
+        return JSONResponse({"ok": False, "error": "dialogId is required"}, status_code=400)
+
+    context = get_project_storage_context(dialog_id)
+    if not context:
+        return JSONResponse({"ok": False, "error": "project storage context not found"}, status_code=404)
+
+    yandex_disk = context.get("yandexDisk") or {}
+    project_root_path = clean_cell_value(yandex_disk.get("projectRootPath"))
+    if not project_root_path:
+        return JSONResponse({"ok": False, "error": "projectRootPath is empty"}, status_code=400)
+
+    normalized_root_path = normalize_yandex_disk_path(project_root_path)
+    project_root_url = clean_cell_value(yandex_disk.get("projectRootUrl"))
+
+    if project_root_url:
+        return JSONResponse({
+            "ok": True,
+            "path": normalized_root_path,
+            "url": project_root_url,
+            "fromCache": True,
+        })
+
+    if not is_yandex_disk_enabled():
+        return JSONResponse({
+            "ok": True,
+            "path": normalized_root_path,
+            "url": "",
+            "fromCache": False,
+            "yandexDisabled": True,
+        })
+
+    try:
+        yandex_disk_ensure_folder(normalized_root_path)
+        yandex_disk_publish_path(normalized_root_path)
+        meta = yandex_disk_get_resource_meta(normalized_root_path)
+
+        project_root_url = clean_cell_value(meta.get("public_url"))
+
+        if project_root_url:
+            yandex_disk["projectRootUrl"] = project_root_url
+
+            save_project_storage_context(dialog_id, {
+                "dialogId": dialog_id,
+                "projectId": context.get("projectId") or "",
+                "projectName": context.get("projectName") or "",
+                "storageMode": context.get("storageMode") or {},
+                "yandexDisk": yandex_disk,
+                "itemMappings": context.get("itemMappings") or [],
+            })
+
+        return JSONResponse({
+            "ok": True,
+            "path": clean_cell_value(meta.get("path")) or normalized_root_path,
+            "url": project_root_url,
+            "fromCache": False,
+        })
+    except Exception as e:
+        return JSONResponse({
+            "ok": False,
+            "error": "failed to resolve project root folder url",
+            "details": str(e),
+            "path": normalized_root_path,
+            "url": "",
+        }, status_code=500)
 
 @app.get("/popup", response_class=HTMLResponse)
 def popup_get(dialogId: str = "", checklistKey: str = "id"):
@@ -5430,6 +5474,23 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                 await acquireChecklistLock(currentChecklistKey, true);
                 startLockHeartbeat();
                 updateLockNotice();
+
+                if (String(projectRootYandexPath || '').trim() && !String(projectRootYandexUrl || '').trim()) {
+                    try {
+                        const response = await fetch(
+                            appUrl('api/project-root-folder') +
+                            '?dialogId=' + encodeURIComponent(dialogId)
+                        );
+                        const result = await response.json();
+
+                        if (response.ok && result && result.ok) {
+                            projectRootYandexUrl = String(result.url || '').trim();
+                            renderProjectRootFolderButton();
+                        }
+                    } catch (e) {
+                        console.log('project root folder background load error:', e);
+                    }
+                }
             }, 0);
     """
 
@@ -5762,7 +5823,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
         <script>
             const dialogId = {dialog_id_json};
             const projectRootYandexPath = {project_root_yandex_path_json};
-            const projectRootYandexUrl = {project_root_yandex_url_json};
+            let projectRootYandexUrl = {project_root_yandex_url_json};
 
             let rawGroups = {groups_json};
             let rawProjectChecklists = {project_checklists_json};
@@ -6388,7 +6449,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                 const folderUrl = String(projectRootYandexUrl || '').trim();
                 const folderPath = String(projectRootYandexPath || '').trim();
 
-                if (!folderUrl) {{
+                if (!folderPath) {{
                     projectRootFolderBoxEl.style.display = 'none';
                     projectRootFolderBoxEl.innerHTML = '';
                     return;
@@ -6410,6 +6471,14 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
 
                 const btn = projectRootFolderBoxEl.querySelector('[data-role="view-project-root-folder"]');
                 if (btn) {{
+                    if (!folderUrl) {{
+                        btn.disabled = true;
+                        btn.style.opacity = '0.65';
+                        btn.style.cursor = 'default';
+                        btn.textContent = 'Подготавливаем ссылку...';
+                        return;
+                    }}
+
                     btn.addEventListener('click', function () {{
                         const url = String(this.dataset.folderUrl || '').trim();
                         if (url) {{
