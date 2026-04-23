@@ -5597,7 +5597,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                                 <div class="progress-value" id="progressValue">{progress_percent}%</div>
                                 <div class="progress-track"><div class="progress-bar" id="progressBar"></div></div>
                             </div>
-                            <div id="projectRootFolderBox" style="display:none; align-self:flex-end;"></div>
+                            <div id="projectRootFolderBox" style="display:none; align-self:flex-end; min-width:260px;"></div>
                         </div>
                     </div>
                     <div class="header-right">
@@ -6324,8 +6324,9 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                         data-role="view-project-root-folder"
                         data-folder-url="${{esc(folderUrl)}}"
                         title="${{esc(folderPath || 'Корневая папка проекта')}}"
+                        style="min-width:260px; width:260px; height:32px; white-space:nowrap;"
                     >
-                        Папка проекта
+                        Папка проекта на Яндекс Диске
                     </button>
                 `;
 
