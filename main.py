@@ -2370,6 +2370,49 @@ def get_item_yandex_folder(dialog_id: str, checklist_key: str, item_name: str):
         "context": context,
     }
 
+def get_project_root_yandex_folder_info(dialog_id: str) -> dict:
+    dialog_id = normalize_dialog_id(dialog_id)
+    if not dialog_id:
+        return {"path": "", "url": ""}
+
+    context = get_project_storage_context(dialog_id)
+    if not context:
+        return {"path": "", "url": ""}
+
+    yandex_disk = context.get("yandexDisk") or {}
+    project_root_path = clean_cell_value(yandex_disk.get("projectRootPath"))
+    if not project_root_path:
+        return {"path": "", "url": ""}
+
+    normalized_root_path = normalize_yandex_disk_path(project_root_path)
+
+    project_root_url = clean_cell_value(yandex_disk.get("projectRootUrl"))
+    if project_root_url:
+        return {
+            "path": normalized_root_path,
+            "url": project_root_url,
+        }
+
+    if not is_yandex_disk_enabled():
+        return {
+            "path": normalized_root_path,
+            "url": "",
+        }
+
+    try:
+        yandex_disk_ensure_folder(normalized_root_path)
+        yandex_disk_publish_path(normalized_root_path)
+        meta = yandex_disk_get_resource_meta(normalized_root_path)
+        return {
+            "path": clean_cell_value(meta.get("path")) or normalized_root_path,
+            "url": clean_cell_value(meta.get("public_url")),
+        }
+    except Exception:
+        return {
+            "path": normalized_root_path,
+            "url": "",
+        }
+
 def can_create_custom_item_yandex_folder(dialog_id: str, checklist_key: str) -> bool:
     dialog_id = normalize_dialog_id(dialog_id)
     checklist_key = normalize_checklist_key(checklist_key)
@@ -2678,9 +2721,7 @@ def ensure_yandex_folder_for_custom_item(
         raise RuntimeError("project storage context not found")
 
     yandex_disk = context.get("yandexDisk") or {}
-    id_stage_root_path = clean_cell_value(yandex_disk.get("idStageRootPath"))
-    if not id_stage_root_path:
-        raise RuntimeError("idStageRootPath is empty in project storage context")
+    id_stage_root_path = ensure_id_stage_root_path(dialog_id)
 
     paths = build_custom_id_yandex_folder_paths(id_stage_root_path, yandex_disk, item_name)
 
@@ -2726,6 +2767,23 @@ def get_id_stage_root_path_from_context(dialog_id: str) -> str:
     yandex_disk = context.get("yandexDisk") or {}
     return clean_cell_value(yandex_disk.get("idStageRootPath"))
 
+def ensure_id_stage_root_path(dialog_id: str) -> str:
+    context = get_project_storage_context(dialog_id)
+    if not context:
+        raise RuntimeError("project storage context not found")
+
+    yandex_disk = context.get("yandexDisk") or {}
+    project_root_path = clean_cell_value(yandex_disk.get("projectRootPath"))
+    if not project_root_path:
+        raise RuntimeError("projectRootPath is empty in project storage context")
+
+    current_path = normalize_yandex_disk_path(project_root_path).rstrip("/")
+
+    for part in ["00_Исходные данные", "01_ИРД"]:
+        current_path = f"{current_path}/{part}"
+        yandex_disk_ensure_folder(current_path)
+
+    return current_path
 
 def build_standard_id_yandex_folder_path(id_stage_root_path: str, relative_path: str) -> str:
     base_path = normalize_yandex_disk_path(id_stage_root_path).rstrip("/")
@@ -2754,9 +2812,7 @@ def ensure_standard_yandex_folder_for_item(
     if not spec:
         raise RuntimeError("standard folder spec not found")
 
-    id_stage_root_path = get_id_stage_root_path_from_context(dialog_id)
-    if not id_stage_root_path:
-        raise RuntimeError("idStageRootPath is empty in project storage context")
+    id_stage_root_path = ensure_id_stage_root_path(dialog_id)
 
     full_folder_path = build_standard_id_yandex_folder_path(
         id_stage_root_path,
@@ -4018,6 +4074,16 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
     full_title = f"{title} — {collab_title}" if collab_title_raw else title
     progress_percent = int(data.get("progressPercent", 0) or 0)
 
+    project_root_folder_info = get_project_root_yandex_folder_info(dialog_id)
+    project_root_yandex_path_json = json.dumps(
+        clean_cell_value(project_root_folder_info.get("path")),
+        ensure_ascii=False
+    )
+    project_root_yandex_url_json = json.dumps(
+        clean_cell_value(project_root_folder_info.get("url")),
+        ensure_ascii=False
+    )
+
     items_json = json.dumps(data.get("items", []), ensure_ascii=False)
     groups_json = json.dumps(data.get("groups", []), ensure_ascii=False)
     project_checklists_json = json.dumps(data.get("projectChecklists", []), ensure_ascii=False)
@@ -4025,7 +4091,6 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
     collab_title_json = json.dumps(collab_title_raw, ensure_ascii=False)
     checklist_key_json = json.dumps(checklist_key, ensure_ascii=False)
     checklist_title_json = json.dumps(title_raw, ensure_ascii=False)
-
     popup_session_enhancements_js = """
             const clientSessionId = 'popup_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
             let checklistSessionState = {};
@@ -5526,10 +5591,13 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                 <div class="header">
                     <div class="header-main">
                         <div class="title" id="popupTitle">Чек-лист ИД</div>
-                        <div class="progress-box">
-                            <div class="progress-label">Прогресс</div>
-                            <div class="progress-value" id="progressValue">{progress_percent}%</div>
-                            <div class="progress-track"><div class="progress-bar" id="progressBar"></div></div>
+                        <div style="display:flex; align-items:flex-end; gap:10px; flex-wrap:wrap;">
+                            <div class="progress-box">
+                                <div class="progress-label">Прогресс</div>
+                                <div class="progress-value" id="progressValue">{progress_percent}%</div>
+                                <div class="progress-track"><div class="progress-bar" id="progressBar"></div></div>
+                            </div>
+                            <div id="projectRootFolderBox" style="display:none; align-self:flex-end;"></div>
                         </div>
                     </div>
                     <div class="header-right">
@@ -5627,6 +5695,9 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
         </div>
         <script>
             const dialogId = {dialog_id_json};
+            const projectRootYandexPath = {project_root_yandex_path_json};
+            const projectRootYandexUrl = {project_root_yandex_url_json};
+
             let rawGroups = {groups_json};
             let rawProjectChecklists = {project_checklists_json};
             let rawItems = {items_json};
@@ -5654,6 +5725,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
             const progressBarEl = document.getElementById('progressBar');
             const progressBoxEl = document.querySelector('.progress-box');
             const popupTitleEl = document.getElementById('popupTitle');
+            const projectRootFolderBoxEl = document.getElementById('projectRootFolderBox');
             const projectChecklistListEl = document.getElementById('projectChecklistList');
             const tablePanels = document.querySelectorAll('.table-panel');
             const tablesGridEl = document.querySelector('.tables-grid');
@@ -6230,6 +6302,44 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
             function hasItemsInGroup(groupId) {{
                 return getItemsByGroup(groupId).length > 0;
             }}
+            function renderProjectRootFolderButton() {{
+                if (!projectRootFolderBoxEl) {{
+                    return;
+                }}
+
+                const folderUrl = String(projectRootYandexUrl || '').trim();
+                const folderPath = String(projectRootYandexPath || '').trim();
+
+                if (!folderUrl) {{
+                    projectRootFolderBoxEl.style.display = 'none';
+                    projectRootFolderBoxEl.innerHTML = '';
+                    return;
+                }}
+
+                projectRootFolderBoxEl.style.display = 'flex';
+                projectRootFolderBoxEl.innerHTML = `
+                    <button
+                        class="doc-btn"
+                        type="button"
+                        data-role="view-project-root-folder"
+                        data-folder-url="${{esc(folderUrl)}}"
+                        title="${{esc(folderPath || 'Корневая папка проекта')}}"
+                    >
+                        Папка проекта
+                    </button>
+                `;
+
+                const btn = projectRootFolderBoxEl.querySelector('[data-role="view-project-root-folder"]');
+                if (btn) {{
+                    btn.addEventListener('click', function () {{
+                        const url = String(this.dataset.folderUrl || '').trim();
+                        if (url) {{
+                            window.open(url, '_blank', 'noopener');
+                        }}
+                    }});
+                }}
+            }}
+
             function renderProjectChecklistList() {{
                 if (!projectChecklistListEl) {{
                     return;
@@ -6845,6 +6955,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                 calculateProgress();
                 renderTitle();
                 renderProjectChecklistList();
+                renderProjectRootFolderButton();
 
                 if (progressBoxEl) {{
                     progressBoxEl.classList.toggle('id-accent', currentChecklistKey === 'id' || currentChecklistKey === 'opr');
