@@ -52,6 +52,24 @@ EDIT_LOCK_TTL_SECONDS = 45
 EDIT_LOCK_HEARTBEAT_SECONDS = 15
 ACTIVE_CHECKLIST_LOCKS = {}
 ACTIVE_CHECKLIST_LOCKS_GUARD = threading.Lock()
+FILE_DELETE_ALLOWED_USER_IDS = {
+    "108",  # Анатолий Черняков
+    "106",  # Юлий Продан
+    "114",  # Алексей Кузьмин
+    "116",  # Дмитрий Сорюс
+    "72",   # Евгения Пулина
+    "56",   # Евгений Фролов
+    "26",   # Никита Радонежский
+    "138",  # Сергей Жигарь
+    "18",   # Олег Рашов
+    "256",  # Сергей Карман
+    "140",  # Василий Пастухов
+    "280",  # Роман Фомин
+    "124",  # Полина Тихонова
+}
+
+def can_user_delete_files(user_id: str) -> bool:
+    return clean_cell_value(user_id) in FILE_DELETE_ALLOWED_USER_IDS
 
 app.mount("/uploads", StaticFiles(directory=str(UPLOAD_ROOT)), name="uploads")
 
@@ -2043,7 +2061,7 @@ def build_recent_changes_sections(changes: list, checklist_key: str) -> list[dic
     elif key == "id":
         section_order.extend(["document", "add-item"])
     elif key == "opr":
-        section_order.extend(["add-item"])
+        section_order.extend(["document","add-item"])
 
     sections = []
     for field in section_order:
@@ -4292,6 +4310,26 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                 setSaveState('', 'Сохранено');
             }
 
+            function isDocumentDeletionChange(change) {
+                if (!change || String(change.field || '') !== 'document') {
+                    return false;
+                }
+
+                const newValue = String(change.newValue || '').trim().toLowerCase();
+                return newValue === 'удален' || newValue === 'удалён' || newValue === 'removed';
+            }
+
+            function sessionStateHasDocumentDeletion(state) {
+                const changes = Array.isArray(state && state.changes) ? state.changes : [];
+                return changes.some(isDocumentDeletionChange);
+            }
+
+            function hasDocumentDeletionInAnyDirtyChecklist() {
+                syncChecklistCache();
+                const dirtyKeys = getDirtyChecklistKeys();
+                return dirtyKeys.some(key => sessionStateHasDocumentDeletion(checklistSessionState[key]));
+            }
+
             function updateLockNotice() {
                 if (!lockNoticeEl) return;
                 if (isChecklistLockedByOther()) {
@@ -4661,6 +4699,8 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                 try {
                     if (saveChanges) {
                         persistResult = await persistDirtyChecklists('save_and_close', false);
+                    } else if (hasDocumentDeletionInAnyDirtyChecklist()) {
+                        persistResult = await persistDirtyChecklists('cancel_with_document_deletions', false);
                     }
                 } catch (e) {
                     console.log('finalizePopupSession error:', e);
@@ -4780,18 +4820,6 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                             >
                                 ${esc(docName)}
                             </a>
-                            <button
-                                type="button"
-                                class="doc-file-remove"
-                                data-role="remove-file"
-                                data-item-id="${esc(itemId)}"
-                                data-document-id="${esc(docId)}"
-                                data-document-name="${esc(docName)}"
-                                title="Удалить файл"
-                                ${typeof disabledAttr === 'function' ? disabledAttr() : ''}
-                            >
-                                ×
-                            </button>
                             ${sizeText ? `<span class="doc-file-meta">${esc(sizeText)}</span>` : ''}
                         </div>
                     `;
@@ -5380,7 +5408,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
 
                                 if (oldDocuments.length) {
                                     const removedNames = oldDocuments.map(x => x.name || 'uploaded').join(', ');
-                                    pushSessionChange(item.id, item.name, 'document', removedNames, 'removed');
+                                    pushSessionChange(item.id, item.name, 'document', removedNames, 'Удален');
                                 }
 
                                 renderAll();
@@ -6272,6 +6300,20 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                 if (!['checklist-document-removed', 'checklist-document-uploaded', 'checklist-document-changed'].includes(messageType)) return;
                 if (String(data.dialogId || '') !== String(dialogId || '')) return;
                 if (String(data.checklistKey || '') !== String(currentChecklistKey || '')) return;
+
+                if (messageType === 'checklist-document-removed') {{
+                    const itemId = String(data.itemId || '').trim();
+                    const documentName = String(data.documentName || '').trim() || 'Файл';
+                    const item = items.find(x => String(x.id || '') === itemId);
+
+                    pushSessionChange(
+                        itemId,
+                        item ? item.name : '',
+                        'document',
+                        documentName,
+                        'Удален'
+                    );
+                }}
 
                 try {{
                     const response = await fetch(
@@ -7243,12 +7285,12 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
 
                                 if (oldDocuments.length) {{
                                     const removedNames = oldDocuments.map(x => x.name || 'uploaded').join(', ');
-                                    pushSessionChange(item.id, item.name, 'document', removedNames, 'removed');
+                                    pushSessionChange(item.id, item.name, 'document', removedNames, 'Удален');
                                     debugLog('document_removed_by_status', {{
                                         itemId: item.id,
                                         itemName: item.name,
                                         oldValue: removedNames,
-                                        newValue: 'removed'
+                                        newValue: 'Удален'
                                     }});
                                 }}
 
@@ -7436,55 +7478,6 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                         }}
                     }});
                 }});
-
-                document.querySelectorAll('[data-role="remove-file"]').forEach(btn => {{
-                    btn.onclick = async function (event) {{
-                        event.preventDefault();
-                        event.stopPropagation();
-
-                        if (this.disabled) return;
-
-                        const itemId = this.dataset.itemId || '';
-                        const documentId = this.dataset.documentId || '';
-                        const documentName = this.dataset.documentName || 'файл';
-
-                        if (!confirmFileRemoval(documentName)) {{
-                            return;
-                        }}
-
-                        const item = items.find(x => x.id === itemId);
-                        const documents = getItemDocuments(item);
-                        const doc = documents.find(x => String(x.id || '') === String(documentId || ''));
-
-                        this.disabled = true;
-
-                        try {{
-                            const removeResult = await removeDocument(itemId, documentId);
-
-                            if (removeResult && removeResult.item) {{
-                                replaceItem(removeResult.item);
-                            }}
-
-                            await reloadCurrentChecklistFromServer();
-
-                            pushSessionChange(
-                                itemId,
-                                item ? item.name : '',
-                                'document',
-                                doc ? (doc.name || documentName) : documentName,
-                                'removed'
-                            );
-
-                            renderAll();
-                        }} catch (e) {{
-                            console.log('remove file error:', e);
-                            setSaveState('error', 'Ошибка удаления файла');
-                        }} finally {{
-                            this.disabled = false;
-                        }}
-                    }};
-                }});
-
                 document.querySelectorAll('[data-role="file-input"]').forEach(input => {{
                     input.addEventListener('change', async function() {{
                         const itemId = this.dataset.itemId;
@@ -8182,12 +8175,20 @@ async def api_checklist_remove_document(request: Request):
     document_id = clean_cell_value(payload.get("documentId"))
     document_url = clean_cell_value(payload.get("documentUrl"))
     preserve_status = bool(payload.get("preserveStatus"))
+    acting_user_id = clean_cell_value(payload.get("actingUserId"))
+    acting_user_name = clean_cell_value(payload.get("actingUserName")) or "Пользователь"
 
     if not dialog_id:
         return JSONResponse({"ok": False, "error": "dialogId is required"}, status_code=400)
 
     if not item_id:
         return JSONResponse({"ok": False, "error": "itemId is required"}, status_code=400)
+
+    if not can_user_delete_files(acting_user_id):
+        return JSONResponse({
+            "ok": False,
+            "error": "У вас недостаточно прав на удаление файлов"
+        }, status_code=403)
 
     data = get_checklist(dialog_id, checklist_key)
     items = data.get("items", []) or []
@@ -8459,14 +8460,49 @@ def api_checklist_folder(dialogId: str = "", itemId: str = "", checklistKey: str
             const folderItemId = "{html.escape(item_id)}";
             const folderItemGroup = "{folder_item_group}";
 
-            function notifyParentChecklistDocumentChanged(messageType = 'checklist-document-changed') {{
+            const folderDeleteAllowedUserIds = new Set([
+                '108',
+                '106',
+                '114',
+                '116',
+                '72',
+                '56',
+                '26',
+                '138',
+                '18',
+                '256',
+                '140',
+                '280',
+                '124'
+            ]);
+
+            function getFolderDeleteActor() {{
+                try {{
+                    const openerEditor = window.opener && window.opener.currentEditor
+                        ? window.opener.currentEditor
+                        : null;
+
+                    return {{
+                        id: String(openerEditor && openerEditor.id || '').trim(),
+                        name: String(openerEditor && openerEditor.name || '').trim() || 'Пользователь'
+                    }};
+                }} catch (e) {{
+                    return {{
+                        id: '',
+                        name: 'Пользователь'
+                    }};
+                }}
+            }}
+
+            function notifyParentChecklistDocumentChanged(messageType = 'checklist-document-changed', extraPayload = {{}}) {{
                 try {{
                     if (window.opener && typeof window.opener.postMessage === 'function') {{
                         window.opener.postMessage({{
                             type: messageType,
                             dialogId: folderDialogId,
                             checklistKey: folderChecklistKey,
-                            itemId: folderItemId
+                            itemId: folderItemId,
+                            ...extraPayload
                         }}, '*');
                     }}
                 }} catch (e) {{
@@ -8477,6 +8513,13 @@ def api_checklist_folder(dialogId: str = "", itemId: str = "", checklistKey: str
             document.querySelectorAll('[data-role="folder-remove-file"]').forEach(btn => {{
                 btn.addEventListener('click', async function () {{
                     const documentName = this.dataset.documentName || 'файл';
+                    const actor = getFolderDeleteActor();
+
+                    if (!folderDeleteAllowedUserIds.has(String(actor.id || '').trim())) {{
+                        alert('У вас недостаточно прав на удаление файлов');
+                        return;
+                    }}
+
                     if (!window.confirm('Удалить файл "' + documentName + '"?')) {{
                         return;
                     }}
@@ -8491,7 +8534,9 @@ def api_checklist_folder(dialogId: str = "", itemId: str = "", checklistKey: str
                                 dialogId: this.dataset.dialogId,
                                 checklistKey: this.dataset.checklistKey,
                                 itemId: this.dataset.itemId,
-                                documentId: this.dataset.documentId
+                                documentId: this.dataset.documentId,
+                                actingUserId: actor.id,
+                                actingUserName: actor.name
                             }})
                         }});
 
@@ -8500,11 +8545,13 @@ def api_checklist_folder(dialogId: str = "", itemId: str = "", checklistKey: str
                             throw new Error(result.error || 'remove document failed');
                         }}
 
-                        notifyParentChecklistDocumentChanged('checklist-document-removed');
+                        notifyParentChecklistDocumentChanged('checklist-document-removed', {{
+                            documentName: documentName
+                        }});
                         window.location.reload();
                     }} catch (e) {{
                         console.log('folder remove error:', e);
-                        alert('Ошибка удаления файла');
+                        alert(e && e.message ? e.message : 'Ошибка удаления файла');
                     }} finally {{
                         this.disabled = false;
                     }}
