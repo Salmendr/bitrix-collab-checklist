@@ -5870,6 +5870,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                 id: "",
                 name: ""
             }};
+            window.currentEditor = currentEditor;
             let currentEditorReady = false;
             let currentEditorReadyPromise = null;
                         const saveStateEl = document.getElementById('saveState');
@@ -6067,6 +6068,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                                                 id: String(data.ID || ''),
                                                 name: fullName || String(data.NAME || '') || ''
                                             }};
+                                            window.currentEditor = currentEditor;
                                         }}
                                     }} catch (e) {{
                                         console.log('user.current parse error:', e);
