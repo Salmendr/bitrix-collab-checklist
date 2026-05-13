@@ -6315,6 +6315,11 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                         documentName,
                         'Удален'
                     );
+
+                    checklistSessionState[currentChecklistKey] = {{
+                        changes: deepClone(sessionChanges),
+                        dirty: !!sessionDirty
+                    }};
                 }}
 
                 try {{
