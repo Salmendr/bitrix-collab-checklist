@@ -8481,7 +8481,8 @@ def api_checklist_folder(dialogId: str = "", itemId: str = "", checklistKey: str
                 '256',
                 '140',
                 '280',
-                '124'
+                '124',
+                '222'
             ]);
 
             function getFolderDeleteActor() {{
