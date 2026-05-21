@@ -66,6 +66,7 @@ FILE_DELETE_ALLOWED_USER_IDS = {
     "140",  # Василий Пастухов
     "280",  # Роман Фомин
     "124",  # Полина Тихонова
+    "222",  # Вероника Варганова
 }
 
 def can_user_delete_files(user_id: str) -> bool:
