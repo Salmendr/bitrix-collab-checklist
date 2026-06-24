@@ -10,6 +10,7 @@ import requests
 import json
 import html
 import re
+import sqlite3
 import mimetypes
 from io import BytesIO
 from datetime import datetime
@@ -35,6 +36,7 @@ from app.settings import (
     DEBUG_LOG_PATH,
     EDIT_LOCK_TTL_SECONDS,
     EDIT_LOCK_HEARTBEAT_SECONDS,
+    ensure_runtime_directories,
 )
 from app.db import get_conn, init_db
 from app.logging_utils import write_debug_log
@@ -49,16 +51,15 @@ from app.yandex_disk.client import (
     yandex_disk_publish_path,
     yandex_disk_get_resource_meta,
 )
-from app.checklists.permissions import (
-    FILE_DELETE_ALLOWED_USER_IDS,
-    can_user_delete_files,
-)
+
+from app.checklists.permissions import can_user_delete_files
 
 app = FastAPI()
 
 ACTIVE_CHECKLIST_LOCKS = {}
 ACTIVE_CHECKLIST_LOCKS_GUARD = threading.Lock()
 
+ensure_runtime_directories()
 
 app.mount("/uploads", StaticFiles(directory=str(UPLOAD_ROOT)), name="uploads")
 

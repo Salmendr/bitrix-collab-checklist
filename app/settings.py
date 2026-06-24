@@ -30,3 +30,18 @@ DEBUG_LOG_PATH = DEBUG_DIR / "close_popup.log"
 
 EDIT_LOCK_TTL_SECONDS = 45
 EDIT_LOCK_HEARTBEAT_SECONDS = 15
+
+def ensure_runtime_directories():
+    """
+    Создаёт только штатные runtime-директории приложения.
+
+    Это не меняет архитектуру Volume:
+    - база остаётся в Volume/db/app.db;
+    - загрузки остаются в Volume/uploads;
+    - app/ остаётся только кодом.
+    """
+    VOLUME_DIR.mkdir(parents=True, exist_ok=True)
+    DB_DIR.mkdir(parents=True, exist_ok=True)
+    UPLOAD_ROOT.mkdir(parents=True, exist_ok=True)
+    CHECKLIST_UPLOAD_ROOT.mkdir(parents=True, exist_ok=True)
+    DEBUG_DIR.mkdir(parents=True, exist_ok=True)
