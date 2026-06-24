@@ -9,7 +9,6 @@ from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 import requests
 import json
 import html
-import sqlite3
 import re
 import mimetypes
 from io import BytesIO
@@ -17,60 +16,49 @@ from datetime import datetime
 from urllib.parse import quote, urlparse
 import openpyxl
 
+from app.settings import (
+    BASE_DIR,
+    VOLUME_DIR,
+    DB_DIR,
+    DB_PATH,
+    APP_PORTAL_PATH,
+    APP_BASE_PATH,
+    PUBLIC_APP_BASE_URL,
+    TECH_USER_ID,
+    BITRIX_TECH_WEBHOOK_URL,
+    N8N_SHARED_TOKEN,
+    YANDEX_DISK_OAUTH_TOKEN,
+    YANDEX_DISK_API_BASE,
+    UPLOAD_ROOT,
+    CHECKLIST_UPLOAD_ROOT,
+    DEBUG_DIR,
+    DEBUG_LOG_PATH,
+    EDIT_LOCK_TTL_SECONDS,
+    EDIT_LOCK_HEARTBEAT_SECONDS,
+)
+from app.db import get_conn, init_db
+from app.logging_utils import write_debug_log
+from app.bitrix.client import bitrix_rest_call, bitrix_webhook_call
+from app.yandex_disk.client import (
+    is_yandex_disk_enabled,
+    normalize_yandex_disk_path,
+    yandex_disk_get_upload_href,
+    yandex_disk_upload_bytes,
+    yandex_disk_delete_path,
+    yandex_disk_ensure_folder,
+    yandex_disk_publish_path,
+    yandex_disk_get_resource_meta,
+)
+from app.checklists.permissions import (
+    FILE_DELETE_ALLOWED_USER_IDS,
+    can_user_delete_files,
+)
+
 app = FastAPI()
 
-BASE_DIR = Path(__file__).resolve().parent
-
-VOLUME_DIR = BASE_DIR / "Volume"
-VOLUME_DIR.mkdir(parents=True, exist_ok=True)
-
-DB_DIR = VOLUME_DIR / "db"
-DB_DIR.mkdir(parents=True, exist_ok=True)
-
-DB_PATH = str(DB_DIR / "app.db")
-
-APP_PORTAL_PATH = (os.getenv("APP_PORTAL_PATH", "/marketplace/app/80/") or "/marketplace/app/80/").strip()
-APP_BASE_PATH = (os.getenv("APP_BASE_PATH", "") or "").strip()
-PUBLIC_APP_BASE_URL = (os.getenv("PUBLIC_APP_BASE_URL", "") or "").strip()
-TECH_USER_ID = int(os.getenv("TECH_USER_ID", "138"))
-BITRIX_TECH_WEBHOOK_URL = os.getenv("BITRIX_TECH_WEBHOOK_URL", "").strip()
-N8N_SHARED_TOKEN = os.getenv("N8N_SHARED_TOKEN", "").strip()
-YANDEX_DISK_OAUTH_TOKEN = os.getenv("YANDEX_DISK_OAUTH_TOKEN", "").strip()
-YANDEX_DISK_API_BASE = "https://cloud-api.yandex.net/v1/disk"
-
-UPLOAD_ROOT = VOLUME_DIR / "uploads"
-UPLOAD_ROOT.mkdir(parents=True, exist_ok=True)
-
-CHECKLIST_UPLOAD_ROOT = UPLOAD_ROOT / "checklists"
-CHECKLIST_UPLOAD_ROOT.mkdir(parents=True, exist_ok=True)
-
-DEBUG_DIR = BASE_DIR / "debug"
-DEBUG_DIR.mkdir(parents=True, exist_ok=True)
-
-DEBUG_LOG_PATH = DEBUG_DIR / "close_popup.log"
-EDIT_LOCK_TTL_SECONDS = 45
-EDIT_LOCK_HEARTBEAT_SECONDS = 15
 ACTIVE_CHECKLIST_LOCKS = {}
 ACTIVE_CHECKLIST_LOCKS_GUARD = threading.Lock()
-FILE_DELETE_ALLOWED_USER_IDS = {
-    "108",  # Анатолий Черняков
-    "106",  # Юлий Продан
-    "114",  # Алексей Кузьмин
-    "116",  # Дмитрий Сорюс
-    "72",   # Евгения Пулина
-    "56",   # Евгений Фролов
-    "26",   # Никита Радонежский
-    "138",  # Сергей Жигарь
-    "18",   # Олег Рашов
-    "256",  # Сергей Карман
-    "140",  # Василий Пастухов
-    "280",  # Роман Фомин
-    "124",  # Полина Тихонова
-    "222",  # Вероника Варганова
-}
 
-def can_user_delete_files(user_id: str) -> bool:
-    return clean_cell_value(user_id) in FILE_DELETE_ALLOWED_USER_IDS
 
 app.mount("/uploads", StaticFiles(directory=str(UPLOAD_ROOT)), name="uploads")
 
@@ -1430,39 +1418,6 @@ def normalize_checklist_data(data: dict, checklist_key: str = "id") -> dict:
         "progressPercent": progress["progressPercent"],
     }
 
-def get_conn():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
-
-
-def init_db():
-    conn = get_conn()
-    cur = conn.cursor()
-
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS checklists (
-            dialog_id TEXT PRIMARY KEY,
-            title TEXT,
-            data_json TEXT
-        )
-    """)
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS project_storage_contexts (
-            dialog_id TEXT PRIMARY KEY,
-            project_id TEXT,
-            project_name TEXT,
-            provider TEXT,
-            storage_mode_json TEXT,
-            yandex_json TEXT,
-            item_mappings_json TEXT,
-            updated_at TEXT
-        )
-    """)
-    conn.commit()
-    conn.close()
-
-
 # Страховочный вызов при импорте модуля
 init_db()
 
@@ -1513,54 +1468,6 @@ def get_public_app_base_url(request: Request) -> str:
     if PUBLIC_APP_BASE_URL:
         return PUBLIC_APP_BASE_URL.rstrip("/")
     return f"{get_public_origin(request)}{get_public_app_base_path(request)}"
-
-def bitrix_rest_call(domain: str, method: str, access_token: str, payload: dict):
-    url = f"https://{domain}/rest/{method}.json"
-    response = requests.post(
-        url,
-        data={**payload, "auth": access_token},
-        timeout=30
-    )
-    try:
-        return response.json()
-    except Exception:
-        return {
-            "http_status": response.status_code,
-            "text": response.text
-        }
-
-
-def bitrix_webhook_call(method: str, payload: dict):
-    if not BITRIX_TECH_WEBHOOK_URL:
-        return {
-            "error": "TECH_WEBHOOK_NOT_CONFIGURED",
-            "error_description": "BITRIX_TECH_WEBHOOK_URL is empty"
-        }
-
-    base = BITRIX_TECH_WEBHOOK_URL.rstrip("/")
-    url = f"{base}/{method}.json"
-
-    response = requests.post(url, data=payload, timeout=30)
-
-    try:
-        return response.json()
-    except Exception:
-        return {
-            "http_status": response.status_code,
-            "text": response.text
-        }
-
-
-def write_debug_log(event: str, payload: dict):
-    record = {
-        "ts": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "event": event,
-        "payload": payload,
-    }
-
-    with open(DEBUG_LOG_PATH, "a", encoding="utf-8") as f:
-        f.write(json.dumps(record, ensure_ascii=False) + "\n")
-
 
 def make_checklist_lock_key(dialog_id: str, checklist_key: str) -> str:
     return f"{normalize_dialog_id(dialog_id)}::{normalize_checklist_key(checklist_key)}"
@@ -2467,78 +2374,6 @@ def can_create_custom_item_yandex_folder(dialog_id: str, checklist_key: str) -> 
 
     return False
 
-def is_yandex_disk_enabled() -> bool:
-    return bool(YANDEX_DISK_OAUTH_TOKEN)
-
-
-def get_yandex_disk_headers() -> dict:
-    return {
-        "Authorization": f"OAuth {YANDEX_DISK_OAUTH_TOKEN}"
-    }
-
-
-def normalize_yandex_disk_path(path: str) -> str:
-    value = clean_cell_value(path)
-    if not value:
-        return ""
-
-    if value.startswith("disk:/"):
-        return value
-
-    if value.startswith("/"):
-        return "disk:" + value
-
-    return "disk:/" + value
-
-
-def yandex_disk_get_upload_href(target_path: str, overwrite: bool = True) -> str:
-    normalized_path = normalize_yandex_disk_path(target_path)
-    response = requests.get(
-        f"{YANDEX_DISK_API_BASE}/resources/upload",
-        headers=get_yandex_disk_headers(),
-        params={
-            "path": normalized_path,
-            "overwrite": "true" if overwrite else "false",
-        },
-        timeout=30
-    )
-    response.raise_for_status()
-    data = response.json() or {}
-    href = clean_cell_value(data.get("href"))
-    if not href:
-        raise RuntimeError("Yandex Disk upload href not found")
-    return href
-
-
-def yandex_disk_upload_bytes(target_path: str, file_bytes: bytes) -> dict:
-    upload_href = yandex_disk_get_upload_href(target_path, overwrite=True)
-    upload_response = requests.put(upload_href, data=file_bytes, timeout=120)
-    upload_response.raise_for_status()
-
-    return {
-        "ok": True,
-        "path": normalize_yandex_disk_path(target_path),
-    }
-
-
-def yandex_disk_delete_path(target_path: str, permanently: bool = True):
-    normalized_path = normalize_yandex_disk_path(target_path)
-    response = requests.delete(
-        f"{YANDEX_DISK_API_BASE}/resources",
-        headers=get_yandex_disk_headers(),
-        params={
-            "path": normalized_path,
-            "permanently": "true" if permanently else "false"
-        },
-        timeout=30
-    )
-
-    if response.status_code not in (200, 202, 204):
-        try:
-            payload = response.json()
-        except Exception:
-            payload = {"text": response.text}
-        raise RuntimeError(f"Yandex Disk delete failed: {payload}")
 
 def sanitize_yandex_folder_name(value: str) -> str:
     value = clean_cell_value(value)
@@ -2548,76 +2383,6 @@ def sanitize_yandex_folder_name(value: str) -> str:
     value = re.sub(r'[\\\\/:*?"<>|]+', " ", value)
     value = re.sub(r"\s+", " ", value).strip()
     return value or "Новый пункт"
-
-
-def yandex_disk_ensure_folder(target_path: str) -> dict:
-    normalized_path = normalize_yandex_disk_path(target_path)
-
-    response = requests.put(
-        f"{YANDEX_DISK_API_BASE}/resources",
-        headers=get_yandex_disk_headers(),
-        params={"path": normalized_path},
-        timeout=30
-    )
-
-    if response.status_code not in (201, 409):
-        try:
-            payload = response.json()
-        except Exception:
-            payload = {"text": response.text}
-        raise RuntimeError(f"Yandex Disk create folder failed: {payload}")
-
-    return {
-        "ok": True,
-        "path": normalized_path,
-        "alreadyExists": response.status_code == 409,
-    }
-
-
-def yandex_disk_publish_path(target_path: str) -> dict:
-    normalized_path = normalize_yandex_disk_path(target_path)
-
-    response = requests.put(
-        f"{YANDEX_DISK_API_BASE}/resources/publish",
-        headers=get_yandex_disk_headers(),
-        params={"path": normalized_path},
-        timeout=30
-    )
-
-    if response.status_code not in (200, 201, 202):
-        try:
-            payload = response.json()
-        except Exception:
-            payload = {"text": response.text}
-        raise RuntimeError(f"Yandex Disk publish failed: {payload}")
-
-    return {
-        "ok": True,
-        "path": normalized_path,
-    }
-
-
-def yandex_disk_get_resource_meta(target_path: str) -> dict:
-    normalized_path = normalize_yandex_disk_path(target_path)
-
-    response = requests.get(
-        f"{YANDEX_DISK_API_BASE}/resources",
-        headers=get_yandex_disk_headers(),
-        params={
-            "path": normalized_path,
-            "fields": "name,path,public_url"
-        },
-        timeout=30
-    )
-    response.raise_for_status()
-
-    data = response.json() or {}
-    return {
-        "name": clean_cell_value(data.get("name")),
-        "path": clean_cell_value(data.get("path")) or normalized_path,
-        "public_url": clean_cell_value(data.get("public_url")),
-    }
-
 
 def extract_yandex_folder_number(name: str) -> int:
     name = clean_cell_value(name)
@@ -3411,7 +3176,7 @@ def app_home_html(
                 const initialContextText = {initial_context_text_json};
 
                 function detectAppBasePath() {{
-                    const path = String(window.location.pathname || '/').replace(/\/+$/, '');
+                    const path = String(window.location.pathname || '/').replace(/\\/+$/, '');
                     const suffixes = ['/launch', '/popup', '/textarea', '/install', '/health', '/debug/logs', '/admin', '/admin/upload'];
 
                     for (const suffix of suffixes) {{
@@ -3427,7 +3192,7 @@ def app_home_html(
                 const APP_BASE_PATH = detectAppBasePath();
 
                 function appPath(path) {{
-                    return (APP_BASE_PATH || '') + '/' + String(path || '').replace(/^\/+/, '');
+                    return (APP_BASE_PATH || '') + '/' + String(path || '').replace(/^\\/+/, '');
                 }}
 
                 function pickValue(searchParams, hashParams, key, fallback) {{
@@ -3715,7 +3480,7 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
             var autoOpened = false;
 
             function detectAppBasePath() {{
-                const path = String(window.location.pathname || '/').replace(/\/+$/, '');
+                const path = String(window.location.pathname || '/').replace(/\\/+$/, '');
                 const suffixes = ['/launch', '/popup', '/textarea', '/install', '/health', '/debug/logs', '/admin', '/admin/upload'];
 
                 for (const suffix of suffixes) {{
@@ -3731,7 +3496,7 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
             const APP_BASE_PATH = detectAppBasePath();
 
             function appPath(path) {{
-                return (APP_BASE_PATH || '') + '/' + String(path || '').replace(/^\/+/, '');
+                return (APP_BASE_PATH || '') + '/' + String(path || '').replace(/^\\/+/, '');
             }}
             function setMeta(text) {{
                 document.getElementById('meta').textContent = text;
@@ -5108,7 +4873,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
             function resolveOprGroupIdByItemIdOrName(item) {
                 const itemId = String(item && item.id || '');
                 if (itemId.startsWith('opr_g')) {
-                    const match = itemId.match(/^opr_g(\d+)_/);
+                    const match = itemId.match(/^opr_g(\\d+)_/);
                     if (match) {
                         const groupId = Number(match[1]);
                         if (groupId && groupId !== 2) {
@@ -5906,7 +5671,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                 }}
             }}
             function detectAppBasePath() {{
-                const path = String(window.location.pathname || '/').replace(/\/+$/, '');
+                const path = String(window.location.pathname || '/').replace(/\\/+$/, '');
                 const suffixes = ['/popup', '/launch', '/textarea', '/install', '/health', '/debug/logs', '/admin', '/admin/upload'];
 
                 for (const suffix of suffixes) {{
@@ -5923,7 +5688,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
             const APP_BASE_URL = window.location.origin + (APP_BASE_PATH || '');
 
             function appUrl(path) {{
-                return APP_BASE_URL + '/' + String(path || '').replace(/^\/+/, '');
+                return APP_BASE_URL + '/' + String(path || '').replace(/^\\/+/, '');
             }}
             let closeSummarySent = false;
             let sessionDirty = false;
