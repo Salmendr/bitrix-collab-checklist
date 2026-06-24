@@ -104,22 +104,22 @@ def resolve_concept_group_id_by_item_id_or_name(item: dict) -> int:
     name = str(item.get("name") or "").strip()
 
     if item_id.startswith("concept_g"):
-        try:
-            group_part = item_id.split("_", 2)[1]
-            if group_part.startswith("g"):
-                group_id = int(group_part[1:])
+        parts = item_id.split("_", 2)
+        if len(parts) > 1 and parts[1].startswith("g"):
+            try:
+                group_id = int(parts[1][1:])
                 if group_id != 10:
                     return group_id
-        except Exception:
-            pass
+            except Exception:
+                pass
 
     for group in CONCEPT_GROUPS:
         if group["id"] == 10:
             continue
 
-        for order, spec in enumerate(group["items"], start=1):
+        for order, item_name in enumerate(group["items"], start=1):
             expected_id = f"concept_g{group['id']}_{order}"
-            if item_id == expected_id or name == spec["name"]:
+            if item_id == expected_id or name == clean_cell_value(item_name):
                 return group["id"]
 
     current_group = int(item.get("group") or 1)
@@ -176,6 +176,7 @@ def normalize_status(value: str) -> str:
     normalized_map = {
         "есть": "Есть",
         "нет": "Нет",
+        "да": "Есть",
         "не требуется": "Не требуется",
         "подписан": "Есть",
         "запрос опросного листа": "",
@@ -543,26 +544,24 @@ def build_default_checklist_template(dialog_id: str = "", checklist_key: str = "
             if group["id"] == 10:
                 continue
 
-            for order, spec in enumerate(group["items"], start=1):
+            for order, name in enumerate(group["items"], start=1):
                 item_id = f"concept_g{group['id']}_{order}"
-                item_name = spec["name"]
 
                 items.append({
                     "id": item_id,
                     "group": group["id"],
                     "order": order,
-                    "name": item_name,
-                    "source": spec.get("source", ""),
-                    "statusKind": spec.get("statusKind", "bool"),
-                    "statusOptions": spec.get("statusOptions", []),
-                    "statusPlaceholder": spec.get("statusPlaceholder", ""),
+                    "name": name,
+                    "priority": "white",
                     "status": "",
-                    "extraInfo": "",
-                    "extraInfoPlaceholder": spec.get("extraPlaceholder", ""),
-                    "folderKey": build_folder_key("concept", item_name, item_id),
+                    "plan": "",
+                    "fact": "",
+                    "folderKey": build_folder_key("concept", name, item_id),
                     "folderPath": "",
                     "folderUrl": "",
                     "documents": [],
+                    "documentUrl": "",
+                    "documentName": "",
                     "isCustom": False,
                 })
 
@@ -670,35 +669,7 @@ def calculate_progress(items: list) -> dict:
 
 
 def calculate_concept_progress(items: list) -> dict:
-    items = items or []
-
-    def is_active(item: dict) -> bool:
-        return clean_cell_value(item.get("status")) != "Не требуется"
-
-    def is_completed(item: dict) -> bool:
-        status = clean_cell_value(item.get("status"))
-        status_kind = clean_cell_value(item.get("statusKind")) or "bool"
-
-        if status == "Не требуется":
-            return False
-
-        if status_kind == "bool":
-            return status == "Да"
-
-        return bool(status)
-
-    active_items = [item for item in items if is_active(item)]
-    completed_items = [item for item in active_items if is_completed(item)]
-
-    active_count = len(active_items)
-    completed_count = len(completed_items)
-    progress_percent = round((completed_count / active_count) * 100) if active_count else 0
-
-    return {
-        "activeCount": active_count,
-        "completedCount": completed_count,
-        "progressPercent": progress_percent,
-    }
+    return calculate_progress(items)
 
 
 def calculate_opr_progress(items: list) -> dict:
@@ -746,6 +717,14 @@ def normalize_checklist_data(data: dict, checklist_key: str = "id") -> dict:
         raw_items = data.get("items", []) or []
         normalized_items = []
 
+        current_concept_default_names = {
+            clean_cell_value(item_name).lower()
+            for group in CONCEPT_GROUPS
+            if group["id"] != 10
+            for item_name in group["items"]
+            if clean_cell_value(item_name)
+        }
+
         for raw_item in raw_items:
             item, documents, first_doc, folder_key, folder_path, folder_url, legacy_document_url, legacy_document_name = prepare_item_common(raw_item)
 
@@ -753,27 +732,92 @@ def normalize_checklist_data(data: dict, checklist_key: str = "id") -> dict:
             if not name:
                 continue
 
+            is_custom = bool(item.get("isCustom", False))
+            normalized_name = name.lower()
+
+            # После упрощения Концепции оставляем:
+            # 1) текущие стандартные пункты из concept.py
+            # 2) кастомные пункты, если пользователь добавил их вручную
+            if not is_custom and normalized_name not in current_concept_default_names:
+                continue
+
+            status = normalize_status(item.get("status"))
+            group_id = int(item.get("group") or 0)
+
+            if status == "Не требуется":
+                group_id = 10
+            elif group_id == 10 or not group_id:
+                group_id = resolve_concept_group_id_by_item_id_or_name(item)
+
             normalized_items.append({
                 "id": str(item.get("id") or ""),
-                "group": int(item.get("group") or 0),
+                "group": group_id,
                 "order": int(item.get("order") or 0),
                 "name": name,
-                "source": clean_cell_value(item.get("source")),
-                "statusKind": clean_cell_value(item.get("statusKind")) or "bool",
-                "statusOptions": item.get("statusOptions") or [],
-                "statusPlaceholder": clean_cell_value(item.get("statusPlaceholder")),
-                "status": clean_cell_value(item.get("status")),
-                "extraInfo": clean_cell_value(item.get("extraInfo")),
-                "extraInfoPlaceholder": clean_cell_value(item.get("extraInfoPlaceholder")),
+                "priority": derive_indicator_from_status(status),
+                "status": status,
+                "plan": normalize_date_string(item.get("plan") or item.get("plannedDate")),
+                "fact": normalize_date_string(item.get("fact")),
                 "folderKey": folder_key,
                 "folderPath": folder_path,
                 "folderUrl": folder_url,
                 "documents": documents,
                 "documentUrl": legacy_document_url,
                 "documentName": legacy_document_name,
-                "isCustom": bool(item.get("isCustom", False)),
-                "priority": clean_cell_value(item.get("priority")) or "white",
+                "isCustom": is_custom,
             })
+
+        deduped_items = []
+        seen_builtin_names = set()
+
+        for existing_item in normalized_items:
+            name_key = clean_cell_value(existing_item.get("name")).lower()
+
+            if not existing_item.get("isCustom"):
+                if name_key in seen_builtin_names:
+                    continue
+                seen_builtin_names.add(name_key)
+
+            deduped_items.append(existing_item)
+
+        normalized_items = deduped_items
+
+        existing_names = {
+            clean_cell_value(existing_item.get("name")).lower()
+            for existing_item in normalized_items
+            if clean_cell_value(existing_item.get("name"))
+        }
+
+        for group in CONCEPT_GROUPS:
+            if group["id"] == 10:
+                continue
+
+            for default_order, default_name in enumerate(group["items"], start=1):
+                normalized_name = clean_cell_value(default_name).lower()
+                if not normalized_name or normalized_name in existing_names:
+                    continue
+
+                migrated_item_id = f"concept_g{group['id']}_{default_order}_migrated_{slugify_folder_part(default_name)}"
+
+                normalized_items.append({
+                    "id": migrated_item_id,
+                    "group": group["id"],
+                    "order": default_order,
+                    "name": default_name,
+                    "priority": "white",
+                    "status": "",
+                    "plan": "",
+                    "fact": "",
+                    "folderKey": build_folder_key("concept", default_name, migrated_item_id),
+                    "folderPath": "",
+                    "folderUrl": "",
+                    "documents": [],
+                    "documentUrl": "",
+                    "documentName": "",
+                    "isCustom": False,
+                })
+
+                existing_names.add(normalized_name)
 
         normalized_items.sort(key=lambda x: (x["group"], x["order"], x["name"]))
 
@@ -1404,23 +1448,16 @@ def display_status_text(status: str) -> str:
 
 
 def build_progress_text(data: dict) -> str:
-    checklist_key = normalize_checklist_key(data.get("checklistKey") or "id")
     items = data.get("items") or []
 
-    if checklist_key == "concept":
-        active_items = [item for item in items if clean_cell_value(item.get("status")) != "Не требуется"]
-        completed_items = []
-        for item in active_items:
-            status = clean_cell_value(item.get("status"))
-            status_kind = clean_cell_value(item.get("statusKind")) or "bool"
-            if status_kind == "bool":
-                if status == "Да":
-                    completed_items.append(item)
-            elif status:
-                completed_items.append(item)
-    else:
-        active_items = [item for item in items if display_status_text(item.get("status")) != "Не требуется"]
-        completed_items = [item for item in active_items if display_status_text(item.get("status")) == "Есть"]
+    active_items = [
+        item for item in items
+        if display_status_text(item.get("status")) != "Не требуется"
+    ]
+    completed_items = [
+        item for item in active_items
+        if display_status_text(item.get("status")) == "Есть"
+    ]
 
     percent = round((len(completed_items) / len(active_items)) * 100) if active_items else 0
     return f"📊Прогресс: {percent}%"
@@ -1632,7 +1669,7 @@ def build_recent_changes_sections(changes: list, checklist_key: str) -> list[dic
     key = normalize_checklist_key(checklist_key)
     section_order = ["status", "date"]
     if key == "concept":
-        section_order.extend(["source", "extraInfo", "name", "add-item"])
+        section_order.extend(["document", "add-item"])
     elif key == "id":
         section_order.extend(["document", "add-item"])
     elif key == "opr":
@@ -5324,6 +5361,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
             const idTableShellHtml = leftTableEl ? leftTableEl.innerHTML : '';
             const idDateVisibility = {{ 1: false, 2: false, 3: false }};
             const oprDateVisibility = {{ 1: false }};
+            const conceptDateVisibility = {{ 1: false }};
             const debugLastEventEl = document.getElementById('debugLastEvent');
             const debugPanelEl = document.getElementById('debugPanel');
             const debugLogsLinkEl = document.getElementById('debugLogsLink');
@@ -5830,30 +5868,13 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                 if (!progressValueEl || !progressBarEl) {{
                     return;
                 }}
-                if (currentChecklistKey === 'concept') {{
-                    const activeItems = items.filter(item => String(item.status || '').trim() !== 'Не требуется');
-                    const completedItems = activeItems.filter(item => {{
-                        const status = String(item.status || '').trim();
-                        const kind = String(item.statusKind || '').trim() || 'bool';
 
-                        if (kind === 'bool') {{
-                            return status === 'Да';
-                        }}
-
-                        return !!status;
-                    }});
-                    const activeCount = activeItems.length;
-                    const completedCount = completedItems.length;
-                    const percent = activeCount ? Math.round((completedCount / activeCount) * 100) : 0;
-                    progressValueEl.textContent = percent + '%';
-                    progressBarEl.style.width = percent + '%';
-                    return;
-                }}
                 const activeItems = items.filter(x => normalizeStatus(x.status) !== 'Не требуется');
                 const completedItems = activeItems.filter(x => normalizeStatus(x.status) === 'Есть');
                 const activeCount = activeItems.length;
                 const completedCount = completedItems.length;
                 const percent = activeCount ? Math.round((completedCount / activeCount) * 100) : 0;
+
                 progressValueEl.textContent = percent + '%';
                 progressBarEl.style.width = percent + '%';
             }}
@@ -6531,9 +6552,155 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                     </div>` : '';
                 return `<div class="group-block"><div class="group-title">${{esc(group.title)}}</div>${{rows}}${{addBlock}}</div>`;
             }}
+
+            function isConceptDatesVisible(groupId) {{
+                return !!conceptDateVisibility[Number(groupId)];
+            }}
+
+            function getConceptGridClass(showDates) {{
+                return showDates ? 'id-grid id-grid-expanded' : 'id-grid id-grid-compact';
+            }}
+
+            function buildConceptTableHeader(group, showDates) {{
+                const groupId = Number(group.id);
+                const toggleTitle = showDates ? 'Скрыть даты' : 'Показать даты';
+
+                return `
+                    <div class="thead-top ${{getConceptGridClass(showDates)}}">
+                        <div class="th">${{esc(group.title)}}</div>
+                        <div class="th">Документ</div>
+                        <div class="th th-status-with-toggle">
+                            <span>Статус</span>
+                            <button
+                                type="button"
+                                class="id-dates-toggle"
+                                data-role="toggle-concept-dates"
+                                data-group-id="${{esc(groupId)}}"
+                                title="${{esc(toggleTitle)}}"
+                                aria-label="${{esc(toggleTitle)}}"
+                            >
+                                📅
+                            </button>
+                        </div>
+                        ${{showDates ? `<div class="th center" style="grid-column: 4 / span 2;">Дата получения</div>` : ''}}
+                    </div>
+                    ${{showDates ? `
+                        <div class="thead-bottom ${{getConceptGridClass(showDates)}}">
+                            <div class="th"></div>
+                            <div class="th"></div>
+                            <div class="th"></div>
+                            <div class="th">План</div>
+                            <div class="th">Факт</div>
+                        </div>
+                    ` : ''}}
+                `;
+            }}
+
+            function renderConceptTableGroup(group, showDates) {{
+                const groupItems = getItemsByGroup(group.id);
+                const allowAdd = Number(group.id) !== 10;
+                const gridClass = getConceptGridClass(showDates);
+
+                const rows = groupItems.map(item => {{
+                    const rowClass = normalizeStatus(item.status) === 'Не требуется' ? 'row not-required' : 'row';
+
+                    return `
+                        <div class="${{rowClass}} ${{gridClass}}" data-item-id="${{esc(item.id)}}">
+                            <div class="td">
+                                <div class="cell-name">
+                                    <div class="${{indicatorClass(item.status)}}"></div>
+                                    <div class="item-name">${{esc(item.name)}}</div>
+                                </div>
+                            </div>
+                            <div class="td">${{buildDocumentCell(item)}}</div>
+                            <div class="td">
+                                <select class="status-select" data-role="status" data-item-id="${{esc(item.id)}}" ${{disabledAttr()}}>
+                                    <option value="" ${{normalizeStatus(item.status) === '' ? 'selected' : ''}}></option>
+                                    <option value="Есть" ${{normalizeStatus(item.status) === 'Есть' ? 'selected' : ''}}>Есть</option>
+                                    <option value="Нет" ${{normalizeStatus(item.status) === 'Нет' ? 'selected' : ''}}>Нет</option>
+                                    <option value="Не требуется" ${{normalizeStatus(item.status) === 'Не требуется' ? 'selected' : ''}}>Не требуется</option>
+                                </select>
+                            </div>
+                            ${{showDates ? `
+                                <div class="td">
+                                    <input class="date-input" type="date" data-role="plan" data-item-id="${{esc(item.id)}}" value="${{esc(toInputDate(item.plan))}}" ${{disabledAttr()}}>
+                                </div>
+                                <div class="td">
+                                    <input class="date-input" type="date" data-role="fact" data-item-id="${{esc(item.id)}}" value="${{esc(toInputDate(item.fact))}}" ${{disabledAttr()}}>
+                                </div>
+                            ` : ''}}
+                        </div>
+                    `;
+                }}).join('');
+
+                const addBlock = allowAdd ? `
+                    <div class="add-item-row">
+                        <input class="add-item-input" id="addItemInput_${{group.id}}" type="text" placeholder="Новый пункт" ${{disabledAttr()}}>
+                        <button class="add-item-btn" type="button" data-role="add-item" data-group-id="${{group.id}}" ${{disabledAttr()}}>Добавить пункт</button>
+                    </div>
+                ` : '';
+
+                return `<div class="group-block"><div class="group-title">${{esc(group.title)}}</div>${{rows}}${{addBlock}}</div>`;
+            }}
+
+            function renderConceptPanel(mainGroup, appendNotRequired = false) {{
+                const showDates = isConceptDatesVisible(mainGroup.id);
+                const notRequiredGroup = appendNotRequired
+                    ? groups.find(g => Number(g.id) === 10)
+                    : null;
+
+                return `
+                    <div class="table id-table">
+                        <div class="thead">
+                            ${{buildConceptTableHeader(mainGroup, showDates)}}
+                        </div>
+                        <div>
+                            ${{renderConceptTableGroup(mainGroup, showDates)}}
+                            ${{appendNotRequired && notRequiredGroup && hasItemsInGroup(10) ? renderConceptTableGroup(notRequiredGroup, false) : ''}}
+                        </div>
+                    </div>
+                `;
+            }}
+
+            function renderConceptTables() {{
+                if (!leftTableEl || !middleTableEl || !rightTableEl || !tablesGridEl) {{
+                    throw new Error('concept table containers not found');
+                }}
+
+                const conceptGroup = groups.find(g => Number(g.id) === 1) || {{ id: 1, title: 'Концепция' }};
+
+                tablesGridEl.classList.remove('id-three-cols');
+                tablesGridEl.style.gridTemplateColumns = 'clamp(620px, 37vw, 760px)';
+                tablesGridEl.style.justifyContent = 'start';
+
+                if (tablePanels[0]) {{
+                    tablePanels[0].style.display = '';
+                    tablePanels[0].style.flex = '0 0 auto';
+                    tablePanels[0].style.width = 'clamp(620px, 37vw, 760px)';
+                    tablePanels[0].style.maxWidth = 'clamp(620px, 37vw, 760px)';
+                }}
+                if (tablePanels[1]) {{
+                    tablePanels[1].style.display = 'none';
+                    tablePanels[1].style.flex = '';
+                    tablePanels[1].style.maxWidth = '';
+                }}
+                if (tablePanels[2]) {{
+                    tablePanels[2].style.display = 'none';
+                    tablePanels[2].style.flex = '';
+                    tablePanels[2].style.maxWidth = '';
+                }}
+
+                leftTableEl.style.width = '100%';
+                leftTableEl.style.maxWidth = '100%';
+
+                leftTableEl.innerHTML = renderConceptPanel(conceptGroup, true);
+                middleTableEl.innerHTML = '';
+                rightTableEl.innerHTML = '';
+            }}
+
             function renderTables() {{
                 if (currentChecklistKey === 'concept') {{
-                    renderConceptTable();
+                    renderConceptTables();
                     return;
                 }}
 
@@ -6588,7 +6755,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                 renderProjectRootFolderButton();
 
                 if (progressBoxEl) {{
-                    progressBoxEl.classList.toggle('id-accent', currentChecklistKey === 'id' || currentChecklistKey === 'opr');
+                    progressBoxEl.classList.toggle('id-accent', currentChecklistKey === 'id' || currentChecklistKey === 'opr'|| currentChecklistKey === 'concept');
                 }}
 
                 updateDebugPanelAccess();
@@ -6808,7 +6975,7 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                         this.disabled = true;
 
                         try {{
-                            const result = await addItem(groupId, name, 'id');
+                            const result = await addItem(groupId, name, currentChecklistKey);
                             if (!result || !result.item) {{
                                 throw new Error('add item failed');
                             }}
@@ -6839,6 +7006,16 @@ def popup_get(dialogId: str = "", checklistKey: str = "id"):
                         if (![1, 2, 3].includes(groupId)) return;
 
                         idDateVisibility[groupId] = !idDateVisibility[groupId];
+                        renderAll();
+                    }});
+                }});
+
+                document.querySelectorAll('[data-role="toggle-concept-dates"]').forEach(btn => {{
+                    btn.addEventListener('click', function () {{
+                        const groupId = Number(this.dataset.groupId || 0);
+                        if (groupId !== 1) return;
+
+                        conceptDateVisibility[groupId] = !conceptDateVisibility[groupId];
                         renderAll();
                     }});
                 }});
@@ -7108,7 +7285,7 @@ async def api_checklist_update_item(request: Request):
         return JSONResponse({"ok": False, "error": "itemId is required"}, status_code=400)
 
     if checklist_key == "concept":
-        allowed_fields = {"priority", "status", "extraInfo"}
+        allowed_fields = {"priority", "status", "plan", "fact"}
     elif checklist_key == "opr":
         allowed_fields = {"priority", "status", "plan", "fact"}
     else:
@@ -7134,29 +7311,21 @@ async def api_checklist_update_item(request: Request):
     if field == "priority":
         target_item["priority"] = normalize_priority(value)
     elif field == "status":
-        new_value = clean_cell_value(value)
-
         if checklist_key == "concept":
-            target_item["status"] = new_value
+            new_status = normalize_status(value)
+            target_item["status"] = new_status
+            target_item["priority"] = derive_indicator_from_status(new_status)
 
-            status_kind = str(target_item.get("statusKind") or "").strip()
+            if new_status == "Нет":
+                cleared_item = remove_all_item_documents(dialog_id, checklist_key, item_id, target_item)
+                target_item.clear()
+                target_item.update(cleared_item)
 
-            if new_value == "Не требуется":
+            if new_status == "Не требуется":
                 target_item["group"] = 10
-                target_item["priority"] = "gray"
-            else:
-                if target_item.get("group") == 10:
-                    target_item["group"] = resolve_concept_group_id_by_item_id_or_name(target_item)
+            elif int(target_item.get("group") or 0) == 10:
+                target_item["group"] = resolve_concept_group_id_by_item_id_or_name(target_item)
 
-                if status_kind == "bool":
-                    if new_value == "Да":
-                        target_item["priority"] = "green"
-                    elif new_value == "Нет":
-                        target_item["priority"] = "gray"
-                    else:
-                        target_item["priority"] = "white"
-                else:
-                    target_item["priority"] = "green" if new_value else "white"
         elif checklist_key == "opr":
             new_status = normalize_status(value)
             target_item["status"] = new_status
@@ -7171,6 +7340,7 @@ async def api_checklist_update_item(request: Request):
                 target_item["group"] = 2
             elif int(target_item.get("group") or 0) == 2:
                 target_item["group"] = resolve_opr_group_id_by_item_id_or_name(target_item)
+
         else:
             new_status = normalize_status(value)
             target_item["status"] = new_status
@@ -7180,12 +7350,15 @@ async def api_checklist_update_item(request: Request):
                 cleared_item = remove_all_item_documents(dialog_id, checklist_key, item_id, target_item)
                 target_item.clear()
                 target_item.update(cleared_item)
+
+            if new_status == "Не требуется":
+                target_item["group"] = 4
+            elif int(target_item.get("group") or 0) == 4:
+                target_item["group"] = move_item_to_required_group(target_item)
     elif field == "plan":
         target_item["plan"] = normalize_date_string(value)
     elif field == "fact":
         target_item["fact"] = normalize_date_string(value)
-    elif field == "extraInfo":
-        target_item["extraInfo"] = clean_cell_value(value)
 
     data["items"] = items
     data = normalize_checklist_data(data, checklist_key)
@@ -7337,13 +7510,10 @@ async def api_checklist_add_item(request: Request):
             "group": group_id,
             "order": next_order,
             "name": name,
-            "source": "",
-            "statusKind": "text",
-            "statusOptions": [],
-            "statusPlaceholder": "",
+            "priority": "white",
             "status": "",
-            "extraInfo": "",
-            "extraInfoPlaceholder": "",
+            "plan": "",
+            "fact": "",
             "folderKey": build_folder_key("concept", name, new_item_id),
             "folderPath": "",
             "folderUrl": "",
@@ -7351,7 +7521,6 @@ async def api_checklist_add_item(request: Request):
             "documentUrl": "",
             "documentName": "",
             "isCustom": True,
-            "priority": "white",
         }
 
     elif checklist_key == "opr":
@@ -7580,6 +7749,9 @@ async def api_checklist_upload_document(
         target_item["status"] = "Есть"
         target_item["priority"] = derive_indicator_from_status("Есть")
     elif checklist_key == "opr" and actual_group != 2:
+        target_item["status"] = "Есть"
+        target_item["priority"] = derive_indicator_from_status("Есть")
+    elif checklist_key == "concept" and actual_group != 10:
         target_item["status"] = "Есть"
         target_item["priority"] = derive_indicator_from_status("Есть")
 
