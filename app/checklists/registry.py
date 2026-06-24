@@ -1,3 +1,7 @@
+from app.checklists.constants import (
+    STATUS_OPTIONS, 
+    PRIORITY_OPTIONS
+)
 from app.checklists.definitions.id import (
     ID_GROUPS,
     STANDARD_ID_YANDEX_FOLDER_SPECS,
@@ -22,16 +26,6 @@ CHECKLIST_TITLES = {
     "opr": "Чек-лист ОПР",
     "concept": "Чек-лист Концепция",
 }
-
-STATUS_OPTIONS = [
-    "",
-    "Есть",
-    "Нет",
-    "Не требуется",
-]
-
-PRIORITY_OPTIONS = ["white", "green", "gray"]
-
 
 def get_project_checklists():
     return [dict(item) for item in PROJECT_CHECKLISTS]
