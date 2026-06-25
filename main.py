@@ -1,15 +1,10 @@
-﻿import os
-import threading
-import uuid
-from collections import defaultdict
-from pathlib import Path
+﻿from pathlib import Path
 from fastapi import FastAPI, Request, UploadFile, File, Form
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 import requests
 import json
 import html
-import re
 import mimetypes
 from io import BytesIO
 from datetime import datetime
@@ -18,23 +13,12 @@ import openpyxl
 
 from app.settings import (
     BASE_DIR,
-    VOLUME_DIR,
-    DB_DIR,
-    DB_PATH,
     APP_PORTAL_PATH,
     APP_BASE_PATH,
     PUBLIC_APP_BASE_URL,
-    TECH_USER_ID,
-    BITRIX_TECH_WEBHOOK_URL,
     N8N_SHARED_TOKEN,
-    YANDEX_DISK_OAUTH_TOKEN,
-    YANDEX_DISK_API_BASE,
     UPLOAD_ROOT,
-    CHECKLIST_UPLOAD_ROOT,
-    DEBUG_DIR,
     DEBUG_LOG_PATH,
-    EDIT_LOCK_TTL_SECONDS,
-    EDIT_LOCK_HEARTBEAT_SECONDS,
     ensure_runtime_directories,
 )
 from app.db import init_db
@@ -43,8 +27,6 @@ from app.bitrix.client import bitrix_rest_call, bitrix_webhook_call
 from app.yandex_disk.client import (
     is_yandex_disk_enabled,
     normalize_yandex_disk_path,
-    yandex_disk_get_upload_href,
-    yandex_disk_upload_bytes,
     yandex_disk_delete_path,
     yandex_disk_ensure_folder,
     yandex_disk_publish_path,
@@ -54,15 +36,8 @@ from app.yandex_disk.client import (
 from app.checklists.permissions import can_user_delete_files
 
 from app.checklists.registry import (
-    ID_GROUPS as CHECKLIST_GROUPS,
     OPR_GROUPS,
     CONCEPT_GROUPS,
-    STANDARD_ID_YANDEX_FOLDER_SPECS,
-    STANDARD_OPR_YANDEX_FOLDER_SPECS,
-    STANDARD_CONCEPT_YANDEX_FOLDER_SPECS,
-    STATUS_OPTIONS,
-    PRIORITY_OPTIONS,
-    get_project_checklists,
 )
 
 from app.checklists.utils import (
@@ -70,7 +45,6 @@ from app.checklists.utils import (
     normalize_priority,
     normalize_status,
     normalize_date_string,
-    slugify_folder_part,
     format_file_size,
     can_preview_in_browser,
     normalize_dialog_id,
@@ -94,7 +68,6 @@ from app.checklists.storage import (
     get_checklist,
     save_project_storage_context,
     get_project_storage_context,
-    get_item_yandex_mapping,
     get_item_yandex_folder,
     list_checklist_summaries,
     get_project_root_yandex_folder_info,
@@ -106,16 +79,9 @@ from app.checklists.normalization import (
     resolve_concept_group_id_by_item_id_or_name,
     resolve_opr_group_id_by_item_id_or_name,
     build_item_id,
-    build_project_checklists,
     derive_indicator_from_status,
     move_item_to_required_group,
     build_folder_key,
-    normalize_id_builtin_name,
-    build_current_id_default_name_set,
-    build_default_checklist_template,
-    calculate_progress,
-    calculate_concept_progress,
-    calculate_opr_progress,
     normalize_checklist_data,
 )
 
