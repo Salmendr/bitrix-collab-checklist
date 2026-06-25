@@ -12,6 +12,7 @@ from app.checklists.storage import (
     get_project_root_yandex_folder_info,
 )
 
+from app.checklists.permissions import FILE_DELETE_ALLOWED_USER_IDS
 
 def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
     dialog_id = normalize_dialog_id(dialogId)
@@ -42,6 +43,10 @@ def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
     collab_title_json = json.dumps(collab_title_raw, ensure_ascii=False)
     checklist_key_json = json.dumps(checklist_key, ensure_ascii=False)
     checklist_title_json = json.dumps(title_raw, ensure_ascii=False)
+    file_delete_allowed_user_ids_json = json.dumps(
+        sorted(FILE_DELETE_ALLOWED_USER_IDS),
+        ensure_ascii=False
+    )
     popup_session_enhancements_js = """
             const clientSessionId = 'popup_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
             let checklistSessionState = {};
@@ -1245,9 +1250,15 @@ def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
                         const newValue = this.value;
                         const oldDocuments = getItemDocuments(oldItem);
 
-                        if (newValue === 'Нет' && oldDocuments.length && !confirmStatusNoWithFiles(item.name, oldDocuments)) {
-                            this.value = normalizeStatus(oldItem.status);
-                            return;
+                        if (newValue === 'Нет' && oldDocuments.length) {
+                            if (typeof fetchCurrentUserIfPossible === 'function') {
+                                await fetchCurrentUserIfPossible();
+                            }
+
+                            if (!confirmStatusNoWithFiles(item.name, oldDocuments)) {
+                                this.value = normalizeStatus(oldItem.status);
+                                return;
+                            }
                         }
 
                         if (newValue === 'Нет') {
@@ -1750,6 +1761,23 @@ def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
             const debugPanelEl = document.getElementById('debugPanel');
             const debugLogsLinkEl = document.getElementById('debugLogsLink');
             const allowedDebugUserIds = new Set(['138', '18']);
+            const fileDeleteAllowedUserIds = new Set({file_delete_allowed_user_ids_json});
+
+            function getFileDeleteActor() {{
+                return {{
+                    id: String(currentEditor && currentEditor.id || '').trim(),
+                    name: String(currentEditor && currentEditor.name || '').trim() || 'Пользователь'
+                }};
+            }}
+
+            function canCurrentUserDeleteFiles() {{
+                const actor = getFileDeleteActor();
+                return fileDeleteAllowedUserIds.has(String(actor.id || '').trim());
+            }}
+
+            function showFileDeleteForbiddenAlert() {{
+                alert('У вас недостаточно прав на удаление файлов');
+            }}
             function updateDebugPanelAccess() {{
                 const currentUserId = String(currentEditor.id || '');
                 if (debugPanelEl) {{
@@ -1869,6 +1897,11 @@ def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
                 const docs = Array.isArray(documents) ? documents : [];
                 if (!docs.length) {{
                     return true;
+                }}
+
+                if (!canCurrentUserDeleteFiles()) {{
+                    showFileDeleteForbiddenAlert();
+                    return false;
                 }}
 
                 const safeItemName = String(itemName || 'пункт').trim() || 'пункт';
@@ -2264,11 +2297,27 @@ def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
             }}
             async function updateItem(itemId, field, value, checklistKey = currentChecklistKey) {{
                 setSaveState('saving', 'Сохраняем...');
+
+                if (typeof fetchCurrentUserIfPossible === 'function') {{
+                    await fetchCurrentUserIfPossible();
+                }}
+
+                const actor = getFileDeleteActor();
+
                 const response = await fetch(appUrl('api/checklist/update-item'), {{
                     method: 'POST',
                     headers: {{ 'Content-Type': 'application/json' }},
-                    body: JSON.stringify({{ dialogId, checklistKey, itemId, field, value }})
+                    body: JSON.stringify({{
+                        dialogId,
+                        checklistKey,
+                        itemId,
+                        field,
+                        value,
+                        actingUserId: actor.id,
+                        actingUserName: actor.name
+                    }})
                 }});
+
                 const result = await response.json();
                 if (!response.ok || !result.ok) throw new Error(result.error || 'save failed');
                 setSaveState('', 'Сохранено');
@@ -2289,6 +2338,19 @@ def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
 
             async function removeDocument(itemId, documentId = '') {{
                 setSaveState('saving', 'Сохраняем...');
+
+                if (typeof fetchCurrentUserIfPossible === 'function') {{
+                    await fetchCurrentUserIfPossible();
+                }}
+
+                if (!canCurrentUserDeleteFiles()) {{
+                    showFileDeleteForbiddenAlert();
+                    setSaveState('', 'Сохранено');
+                    throw new Error('У вас недостаточно прав на удаление файлов');
+                }}
+
+                const actor = getFileDeleteActor();
+
                 const response = await fetch(appUrl('api/checklist/remove-document'), {{
                     method: 'POST',
                     headers: {{ 'Content-Type': 'application/json' }},
@@ -2296,9 +2358,12 @@ def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
                         dialogId,
                         checklistKey: currentChecklistKey,
                         itemId,
-                        documentId
+                        documentId,
+                        actingUserId: actor.id,
+                        actingUserName: actor.name
                     }})
                 }});
+
                 const result = await response.json();
                 if (!response.ok || !result.ok) throw new Error(result.error || 'remove document failed');
                 setSaveState('', 'Сохранено');
@@ -3252,9 +3317,15 @@ def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
                         const newValue = this.value;
                         const oldDocuments = getItemDocuments(oldItem);
 
-                        if (newValue === 'Нет' && oldDocuments.length && !confirmStatusNoWithFiles(item.name, oldDocuments)) {{
-                            this.value = normalizeStatus(oldItem.status);
-                            return;
+                        if (newValue === 'Нет' && oldDocuments.length) {{
+                            if (typeof fetchCurrentUserIfPossible === 'function') {{
+                                await fetchCurrentUserIfPossible();
+                            }}
+
+                            if (!confirmStatusNoWithFiles(item.name, oldDocuments)) {{
+                                this.value = normalizeStatus(oldItem.status);
+                                return;
+                            }}
                         }}
 
                         if (newValue === 'Нет') {{

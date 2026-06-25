@@ -1,4 +1,6 @@
 import html
+import json
+from logging import config
 import mimetypes
 import uuid
 from datetime import datetime
@@ -15,6 +17,7 @@ from app.settings import (
 )
 
 from app.logging_utils import write_debug_log
+from app.checklists.config import get_checklist_config
 
 from app.checklists.utils import (
     can_preview_in_browser,
@@ -24,7 +27,10 @@ from app.checklists.utils import (
     normalize_checklist_key,
 )
 
-from app.checklists.permissions import can_user_delete_files
+from app.checklists.permissions import (
+    FILE_DELETE_ALLOWED_USER_IDS,
+    can_user_delete_files,
+)
 
 from app.checklists.storage import (
     get_checklist,
@@ -69,6 +75,8 @@ async def api_checklist_upload_document(
 ):
     dialog_id = normalize_dialog_id(dialogId)
     checklist_key = normalize_checklist_key(checklistKey)
+    config = get_checklist_config(checklist_key)
+
     item_id = str(itemId or "").strip()
     item_group = int(str(itemGroup or "0").strip() or 0)
 
@@ -78,7 +86,7 @@ async def api_checklist_upload_document(
     if not item_id:
         return JSONResponse({"ok": False, "error": "itemId is required"}, status_code=400)
 
-    data = get_checklist(dialog_id, checklist_key)
+    data = get_checklist(dialog_id, config.key)
     items = data.get("items", []) or []
 
     target_item = None
@@ -101,8 +109,8 @@ async def api_checklist_upload_document(
 
     file_url = "/uploads/" + rel_path.replace("\\", "/")
     document_id = uuid.uuid4().hex
-    document_view_url = build_document_view_url(dialog_id, checklist_key, item_id, document_id)
-    folder_view_url = build_folder_view_url(dialog_id, checklist_key, item_id)
+    document_view_url = build_document_view_url(dialog_id, config.key, item_id, document_id)
+    folder_view_url = build_folder_view_url(dialog_id, config.key, item_id)
 
     try:
         folder_path = "/" + str(abs_path.parent.relative_to(BASE_DIR)).replace("\\", "/")
@@ -131,7 +139,7 @@ async def api_checklist_upload_document(
     try:
         mirror_result = mirror_document_to_yandex(
             dialog_id=dialog_id,
-            checklist_key=checklist_key,
+            checklist_key=config.key,
             item_name=clean_cell_value(target_item.get("name")),
             filename=uploaded_name,
             file_bytes=file_bytes,
@@ -166,19 +174,13 @@ async def api_checklist_upload_document(
     target_item["documentName"] = clean_cell_value(first_doc.get("name"))
 
     actual_group = int(target_item.get("group") or item_group or 0)
-    if checklist_key == "id" and actual_group != 4:
-        target_item["status"] = "Есть"
-        target_item["priority"] = derive_indicator_from_status("Есть")
-    elif checklist_key == "opr" and actual_group != 2:
-        target_item["status"] = "Есть"
-        target_item["priority"] = derive_indicator_from_status("Есть")
-    elif checklist_key == "concept" and actual_group != 10:
+    if config.is_active_group(actual_group):
         target_item["status"] = "Есть"
         target_item["priority"] = derive_indicator_from_status("Есть")
 
     data["items"] = items
-    data = normalize_checklist_data(data, checklist_key)
-    save_checklist(dialog_id, data, checklist_key)
+    data = normalize_checklist_data(data, config.key)
+    save_checklist(dialog_id, data, config.key)
 
     updated_item = None
     for item in data.get("items", []):
@@ -192,7 +194,7 @@ async def api_checklist_upload_document(
     return JSONResponse({
         "ok": True,
         "dialogId": dialog_id,
-        "checklistKey": checklist_key,
+        "checklistKey": config.key,
         "item": updated_item,
         "progressPercent": data.get("progressPercent", 0),
     })
@@ -203,6 +205,8 @@ async def api_checklist_remove_document(request: Request):
 
     dialog_id = normalize_dialog_id(payload.get("dialogId"))
     checklist_key = normalize_checklist_key(payload.get("checklistKey"))
+    config = get_checklist_config(checklist_key)
+
     item_id = str(payload.get("itemId") or "").strip()
     document_id = clean_cell_value(payload.get("documentId"))
     document_url = clean_cell_value(payload.get("documentUrl"))
@@ -222,7 +226,7 @@ async def api_checklist_remove_document(request: Request):
             "error": "У вас недостаточно прав на удаление файлов"
         }, status_code=403)
 
-    data = get_checklist(dialog_id, checklist_key)
+    data = get_checklist(dialog_id, config.key)
     items = data.get("items", []) or []
 
     target_item = None
@@ -309,23 +313,24 @@ async def api_checklist_remove_document(request: Request):
     if normalized_documents:
         first_file_url = clean_cell_value(first_doc.get("fileUrl"))
         target_item["folderPath"] = first_file_url.rsplit("/", 1)[0] if first_file_url.startswith("/") else ""
-        target_item["folderUrl"] = build_folder_view_url(dialog_id, checklist_key, item_id)
+        target_item["folderUrl"] = build_folder_view_url(dialog_id, config.key, item_id)
     else:
         target_item["folderPath"] = ""
         target_item["folderUrl"] = ""
         target_item["documentUrl"] = ""
         target_item["documentName"] = ""
 
-        if checklist_key == "id" and int(target_item.get("group") or 0) != 4 and not preserve_status:
-            target_item["status"] = ""
-            target_item["priority"] = "white"
-        elif checklist_key == "opr" and int(target_item.get("group") or 0) != 2 and not preserve_status:
+        if (
+            config.reset_status_on_last_document_removed
+            and config.is_active_group(target_item.get("group"))
+            and not preserve_status
+        ):
             target_item["status"] = ""
             target_item["priority"] = "white"
 
     data["items"] = items
-    data = normalize_checklist_data(data, checklist_key)
-    save_checklist(dialog_id, data, checklist_key)
+    data = normalize_checklist_data(data, config.key)
+    save_checklist(dialog_id, data, config.key)
 
     updated_item = None
     for item in data.get("items", []):
@@ -339,7 +344,7 @@ async def api_checklist_remove_document(request: Request):
     return JSONResponse({
         "ok": True,
         "dialogId": dialog_id,
-        "checklistKey": checklist_key,
+        "checklistKey": config.key,
         "item": updated_item,
         "progressPercent": data.get("progressPercent", 0),
     })
@@ -450,6 +455,10 @@ def api_checklist_folder(dialogId: str = "", itemId: str = "", checklistKey: str
             ''' if yandex_folder_url else ''}
         </div>
     '''
+    folder_delete_allowed_user_ids_json = json.dumps(
+        sorted(FILE_DELETE_ALLOWED_USER_IDS),
+        ensure_ascii=False
+    )
 
     return f"""
     <html>
@@ -492,22 +501,7 @@ def api_checklist_folder(dialogId: str = "", itemId: str = "", checklistKey: str
             const folderItemId = "{html.escape(item_id)}";
             const folderItemGroup = "{folder_item_group}";
 
-            const folderDeleteAllowedUserIds = new Set([
-                '108',
-                '106',
-                '114',
-                '116',
-                '72',
-                '56',
-                '26',
-                '138',
-                '18',
-                '256',
-                '140',
-                '280',
-                '124',
-                '222'
-            ]);
+            const folderDeleteAllowedUserIds = new Set({folder_delete_allowed_user_ids_json});
 
             function getFolderDeleteActor() {{
                 try {{
