@@ -36,6 +36,11 @@ def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
         ensure_ascii=False
     )
 
+    project_root_yandex_prepared_json = json.dumps(
+        bool(project_root_folder_info.get("standardFoldersPrepared")),
+        ensure_ascii=False
+    )
+
     items_json = json.dumps(data.get("items", []), ensure_ascii=False)
     groups_json = json.dumps(data.get("groups", []), ensure_ascii=False)
     project_checklists_json = json.dumps(data.get("projectChecklists", []), ensure_ascii=False)
@@ -1606,7 +1611,10 @@ def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
                 startLockHeartbeat();
                 updateLockNotice();
 
-                if (String(projectRootYandexPath || '').trim() && !String(projectRootYandexUrl || '').trim()) {
+                if (String(projectRootYandexPath || '').trim() && (!String(projectRootYandexUrl || '').trim() || !projectRootYandexPrepared)) {
+                    projectRootYandexPreparing = true;
+                    renderProjectRootFolderButton();
+
                     try {
                         const response = await fetch(
                             appUrl('api/project-root-folder') +
@@ -1616,10 +1624,19 @@ def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
 
                         if (response.ok && result && result.ok) {
                             projectRootYandexUrl = String(result.url || '').trim();
-                            renderProjectRootFolderButton();
+                            projectRootYandexPrepared = !!result.standardFoldersPrepared;
+                            debugLog('project_yandex_structure_prepared', result);
+                        } else {
+                            debugLog('project_yandex_structure_prepare_failed', result || {});
                         }
                     } catch (e) {
                         console.log('project root folder background load error:', e);
+                        debugLog('project_yandex_structure_prepare_exception', {
+                            message: String(e && e.message || e)
+                        });
+                    } finally {
+                        projectRootYandexPreparing = false;
+                        renderProjectRootFolderButton();
                     }
                 }
             }, 0);
@@ -1955,6 +1972,9 @@ def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
             const dialogId = {dialog_id_json};
             const projectRootYandexPath = {project_root_yandex_path_json};
             let projectRootYandexUrl = {project_root_yandex_url_json};
+
+            let projectRootYandexPrepared = {project_root_yandex_prepared_json};
+            let projectRootYandexPreparing = false;
 
             let rawGroups = {groups_json};
             let rawProjectChecklists = {project_checklists_json};
@@ -2638,6 +2658,7 @@ def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
 
                 const folderUrl = String(projectRootYandexUrl || '').trim();
                 const folderPath = String(projectRootYandexPath || '').trim();
+                const isReady = !!(folderUrl && projectRootYandexPrepared && !projectRootYandexPreparing);
 
                 if (!folderPath) {{
                     projectRootFolderBoxEl.style.display = 'none';
@@ -2646,6 +2667,11 @@ def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
                 }}
 
                 projectRootFolderBoxEl.style.display = 'flex';
+
+                const buttonText = isReady
+                    ? 'Открыть папку в Яндекс Диске'
+                    : 'Готовим структуру Яндекс.Диска...';
+
                 projectRootFolderBoxEl.innerHTML = `
                     <button
                         class="doc-btn"
@@ -2654,28 +2680,30 @@ def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
                         data-folder-url="${{esc(folderUrl)}}"
                         title="${{esc(folderPath || 'Корневая папка проекта')}}"
                         style="min-width:260px; width:260px; height:32px; white-space:nowrap;"
+                        ${{isReady ? '' : 'disabled'}}
                     >
-                        Папка проекта на Яндекс Диске
+                        ${{esc(buttonText)}}
                     </button>
                 `;
 
                 const btn = projectRootFolderBoxEl.querySelector('[data-role="view-project-root-folder"]');
-                if (btn) {{
-                    if (!folderUrl) {{
-                        btn.disabled = true;
-                        btn.style.opacity = '0.65';
-                        btn.style.cursor = 'default';
-                        btn.textContent = 'Подготавливаем ссылку...';
-                        return;
-                    }}
-
-                    btn.addEventListener('click', function () {{
-                        const url = String(this.dataset.folderUrl || '').trim();
-                        if (url) {{
-                            window.open(url, '_blank', 'noopener');
-                        }}
-                    }});
+                if (!btn) {{
+                    return;
                 }}
+
+                if (!isReady) {{
+                    btn.disabled = true;
+                    btn.style.opacity = '0.65';
+                    btn.style.cursor = 'default';
+                    return;
+                }}
+
+                btn.addEventListener('click', function () {{
+                    const url = String(this.dataset.folderUrl || '').trim();
+                    if (url) {{
+                        window.open(url, '_blank', 'noopener');
+                    }}
+                }});
             }}
 
             function renderProjectChecklistList() {{

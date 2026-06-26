@@ -273,4 +273,7 @@ def get_project_root_yandex_folder_info(dialog_id: str) -> dict:
     return {
         "path": clean_cell_value(yandex_disk.get("projectRootPath")),
         "url": clean_cell_value(yandex_disk.get("projectRootUrl")),
+        "standardFoldersPrepared": bool(yandex_disk.get("standardFoldersPrepared")),
+        "standardFoldersPreparedAt": clean_cell_value(yandex_disk.get("standardFoldersPreparedAt")),
+        "standardFoldersPreparedCount": int(yandex_disk.get("standardFoldersPreparedCount") or 0),
     }

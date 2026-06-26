@@ -1,5 +1,6 @@
 import re
 from pathlib import Path
+from datetime import datetime
 
 from app.logging_utils import write_debug_log
 
@@ -165,6 +166,128 @@ def ensure_folder_and_get_public_url(folder_path: str) -> dict:
         "name": clean_cell_value(meta.get("name")) or folder_path.rstrip("/").rsplit("/", 1)[-1],
     }
 
+def ensure_project_standard_yandex_folder_structure(dialog_id: str) -> dict:
+    context = get_project_storage_context(dialog_id)
+    if not context:
+        return {
+            "ok": False,
+            "error": "project storage context not found",
+            "prepared": 0,
+            "skipped": 0,
+            "failed": 0,
+            "errors": [],
+        }
+
+    storage_mode = context.get("storageMode") or {}
+    mirror_targets = storage_mode.get("mirrorTargets") or []
+
+    if "yandex_disk" not in mirror_targets:
+        return {
+            "ok": True,
+            "yandexDisabled": True,
+            "reason": "yandex_disk is not in mirrorTargets",
+            "prepared": 0,
+            "skipped": 0,
+            "failed": 0,
+            "errors": [],
+        }
+
+    if not is_yandex_disk_enabled():
+        return {
+            "ok": True,
+            "yandexDisabled": True,
+            "reason": "yandex disk is disabled",
+            "prepared": 0,
+            "skipped": 0,
+            "failed": 0,
+            "errors": [],
+        }
+
+    yandex_disk = context.get("yandexDisk") or {}
+    folders = yandex_disk.get("folders") or {}
+    project_root_path = clean_cell_value(yandex_disk.get("projectRootPath"))
+
+    prepared = 0
+    skipped = 0
+    failed = 0
+    errors = []
+    prepared_at = datetime.now().isoformat()
+
+    if project_root_path:
+        try:
+            root_meta = ensure_folder_and_get_public_url(project_root_path)
+            yandex_disk["projectRootPath"] = root_meta.get("path") or normalize_yandex_disk_path(project_root_path)
+            yandex_disk["projectRootUrl"] = root_meta.get("url") or clean_cell_value(yandex_disk.get("projectRootUrl"))
+            prepared += 1
+        except Exception as exc:
+            failed += 1
+            errors.append({
+                "alias": "projectRoot",
+                "path": project_root_path,
+                "error": str(exc),
+            })
+
+    updated_folders = dict(folders)
+
+    for folder_alias, raw_folder in folders.items():
+        folder = raw_folder if isinstance(raw_folder, dict) else {}
+        folder_path = clean_cell_value(folder.get("path"))
+
+        if not folder_path:
+            skipped += 1
+            continue
+
+        if clean_cell_value(folder.get("url")):
+            skipped += 1
+            continue
+
+        try:
+            folder_meta = ensure_folder_and_get_public_url(folder_path)
+
+            updated_folders[folder_alias] = {
+                **folder,
+                "name": clean_cell_value(folder_meta.get("name")) or clean_cell_value(folder.get("name")),
+                "path": clean_cell_value(folder_meta.get("path")) or normalize_yandex_disk_path(folder_path),
+                "url": clean_cell_value(folder_meta.get("url")) or clean_cell_value(folder.get("url")),
+                "preparedAt": prepared_at,
+            }
+
+            prepared += 1
+
+        except Exception as exc:
+            failed += 1
+            errors.append({
+                "alias": folder_alias,
+                "path": folder_path,
+                "error": str(exc),
+            })
+
+    yandex_disk["folders"] = updated_folders
+    yandex_disk["standardFoldersPrepared"] = failed == 0
+    yandex_disk["standardFoldersPreparedAt"] = prepared_at
+    yandex_disk["standardFoldersPreparedCount"] = len(updated_folders)
+
+    save_project_storage_context(dialog_id, {
+        "dialogId": dialog_id,
+        "projectId": context.get("projectId") or "",
+        "projectName": context.get("projectName") or "",
+        "storageMode": context.get("storageMode") or {},
+        "yandexDisk": yandex_disk,
+        "itemMappings": context.get("itemMappings") or [],
+    })
+
+    return {
+        "ok": failed == 0,
+        "projectRootPath": clean_cell_value(yandex_disk.get("projectRootPath")),
+        "projectRootUrl": clean_cell_value(yandex_disk.get("projectRootUrl")),
+        "standardFoldersPrepared": failed == 0,
+        "standardFoldersPreparedAt": prepared_at,
+        "foldersCount": len(updated_folders),
+        "prepared": prepared,
+        "skipped": skipped,
+        "failed": failed,
+        "errors": errors[:20],
+    }
 
 def upsert_item_yandex_mapping(
     dialog_id: str,
@@ -341,6 +464,11 @@ def ensure_item_yandex_folder_for_upload(
     if existing:
         folder = existing.get("folder") or {}
         folder_path = clean_cell_value(folder.get("path"))
+        folder_url = clean_cell_value(folder.get("url"))
+
+        if folder_path and folder_url:
+            return existing
+
 
         if folder_path:
             folder_meta = ensure_folder_and_get_public_url(folder_path)

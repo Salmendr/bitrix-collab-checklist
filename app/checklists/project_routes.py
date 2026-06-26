@@ -14,9 +14,10 @@ from app.checklists.storage import (
 from app.yandex_disk.client import (
     is_yandex_disk_enabled,
     normalize_yandex_disk_path,
-    yandex_disk_ensure_folder,
-    yandex_disk_publish_path,
-    yandex_disk_get_resource_meta,
+)
+
+from app.checklists.yandex_folders import (
+    ensure_project_standard_yandex_folder_structure,
 )
 
 
@@ -39,56 +40,47 @@ def api_project_root_folder(dialogId: str = ""):
         return JSONResponse({"ok": False, "error": "projectRootPath is empty"}, status_code=400)
 
     normalized_root_path = normalize_yandex_disk_path(project_root_path)
-    project_root_url = clean_cell_value(yandex_disk.get("projectRootUrl"))
-
-    if project_root_url:
-        return JSONResponse({
-            "ok": True,
-            "path": normalized_root_path,
-            "url": project_root_url,
-            "fromCache": True,
-        })
 
     if not is_yandex_disk_enabled():
         return JSONResponse({
             "ok": True,
             "path": normalized_root_path,
-            "url": "",
+            "url": clean_cell_value(yandex_disk.get("projectRootUrl")),
             "fromCache": False,
             "yandexDisabled": True,
+            "standardFoldersPrepared": False,
         })
 
-    try:
-        yandex_disk_ensure_folder(normalized_root_path)
-        yandex_disk_publish_path(normalized_root_path)
-        meta = yandex_disk_get_resource_meta(normalized_root_path)
+    prepare_result = ensure_project_standard_yandex_folder_structure(dialog_id)
 
-        project_root_url = clean_cell_value(meta.get("public_url"))
+    refreshed_context = get_project_storage_context(dialog_id) or context
+    refreshed_yandex_disk = refreshed_context.get("yandexDisk") or {}
 
-        if project_root_url:
-            yandex_disk["projectRootUrl"] = project_root_url
+    project_root_url = clean_cell_value(
+        prepare_result.get("projectRootUrl")
+        or refreshed_yandex_disk.get("projectRootUrl")
+        or yandex_disk.get("projectRootUrl")
+    )
 
-            save_project_storage_context(dialog_id, {
-                "dialogId": dialog_id,
-                "projectId": context.get("projectId") or "",
-                "projectName": context.get("projectName") or "",
-                "storageMode": context.get("storageMode") or {},
-                "yandexDisk": yandex_disk,
-                "itemMappings": context.get("itemMappings") or [],
-            })
-
-        return JSONResponse({
-            "ok": True,
-            "path": clean_cell_value(meta.get("path")) or normalized_root_path,
-            "url": project_root_url,
-            "fromCache": False,
-        })
-
-    except Exception as e:
+    if not prepare_result.get("ok"):
         return JSONResponse({
             "ok": False,
-            "error": "failed to resolve project root folder url",
-            "details": str(e),
+            "error": "failed to prepare yandex folder structure",
+            "details": prepare_result,
             "path": normalized_root_path,
-            "url": "",
+            "url": project_root_url,
+            "standardFoldersPrepared": False,
         }, status_code=500)
+
+    return JSONResponse({
+        "ok": True,
+        "path": clean_cell_value(prepare_result.get("projectRootPath")) or normalized_root_path,
+        "url": project_root_url,
+        "fromCache": bool(prepare_result.get("prepared") == 0),
+        "standardFoldersPrepared": bool(prepare_result.get("standardFoldersPrepared")),
+        "standardFoldersPreparedAt": prepare_result.get("standardFoldersPreparedAt"),
+        "foldersCount": prepare_result.get("foldersCount", 0),
+        "prepared": prepare_result.get("prepared", 0),
+        "skipped": prepare_result.get("skipped", 0),
+        "failed": prepare_result.get("failed", 0),
+    })
