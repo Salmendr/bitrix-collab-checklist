@@ -108,10 +108,58 @@ def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
             const saveCloseBtn = document.getElementById('saveCloseBtn');
             const cancelBtn = document.getElementById('cancelBtn');
 
+            function normalizeFrontendChecklistKey(key) {
+                return String(key || '').trim() || 'id';
+            }
+
+            function getChecklistMeta(key = currentChecklistKey) {
+                const targetKey = normalizeFrontendChecklistKey(key);
+
+                const found = (Array.isArray(projectChecklists) ? projectChecklists : []).find(item =>
+                    String(item && item.key || '').trim() === targetKey
+                );
+
+                return found || {
+                    key: targetKey,
+                    title: targetKey === 'id' ? 'Чек-лист ИД' : 'Чек-лист',
+                    notRequiredGroupId: 0,
+                    defaultGroupId: 0,
+                    allowCustomItemGroupIds: []
+                };
+            }
+
             function getChecklistDefaultTitle(key) {
+                const meta = getChecklistMeta(key);
+                const title = String(meta && meta.title || '').trim();
+
+                if (title) {
+                    return title;
+                }
+
                 if (key === 'concept') return 'Чек-лист Концепция';
                 if (key === 'opr') return 'Чек-лист ОПР';
+                if (key === 'p') return 'Стадия П';
+
                 return 'Чек-лист ИД';
+            }
+
+            function getCurrentNotRequiredGroupId() {
+                const meta = getChecklistMeta(currentChecklistKey);
+                return Number(meta && meta.notRequiredGroupId || 0);
+            }
+
+            function currentAllowsCustomItemsForGroup(groupId) {
+                const meta = getChecklistMeta(currentChecklistKey);
+                const allowed = Array.isArray(meta && meta.allowCustomItemGroupIds)
+                    ? meta.allowCustomItemGroupIds.map(Number)
+                    : [];
+
+                return allowed.includes(Number(groupId));
+            }
+
+            function isCurrentNotRequiredGroup(groupId) {
+                const notRequiredGroupId = getCurrentNotRequiredGroupId();
+                return !!notRequiredGroupId && Number(groupId) === notRequiredGroupId;
             }
 
             function getChecklistState(key) {
@@ -937,9 +985,11 @@ def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
 
                 const normalizedList = (Array.isArray(projectChecklists) ? projectChecklists : []).map(item => {
                     const key = String(item && item.key || '').trim();
+                    const title = String(item && item.title || '').trim() || getChecklistDefaultTitle(key);
+
                     return {
                         key,
-                        title: getChecklistDefaultTitle(key)
+                        title
                     };
                 });
 
@@ -1129,6 +1179,184 @@ def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
                 if (rightTableEl) rightTableEl.innerHTML = '';
             };
 
+            let genericDateVisibility = {};
+
+            function isGenericDatesVisible(groupId) {
+                return !!genericDateVisibility[Number(groupId)];
+            }
+
+            function getGenericGridClass(showDates) {
+                return showDates ? 'id-grid id-grid-expanded' : 'id-grid id-grid-compact';
+            }
+
+            function buildGenericTableHeader(group, showDates) {
+                const groupId = Number(group.id);
+                const toggleTitle = showDates ? 'Скрыть даты' : 'Показать даты';
+
+                return `
+                    <div class="thead-top ${getGenericGridClass(showDates)}">
+                        <div class="th">${esc(group.title)}</div>
+                        <div class="th">Документ</div>
+                        <div class="th th-status-with-toggle">
+                            <span>Статус</span>
+                            <button
+                                type="button"
+                                class="id-dates-toggle"
+                                data-role="toggle-generic-dates"
+                                data-group-id="${esc(groupId)}"
+                                title="${esc(toggleTitle)}"
+                                aria-label="${esc(toggleTitle)}"
+                                ${disabledAttr()}
+                            >
+                                📅
+                            </button>
+                        </div>
+                        ${showDates ? `<div class="th center" style="grid-column: 4 / span 2;">Дата получения</div>` : ''}
+                    </div>
+                    ${showDates ? `
+                        <div class="thead-bottom ${getGenericGridClass(showDates)}">
+                            <div class="th"></div>
+                            <div class="th"></div>
+                            <div class="th"></div>
+                            <div class="th">План</div>
+                            <div class="th">Факт</div>
+                        </div>
+                    ` : ''}
+                `;
+            }
+
+            function renderGenericGroup(group, showDates) {
+                const groupItems = getItemsByGroup(group.id);
+                const allowAdd = currentAllowsCustomItemsForGroup(group.id);
+                const gridClass = getGenericGridClass(showDates);
+
+                const rows = groupItems.map(item => {
+                    const rowClass = normalizeStatus(item.status) === 'Не требуется'
+                        ? 'row not-required'
+                        : 'row';
+
+                    return `
+                        <div class="${rowClass} ${gridClass}" data-item-id="${esc(item.id)}">
+                            <div class="td">
+                                <div class="cell-name">
+                                    <div class="${indicatorClass(item.status)}"></div>
+                                    <div class="item-name">${esc(item.name)}</div>
+                                </div>
+                            </div>
+                            <div class="td">${buildDocumentCell(item)}</div>
+                            <div class="td">
+                                <select class="status-select" data-role="status" data-item-id="${esc(item.id)}" ${disabledAttr()}>
+                                    <option value="" ${normalizeStatus(item.status) === '' ? 'selected' : ''}></option>
+                                    <option value="Есть" ${normalizeStatus(item.status) === 'Есть' ? 'selected' : ''}>Есть</option>
+                                    <option value="Нет" ${normalizeStatus(item.status) === 'Нет' ? 'selected' : ''}>Нет</option>
+                                    <option value="Не требуется" ${normalizeStatus(item.status) === 'Не требуется' ? 'selected' : ''}>Не требуется</option>
+                                </select>
+                            </div>
+                            ${showDates ? `
+                                <div class="td">
+                                    <input class="date-input" type="date" data-role="plan" data-item-id="${esc(item.id)}" value="${esc(toInputDate(item.plan))}" ${disabledAttr()}>
+                                </div>
+                                <div class="td">
+                                    <input class="date-input" type="date" data-role="fact" data-item-id="${esc(item.id)}" value="${esc(toInputDate(item.fact))}" ${disabledAttr()}>
+                                </div>
+                            ` : ''}
+                        </div>
+                    `;
+                }).join('');
+
+                const addBlock = allowAdd ? `
+                    <div class="add-item-row">
+                        <input class="add-item-input" id="addItemInput_${group.id}" type="text" placeholder="Новый пункт" ${disabledAttr()}>
+                        <button class="add-item-btn" type="button" data-role="add-item" data-group-id="${group.id}" ${disabledAttr()}>Добавить пункт</button>
+                    </div>
+                ` : '';
+
+                return `<div class="group-block"><div class="group-title">${esc(group.title)}</div>${rows}${addBlock}</div>`;
+            }
+
+            function renderGenericPanel(mainGroup, appendNotRequired = false) {
+                const showDates = isGenericDatesVisible(mainGroup.id);
+                const notRequiredGroupId = getCurrentNotRequiredGroupId();
+                const notRequiredGroup = appendNotRequired
+                    ? groups.find(g => Number(g.id) === notRequiredGroupId)
+                    : null;
+
+                return `
+                    <div class="table id-table">
+                        <div class="thead">
+                            ${buildGenericTableHeader(mainGroup, showDates)}
+                        </div>
+                        <div>
+                            ${renderGenericGroup(mainGroup, showDates)}
+                            ${appendNotRequired && notRequiredGroup && hasItemsInGroup(notRequiredGroupId)
+                                ? renderGenericGroup(notRequiredGroup, false)
+                                : ''
+                            }
+                        </div>
+                    </div>
+                `;
+            }
+
+            function resetTablePanelsForGeneric(panelCount) {
+                if (tablesGridEl) {
+                    tablesGridEl.classList.toggle('id-three-cols', panelCount >= 3);
+                    tablesGridEl.style.gridTemplateColumns = panelCount >= 3
+                        ? 'minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr)'
+                        : panelCount === 2
+                            ? 'minmax(0, 1fr) minmax(0, 1fr)'
+                            : 'clamp(620px, 37vw, 760px)';
+                    tablesGridEl.style.justifyContent = panelCount === 1 ? 'start' : '';
+                }
+
+                tablePanels.forEach((panel, index) => {
+                    const visible = index < panelCount;
+                    panel.style.display = visible ? '' : 'none';
+                    panel.style.flex = panelCount === 1 && visible ? '0 0 auto' : '';
+                    panel.style.width = panelCount === 1 && visible ? 'clamp(620px, 37vw, 760px)' : '';
+                    panel.style.maxWidth = panelCount === 1 && visible ? 'clamp(620px, 37vw, 760px)' : '';
+                });
+
+                [leftTableEl, middleTableEl, rightTableEl].forEach((table, index) => {
+                    if (!table) return;
+                    table.style.width = panelCount === 1 && index === 0 ? '100%' : '';
+                    table.style.maxWidth = panelCount === 1 && index === 0 ? '100%' : '';
+                    table.innerHTML = '';
+                });
+            }
+
+            function renderGenericTables() {
+                if (!leftTableEl || !middleTableEl || !rightTableEl || !tablesGridEl) {
+                    throw new Error('generic table containers not found');
+                }
+
+                const notRequiredGroupId = getCurrentNotRequiredGroupId();
+
+                const activeGroups = (Array.isArray(groups) ? groups : []).filter(group =>
+                    Number(group.id) !== Number(notRequiredGroupId)
+                );
+
+                const visibleGroups = activeGroups.length ? activeGroups : groups.slice(0, 1);
+                const panelCount = Math.min(Math.max(visibleGroups.length, 1), 3);
+                const targetTables = [leftTableEl, middleTableEl, rightTableEl];
+
+                resetTablePanelsForGeneric(panelCount);
+
+                visibleGroups.slice(0, 3).forEach((group, index) => {
+                    const appendNotRequired = index === panelCount - 1;
+                    targetTables[index].innerHTML = renderGenericPanel(group, appendNotRequired);
+                });
+            }
+
+            const previousRenderTablesGeneric = renderTables;
+            renderTables = function () {
+                if (!['id', 'opr', 'concept'].includes(currentChecklistKey)) {
+                    renderGenericTables();
+                    return;
+                }
+
+                previousRenderTablesGeneric();
+            };
+
             const previousRenderAll = renderAll;
             renderAll = function () {
                 previousRenderAll();
@@ -1139,6 +1367,16 @@ def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
             const previousBindEventsEnhanced = bindEvents;
             bindEvents = function () {
                 previousBindEventsEnhanced();
+
+                document.querySelectorAll('[data-role="toggle-generic-dates"]').forEach(btn => {
+                    btn.addEventListener('click', function () {
+                        const groupId = Number(this.dataset.groupId || 0);
+                        if (!groupId) return;
+
+                        genericDateVisibility[groupId] = !genericDateVisibility[groupId];
+                        renderAll();
+                    });
+                });
 
                 document.querySelectorAll('[data-role="concept-extra"], [data-role="concept-name-edit"], [data-role="concept-source-edit"]').forEach(el => {
                     el.dataset.initialValue = String(el.value || '');
@@ -3204,7 +3442,7 @@ def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
                 renderProjectRootFolderButton();
 
                 if (progressBoxEl) {{
-                    progressBoxEl.classList.toggle('id-accent', currentChecklistKey === 'id' || currentChecklistKey === 'opr'|| currentChecklistKey === 'concept');
+                    progressBoxEl.classList.toggle('id-accent', true);
                 }}
 
                 updateDebugPanelAccess();

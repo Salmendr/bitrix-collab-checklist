@@ -10,6 +10,11 @@ from app.checklists.utils import (
     normalize_checklist_key,
 )
 
+from app.checklists.config import (
+    get_checklist_config,
+    list_checklist_configs,
+)
+
 def status_emoji(status: str) -> str:
     status = display_status_text(status)
 
@@ -24,12 +29,16 @@ def status_emoji(status: str) -> str:
 
 MESSAGE_ALIGNMENT_SPACE = " "
 MESSAGE_ALIGNMENT_SPACE_FACTOR = 2
-MESSAGE_CHECKLIST_ORDER = ["id", "opr", "concept"]
-MESSAGE_CHECKLIST_TITLES = {
-    "id": "Чек-лист ИД",
-    "concept": "Чек-лист Концепция",
-    "opr": "Чек-лист ОПР",
-}
+def get_message_checklist_order_map() -> dict[str, int]:
+    return {
+        config.key: index
+        for index, config in enumerate(list_checklist_configs())
+    }
+
+
+def get_message_checklist_title(checklist_key: str) -> str:
+    return get_checklist_config(checklist_key).title
+
 MESSAGE_SECTION_LABELS = {
     "status": "Статусы",
     "date": "Даты",
@@ -108,18 +117,25 @@ def pad_message_left(value: str, target_width: int) -> str:
 
 
 def get_checklist_message_title(checklist_key: str, checklist_title: str = "") -> str:
-    normalized_key = normalize_checklist_key(checklist_key)
     cleaned_title = clean_cell_value(checklist_title)
-    return cleaned_title or MESSAGE_CHECKLIST_TITLES.get(normalized_key, "Чек-лист ИД")
+    if cleaned_title:
+        return cleaned_title
+
+    return get_message_checklist_title(checklist_key)
 
 
 def get_checklist_link_caption(checklist_key: str) -> str:
-    mapping = {
-        "id": "ИД",
-        "concept": "КОНЦЕПЦИЯ",
-        "opr": "ОПР",
-    }
-    return mapping.get(normalize_checklist_key(checklist_key), "ЧЕК-ЛИСТ")
+    title = get_message_checklist_title(checklist_key)
+
+    cleaned = (
+        clean_cell_value(title)
+        .replace("Чек-лист", "")
+        .replace("чек-лист", "")
+        .strip(" —-")
+        .strip()
+    )
+
+    return (cleaned or title or "ЧЕК-ЛИСТ").upper()
 
 
 def build_checklist_message_link(dialog_id: str, checklist_key: str) -> str:
@@ -267,25 +283,35 @@ def build_aligned_section_lines(section_title: str, rows: list[dict], target_wid
 def build_recent_changes_sections(changes: list, checklist_key: str) -> list[dict]:
     grouped = split_changes(changes)
     key = normalize_checklist_key(checklist_key)
-    section_order = ["status", "date"]
-    if key == "concept":
-        section_order.extend(["document", "add-item"])
-    elif key == "id":
-        section_order.extend(["document", "add-item"])
-    elif key == "opr":
-        section_order.extend(["document","add-item"])
+
+    section_order = [
+        "status",
+        "date",
+        "document",
+        "add-item",
+        "name",
+        "source",
+        "extraInfo",
+    ]
 
     sections = []
+
     for field in section_order:
         field_changes = grouped.get(field) or []
         if not field_changes:
             continue
-        rows = [build_change_entry(change, field, key) for change in field_changes]
+
+        rows = [
+            build_change_entry(change, field, key)
+            for change in field_changes
+        ]
+
         sections.append({
             "field": field,
             "title": MESSAGE_SECTION_LABELS.get(field, field),
             "rows": rows,
         })
+
     return sections
 
 
@@ -364,7 +390,7 @@ def build_multi_checklist_chat_message(sessions: list, editor: dict) -> str:
     if not indexed:
         return ""
 
-    order_map = {key: index for index, key in enumerate(MESSAGE_CHECKLIST_ORDER)}
+    order_map = get_message_checklist_order_map()
     indexed.sort(key=lambda item: order_map.get(item["checklistKey"], 999))
     alignment_width = collect_global_alignment_width(indexed)
 

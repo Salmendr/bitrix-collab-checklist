@@ -14,9 +14,33 @@ from app.checklists.storage import (
 
 router = APIRouter()
 
+def verify_n8n_token(request: Request):
+    expected_token = str(N8N_SHARED_TOKEN or "").strip()
+
+    # Если токен не задан в окружении — не блокируем локальную разработку.
+    if not expected_token:
+        return
+
+    auth_header = str(request.headers.get("authorization") or "").strip()
+    bearer_token = ""
+
+    if auth_header.lower().startswith("bearer "):
+        bearer_token = auth_header[7:].strip()
+
+    provided_token = (
+        str(request.headers.get("x-n8n-token") or "").strip()
+        or bearer_token
+        or str(request.query_params.get("token") or "").strip()
+    )
+
+    if provided_token != expected_token:
+        raise HTTPException(status_code=401, detail="Invalid n8n token")
+
 
 @router.post("/api/integrations/n8n/project-storage-context")
-def api_save_project_storage_context(payload: dict):
+def api_save_project_storage_context(payload: dict, request: Request):
+    verify_n8n_token(request)
+
     payload = dict(payload or {})
 
     dialog_id = normalize_dialog_id(payload.get("dialogId"))
@@ -79,7 +103,9 @@ def api_save_project_storage_context(payload: dict):
 
 
 @router.get("/api/integrations/n8n/project-storage-context")
-def api_get_project_storage_context(dialogId: str = ""):
+def api_get_project_storage_context(request: Request, dialogId: str = ""):
+    verify_n8n_token(request)
+
     dialog_id = normalize_dialog_id(dialogId)
 
     if not dialog_id:

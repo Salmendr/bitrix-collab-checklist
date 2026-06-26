@@ -3,11 +3,12 @@ from pathlib import Path
 
 from app.logging_utils import write_debug_log
 
-from app.checklists.registry import (
-    STANDARD_ID_YANDEX_FOLDER_SPECS,
-    STANDARD_OPR_YANDEX_FOLDER_SPECS,
-    STANDARD_CONCEPT_YANDEX_FOLDER_SPECS,
+from app.checklists.config import (
+    get_checklist_config,
+    get_standard_yandex_folder_specs,
 )
+
+from app.checklists.yandex_context import resolve_checklist_yandex_root_path
 
 from app.checklists.utils import (
     clean_cell_value,
@@ -32,27 +33,23 @@ from app.yandex_disk.client import (
 
 
 def can_create_custom_item_yandex_folder(dialog_id: str, checklist_key: str) -> bool:
-    checklist_key = normalize_checklist_key(checklist_key)
+    config = get_checklist_config(checklist_key)
 
-    if checklist_key not in {"id", "opr"}:
+    if not config.allow_custom_item_group_ids:
         return False
 
     context = get_project_storage_context(dialog_id)
     if not context:
         return False
 
-    yandex_disk = context.get("yandexDisk") or {}
     storage_mode = context.get("storageMode") or {}
-
     mirror_targets = storage_mode.get("mirrorTargets") or []
+
     if "yandex_disk" not in mirror_targets:
         return False
 
-    project_root_path = clean_cell_value(yandex_disk.get("projectRootPath"))
-    id_stage_root_path = clean_cell_value(yandex_disk.get("idStageRootPath"))
-
-    return bool(project_root_path or id_stage_root_path)
-
+    root_path = get_root_path_from_context(dialog_id, config.key)
+    return bool(root_path)
 
 def sanitize_yandex_folder_name(value: str) -> str:
     value = clean_cell_value(value)
@@ -62,15 +59,7 @@ def sanitize_yandex_folder_name(value: str) -> str:
 
 
 def get_folder_specs_for_checklist(checklist_key: str) -> dict:
-    checklist_key = normalize_checklist_key(checklist_key)
-
-    if checklist_key == "opr":
-        return STANDARD_OPR_YANDEX_FOLDER_SPECS
-
-    if checklist_key == "concept":
-        return STANDARD_CONCEPT_YANDEX_FOLDER_SPECS
-
-    return STANDARD_ID_YANDEX_FOLDER_SPECS
+    return get_standard_yandex_folder_specs(checklist_key)
 
 
 def get_root_path_from_context(dialog_id: str, checklist_key: str) -> str:
@@ -78,34 +67,10 @@ def get_root_path_from_context(dialog_id: str, checklist_key: str) -> str:
     if not context:
         return ""
 
-    checklist_key = normalize_checklist_key(checklist_key)
-    yandex_disk = context.get("yandexDisk") or {}
+    config = get_checklist_config(checklist_key)
+    root_path = resolve_checklist_yandex_root_path(context, config)
 
-    if checklist_key == "id":
-        return clean_cell_value(
-            yandex_disk.get("idStageRootPath")
-            or yandex_disk.get("projectRootPath")
-        )
-
-    if checklist_key == "opr":
-        project_root = clean_cell_value(yandex_disk.get("projectRootPath"))
-        if not project_root:
-            return ""
-
-        return normalize_yandex_disk_path(
-            f"{project_root.rstrip('/')}/02_ОПР"
-        )
-
-    if checklist_key == "concept":
-        project_root = clean_cell_value(yandex_disk.get("projectRootPath"))
-        if not project_root:
-            return ""
-
-        return normalize_yandex_disk_path(
-            f"{project_root.rstrip('/')}/01_Концепция"
-        )
-
-    return ""
+    return normalize_yandex_disk_path(root_path) if root_path else ""
 
 def split_yandex_disk_path_parts(target_path: str) -> list[str]:
     normalized_path = normalize_yandex_disk_path(target_path)
@@ -421,27 +386,19 @@ def ensure_item_yandex_folder_for_upload(
         return existing
 
     if is_custom:
-        if checklist_key == "opr":
-            restored = ensure_yandex_folder_for_custom_opr_item(
-                dialog_id=dialog_id,
-                checklist_key=checklist_key,
-                group_id=int(item_group or 0),
-                item_name=item_name,
-                item_id=item_id,
-            )
-        else:
-            restored = ensure_yandex_folder_for_custom_item(
-                dialog_id=dialog_id,
-                checklist_key=checklist_key,
-                group_id=int(item_group or 0),
-                item_name=item_name,
-                item_id=item_id,
-            )
+        restored = ensure_yandex_folder_for_custom_item(
+            dialog_id=dialog_id,
+            checklist_key=checklist_key,
+            group_id=int(item_group or 0),
+            item_name=item_name,
+            item_id=item_id,
+        )
     else:
-        if checklist_key == "opr":
-            restored = ensure_standard_yandex_folder_for_opr_item(dialog_id, checklist_key, item_name)
-        else:
-            restored = ensure_standard_yandex_folder_for_item(dialog_id, checklist_key, item_name)
+        restored = ensure_standard_yandex_folder_for_item(
+            dialog_id,
+            checklist_key,
+            item_name,
+        )
 
     if not restored:
         return None

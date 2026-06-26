@@ -123,9 +123,9 @@ def app_home_html(
                 }}
 
                 function normalizeChecklistKey(value) {{
-                    const v = String(value || '').trim().toLowerCase();
-                    if (v === 'concept' || v === 'opr' || v === 'id') return v;
-                    return 'id';
+                    const v = String(value || '').trim().toLowerCase().replace(/\\s+/g, '_');
+                    const cleaned = v.replace(/[^a-z0-9_-]+/g, '');
+                    return cleaned || 'id';
                 }}
 
                 function extractFromBx24() {{
