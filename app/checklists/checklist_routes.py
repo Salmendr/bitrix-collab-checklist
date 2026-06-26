@@ -24,9 +24,7 @@ from app.checklists.normalization import (
     normalize_checklist_data,
     build_folder_key,
     derive_indicator_from_status,
-    move_item_to_required_group,
-    resolve_concept_group_id_by_item_id_or_name,
-    resolve_opr_group_id_by_item_id_or_name,
+    resolve_required_group_id_by_item_id_or_name,
 )
 
 from app.checklists.documents import (
@@ -44,17 +42,9 @@ from app.checklists.yandex_folders import (
 
 router = APIRouter()
 
-REQUIRED_GROUP_RESOLVERS = {
-    "id": move_item_to_required_group,
-    "opr": resolve_opr_group_id_by_item_id_or_name,
-    "concept": resolve_concept_group_id_by_item_id_or_name,
-}
-
-
 def resolve_required_group_for_item(checklist_key: str, item: dict) -> int:
     config = get_checklist_config(checklist_key)
-    resolver = REQUIRED_GROUP_RESOLVERS.get(config.key, move_item_to_required_group)
-    return resolver(item)
+    return resolve_required_group_id_by_item_id_or_name(config.key, item)
 
 @router.get("/api/checklist")
 def api_get_checklist(dialogId: str = "", checklistKey: str = "id"):

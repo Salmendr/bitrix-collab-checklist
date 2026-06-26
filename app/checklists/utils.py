@@ -154,6 +154,8 @@ def normalize_dialog_id(value: str) -> str:
 
 def normalize_checklist_key(value: str) -> str:
     value = str(value or "").strip().lower()
-    if value in {"id", "opr", "concept"}:
-        return value
-    return "id"
+    value = value.replace(" ", "_")
+
+    value = re.sub(r"[^a-z0-9_-]+", "", value)
+
+    return value or "id"

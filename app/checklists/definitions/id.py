@@ -1,4 +1,8 @@
 # Definitions for checklist "ИД".
+
+from app.checklists.models import ChecklistConfig
+from app.checklists.definitions.helpers import groups_from_id_dict
+
 ID_GROUPS = {
     1: {
         "title": "ИД",
@@ -167,3 +171,18 @@ STANDARD_ID_YANDEX_FOLDER_SPECS = {
         "relativePath": "08_СТУ",
     },
 }
+
+CHECKLIST_CONFIG = ChecklistConfig(
+    key="id",
+    title="Чек-лист ИД",
+    groups=groups_from_id_dict(ID_GROUPS),
+    not_required_group_id=4,
+    default_group_id=3,
+    allow_custom_item_group_ids=(1, 2, 3),
+    order=10,
+    yandex_root_relative_path="00_Исходные данные/01_ИРД",
+    yandex_root_alias="id_stage_root",
+    yandex_root_folder_name="01_ИРД",
+    reset_status_on_last_document_removed=True,
+    standard_yandex_folder_specs=STANDARD_ID_YANDEX_FOLDER_SPECS,
+)

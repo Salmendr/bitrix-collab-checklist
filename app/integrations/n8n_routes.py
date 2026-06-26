@@ -1,16 +1,14 @@
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
+
 
 from app.settings import N8N_SHARED_TOKEN
 
-from app.checklists.utils import (
-    clean_cell_value,
-    normalize_dialog_id,
-)
+from app.checklists.utils import clean_cell_value, normalize_dialog_id
 
 from app.checklists.storage import (
-    save_project_storage_context,
     get_project_storage_context,
+    save_project_storage_context,
 )
 
 
@@ -18,53 +16,66 @@ router = APIRouter()
 
 
 @router.post("/api/integrations/n8n/project-storage-context")
-async def api_project_storage_context(request: Request):
-    expected_token = N8N_SHARED_TOKEN
-    provided_token = (request.headers.get("X-N8N-Token") or "").strip()
-
-    if expected_token and provided_token != expected_token:
-        return JSONResponse({"ok": False, "error": "forbidden"}, status_code=403)
-
-    try:
-        payload = await request.json()
-    except Exception:
-        return JSONResponse({"ok": False, "error": "invalid json"}, status_code=400)
+def api_save_project_storage_context(payload: dict):
+    payload = dict(payload or {})
 
     dialog_id = normalize_dialog_id(payload.get("dialogId"))
-    project_name = clean_cell_value(payload.get("projectName"))
-    yandex_disk = payload.get("yandexDisk") or {}
-    item_mappings = payload.get("itemMappings") or []
-
     if not dialog_id:
-        return JSONResponse({"ok": False, "error": "dialogId is required"}, status_code=400)
+        raise HTTPException(status_code=400, detail="dialogId is required")
 
-    if not project_name:
-        return JSONResponse({"ok": False, "error": "projectName is required"}, status_code=400)
+    project_id = clean_cell_value(payload.get("projectId"))
+    project_name = clean_cell_value(payload.get("projectName"))
 
-    if not isinstance(yandex_disk, dict) or not yandex_disk:
-        return JSONResponse({"ok": False, "error": "yandexDisk is required"}, status_code=400)
+    storage_mode = payload.get("storageMode") or {
+        "localPrimary": True,
+        "mirrorTargets": ["yandex_disk"],
+    }
 
+    if not isinstance(storage_mode, dict):
+        storage_mode = {
+            "localPrimary": True,
+            "mirrorTargets": ["yandex_disk"],
+        }
+
+    yandex_disk = payload.get("yandexDisk") or {}
+    if not isinstance(yandex_disk, dict):
+        yandex_disk = {}
+
+    yandex_disk.setdefault("provider", "yandex_disk")
+    yandex_disk.setdefault("projectRootPath", "")
+    yandex_disk.setdefault("idStageRootPath", "")
+    yandex_disk.setdefault("projectRootUrl", "")
+    yandex_disk.setdefault("idStageRootUrl", "")
+    yandex_disk.setdefault("folders", {})
+
+    if not isinstance(yandex_disk.get("folders"), dict):
+        yandex_disk["folders"] = {}
+
+    item_mappings = payload.get("itemMappings") or []
     if not isinstance(item_mappings, list):
-        return JSONResponse({"ok": False, "error": "itemMappings must be a list"}, status_code=400)
+        item_mappings = []
 
-    try:
-        save_project_storage_context(dialog_id, payload)
-    except Exception as e:
-        return JSONResponse({
-            "ok": False,
-            "error": "failed to save storage context",
-            "details": str(e),
-        }, status_code=500)
+    normalized_payload = {
+        "dialogId": dialog_id,
+        "projectId": project_id,
+        "projectName": project_name,
+        "storageMode": storage_mode,
+        "yandexDisk": yandex_disk,
+        "itemMappings": item_mappings,
+    }
 
-    return JSONResponse({
+    save_project_storage_context(dialog_id, normalized_payload)
+
+    context = get_project_storage_context(dialog_id)
+
+    return {
         "ok": True,
         "dialogId": dialog_id,
-        "projectId": str(payload.get("projectId") or "").strip(),
+        "projectId": project_id,
         "projectName": project_name,
-        "provider": str(yandex_disk.get("provider") or "yandex_disk").strip(),
-        "stored": True,
-        "mappingCount": len(item_mappings),
-    })
+        "foldersCount": len((context.get("yandexDisk") or {}).get("folders") or {}) if context else 0,
+        "itemMappingsCount": len(context.get("itemMappings") or []) if context else 0,
+    }
 
 
 @router.get("/api/integrations/n8n/project-storage-context")

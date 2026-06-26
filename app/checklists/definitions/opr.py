@@ -1,4 +1,8 @@
 # Definitions for checklist "ОПР".
+
+from app.checklists.models import ChecklistConfig
+from app.checklists.definitions.helpers import groups_from_list
+
 OPR_GROUPS = [
     {
         "id": 1,
@@ -57,3 +61,18 @@ STANDARD_OPR_YANDEX_FOLDER_SPECS = {
         "relativePath": "03_ИОС/ИОС_5",
     },
 }
+
+CHECKLIST_CONFIG = ChecklistConfig(
+    key="opr",
+    title="Чек-лист ОПР",
+    groups=groups_from_list(OPR_GROUPS),
+    not_required_group_id=2,
+    default_group_id=1,
+    allow_custom_item_group_ids=(1,),
+    order=20,
+    yandex_root_relative_path="02_Выдача документации/02_ОПР",
+    yandex_root_alias="opr_stage_root",
+    yandex_root_folder_name="02_ОПР",
+    reset_status_on_last_document_removed=True,
+    standard_yandex_folder_specs=STANDARD_OPR_YANDEX_FOLDER_SPECS,
+)

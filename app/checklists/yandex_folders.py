@@ -107,17 +107,97 @@ def get_root_path_from_context(dialog_id: str, checklist_key: str) -> str:
 
     return ""
 
+def split_yandex_disk_path_parts(target_path: str) -> list[str]:
+    normalized_path = normalize_yandex_disk_path(target_path)
+    if not normalized_path:
+        return []
+
+    if not normalized_path.startswith("disk:/"):
+        return []
+
+    raw_path = normalized_path[len("disk:/"):].strip("/")
+    if not raw_path:
+        return []
+
+    return [
+        part.strip()
+        for part in raw_path.split("/")
+        if part and part.strip()
+    ]
+
+
+def build_yandex_disk_path_from_parts(parts: list[str]) -> str:
+    clean_parts = [
+        str(part or "").strip().strip("/")
+        for part in parts
+        if str(part or "").strip().strip("/")
+    ]
+
+    if not clean_parts:
+        return "disk:/"
+
+    return "disk:/" + "/".join(clean_parts)
+
+
+def iter_yandex_disk_folder_chain(target_path: str) -> list[str]:
+    parts = split_yandex_disk_path_parts(target_path)
+    result = []
+
+    for index in range(1, len(parts) + 1):
+        result.append(build_yandex_disk_path_from_parts(parts[:index]))
+
+    return result
+
+
+def ensure_yandex_folder_chain(target_path: str) -> dict:
+    normalized_path = normalize_yandex_disk_path(target_path)
+    chain = iter_yandex_disk_folder_chain(normalized_path)
+
+    if not chain:
+        return {
+            "ok": False,
+            "path": normalized_path,
+            "created": [],
+            "reason": "empty yandex folder path",
+        }
+
+    created = []
+
+    for folder_path in chain:
+        result = yandex_disk_ensure_folder(folder_path)
+        created.append({
+            "path": folder_path,
+            "alreadyExists": bool(result.get("alreadyExists")),
+        })
+
+    return {
+        "ok": True,
+        "path": normalized_path,
+        "created": created,
+    }
 
 def ensure_folder_and_get_public_url(folder_path: str) -> dict:
     folder_path = normalize_yandex_disk_path(folder_path)
 
-    yandex_disk_ensure_folder(folder_path)
+    if not folder_path:
+        return {
+            "ok": False,
+            "path": "",
+            "url": "",
+            "name": "",
+            "reason": "empty yandex folder path",
+        }
+
+    ensure_yandex_folder_chain(folder_path)
     yandex_disk_publish_path(folder_path)
 
     meta = yandex_disk_get_resource_meta(folder_path)
+
     return {
+        "ok": True,
         "path": clean_cell_value(meta.get("path")) or folder_path,
         "url": clean_cell_value(meta.get("public_url")),
+        "name": clean_cell_value(meta.get("name")) or folder_path.rstrip("/").rsplit("/", 1)[-1],
     }
 
 
@@ -294,6 +374,50 @@ def ensure_item_yandex_folder_for_upload(
 
     existing = get_item_yandex_folder(dialog_id, checklist_key, item_name)
     if existing:
+        folder = existing.get("folder") or {}
+        folder_path = clean_cell_value(folder.get("path"))
+
+        if folder_path:
+            folder_meta = ensure_folder_and_get_public_url(folder_path)
+
+            folder_alias = clean_cell_value(
+                existing.get("folderAlias")
+                or (existing.get("mapping") or {}).get("folderAlias")
+            )
+
+            folder_name = (
+                clean_cell_value(folder_meta.get("name"))
+                or clean_cell_value(folder.get("name"))
+                or folder_path.rstrip("/").rsplit("/", 1)[-1]
+            )
+
+            folder_url = (
+                clean_cell_value(folder_meta.get("url"))
+                or clean_cell_value(folder.get("url"))
+            )
+
+            if folder_alias:
+                upsert_item_yandex_mapping(
+                    dialog_id=dialog_id,
+                    checklist_key=checklist_key,
+                    item_name=item_name,
+                    folder_alias=folder_alias,
+                    folder_name=folder_name,
+                    folder_path=folder_meta.get("path") or folder_path,
+                    folder_url=folder_url,
+                )
+
+                refreshed = get_item_yandex_folder(dialog_id, checklist_key, item_name)
+                if refreshed:
+                    return refreshed
+
+            existing["folder"] = {
+                **folder,
+                "name": folder_name,
+                "path": folder_meta.get("path") or folder_path,
+                "url": folder_url,
+            }
+
         return existing
 
     if is_custom:

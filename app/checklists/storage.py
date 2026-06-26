@@ -14,6 +14,8 @@ from app.checklists.normalization import (
     build_default_checklist_template,
 )
 
+from app.checklists.yandex_context import hydrate_project_storage_context_from_configs
+
 def make_storage_dialog_id(dialog_id: str, checklist_key: str = "id") -> str:
     dialog_id = normalize_dialog_id(dialog_id)
     checklist_key = normalize_checklist_key(checklist_key)
@@ -175,7 +177,7 @@ def get_project_storage_context(dialog_id: str):
     if not row:
         return None
 
-    return {
+    context = {
         "dialogId": row["dialog_id"],
         "projectId": row["project_id"],
         "projectName": row["project_name"],
@@ -185,6 +187,8 @@ def get_project_storage_context(dialog_id: str):
         "itemMappings": json.loads(row["item_mappings_json"] or "[]"),
         "updatedAt": row["updated_at"],
     }
+
+    return hydrate_project_storage_context_from_configs(context)
 
 
 def get_item_yandex_mapping(dialog_id: str, checklist_key: str, item_name: str):

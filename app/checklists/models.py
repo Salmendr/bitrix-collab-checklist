@@ -8,7 +8,6 @@ class ChecklistGroupConfig:
     title: str
     items: tuple[str, ...] = ()
 
-
 @dataclass(frozen=True)
 class ChecklistConfig:
     key: str
@@ -17,6 +16,14 @@ class ChecklistConfig:
     not_required_group_id: int
     default_group_id: int
     allow_custom_item_group_ids: tuple[int, ...]
+
+    order: int = 100
+
+    yandex_root_context_key: str = ""
+    yandex_root_relative_path: str = ""
+    yandex_root_alias: str = ""
+    yandex_root_folder_name: str = ""
+
     reset_status_on_last_document_removed: bool = True
     standard_yandex_folder_specs: Mapping[str, Mapping[str, str]] = field(default_factory=dict)
 
