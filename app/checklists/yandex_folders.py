@@ -32,6 +32,7 @@ from app.yandex_disk.client import (
     yandex_disk_get_resource_meta,
 )
 
+ACTIVE_YANDEX_WARMUPS: set[str] = set()
 
 def can_create_custom_item_yandex_folder(dialog_id: str, checklist_key: str) -> bool:
     config = get_checklist_config(checklist_key)
@@ -165,7 +166,7 @@ def ensure_folder_and_get_public_url(folder_path: str) -> dict:
             "reason": "empty yandex folder path",
         }
 
-    ensure_yandex_folder_chain(folder_path)
+    chain_result = ensure_yandex_folder_chain(folder_path)
     yandex_disk_publish_path(folder_path)
 
     meta = yandex_disk_get_resource_meta(folder_path)
@@ -175,6 +176,7 @@ def ensure_folder_and_get_public_url(folder_path: str) -> dict:
         "path": clean_cell_value(meta.get("path")) or folder_path,
         "url": clean_cell_value(meta.get("public_url")),
         "name": clean_cell_value(meta.get("name")) or folder_path.rstrip("/").rsplit("/", 1)[-1],
+        "chain": chain_result.get("created") or [],
     }
 
 def ensure_project_yandex_root_folder(dialog_id: str) -> dict:
@@ -447,6 +449,8 @@ def ensure_project_standard_yandex_folder_structure(dialog_id: str) -> dict:
     failed = 0
     errors = []
     prepared_at = datetime.now().isoformat()
+
+    updated_folders = dict(folders)
 
     for folder_alias, raw_folder in folders.items():
         folder = raw_folder if isinstance(raw_folder, dict) else {}

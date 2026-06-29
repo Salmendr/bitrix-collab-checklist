@@ -42,7 +42,11 @@ def verify_n8n_token(request: Request):
 
 
 @router.post("/api/integrations/n8n/project-storage-context")
-def api_save_project_storage_context(payload: dict, background_tasks: BackgroundTasks):
+def api_save_project_storage_context(
+    request: Request,
+    payload: dict,
+    background_tasks: BackgroundTasks,
+):
     verify_n8n_token(request)
 
     payload = dict(payload or {})
@@ -102,7 +106,7 @@ def api_save_project_storage_context(payload: dict, background_tasks: Background
         "mirrorTargets": storage_mode.get("mirrorTargets") if isinstance(storage_mode, dict) else [],
     })
 
-    background_tasks.add_task(run_project_yandex_folder_warmup, dialog_id)
+    background_tasks.add_task(run_project_yandex_folder_warmup_safe, dialog_id)
 
     context = get_project_storage_context(dialog_id)
 
@@ -120,6 +124,21 @@ def api_save_project_storage_context(payload: dict, background_tasks: Background
 @router.get("/api/integrations/n8n/project-storage-context")
 def api_get_project_storage_context(request: Request, dialogId: str = ""):
     verify_n8n_token(request)
+
+def run_project_yandex_folder_warmup_safe(dialog_id: str):
+    try:
+        result = run_project_yandex_folder_warmup(dialog_id)
+
+        write_debug_log("n8n_yandex_warmup_background_completed", {
+            "dialogId": dialog_id,
+            "result": result,
+        })
+
+    except Exception as exc:
+        write_debug_log("n8n_yandex_warmup_background_failed", {
+            "dialogId": dialog_id,
+            "error": str(exc),
+        })
 
     dialog_id = normalize_dialog_id(dialogId)
 
