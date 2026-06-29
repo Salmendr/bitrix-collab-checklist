@@ -130,7 +130,18 @@ def ensure_yandex_folder_chain(target_path: str) -> dict:
     created = []
 
     for folder_path in chain:
+        write_debug_log("yandex_folder_chain_ensure_started", {
+            "targetPath": normalized_path,
+            "folderPath": folder_path,
+        })
+
         result = yandex_disk_ensure_folder(folder_path)
+
+        write_debug_log("yandex_folder_chain_ensure_completed", {
+            "targetPath": normalized_path,
+            "folderPath": folder_path,
+            "alreadyExists": bool(result.get("alreadyExists")),
+        })
         created.append({
             "path": folder_path,
             "alreadyExists": bool(result.get("alreadyExists")),
@@ -167,8 +178,17 @@ def ensure_folder_and_get_public_url(folder_path: str) -> dict:
     }
 
 def ensure_project_standard_yandex_folder_structure(dialog_id: str) -> dict:
+    write_debug_log("yandex_warmup_started", {
+        "dialogId": dialog_id,
+    })
+
     context = get_project_storage_context(dialog_id)
     if not context:
+        write_debug_log("yandex_warmup_skipped", {
+            "dialogId": dialog_id,
+            "reason": "project storage context not found",
+        })
+
         return {
             "ok": False,
             "error": "project storage context not found",
@@ -182,6 +202,13 @@ def ensure_project_standard_yandex_folder_structure(dialog_id: str) -> dict:
     mirror_targets = storage_mode.get("mirrorTargets") or []
 
     if "yandex_disk" not in mirror_targets:
+        write_debug_log("yandex_warmup_skipped", {
+            "dialogId": dialog_id,
+            "reason": "yandex_disk is not in mirrorTargets",
+            "storageMode": storage_mode,
+            "mirrorTargets": mirror_targets,
+        })
+
         return {
             "ok": True,
             "yandexDisabled": True,
@@ -193,6 +220,11 @@ def ensure_project_standard_yandex_folder_structure(dialog_id: str) -> dict:
         }
 
     if not is_yandex_disk_enabled():
+        write_debug_log("yandex_warmup_skipped", {
+            "dialogId": dialog_id,
+            "reason": "yandex disk is disabled",
+        })
+
         return {
             "ok": True,
             "yandexDisabled": True,
@@ -207,6 +239,18 @@ def ensure_project_standard_yandex_folder_structure(dialog_id: str) -> dict:
     folders = yandex_disk.get("folders") or {}
     project_root_path = clean_cell_value(yandex_disk.get("projectRootPath"))
 
+    write_debug_log("yandex_warmup_context_loaded", {
+        "dialogId": dialog_id,
+        "projectId": context.get("projectId") or "",
+        "projectName": context.get("projectName") or "",
+        "projectRootPath": project_root_path,
+        "storageMode": storage_mode,
+        "mirrorTargets": mirror_targets,
+        "foldersCount": len(folders),
+        "itemMappingsCount": len(context.get("itemMappings") or []),
+        "alreadyPrepared": bool(yandex_disk.get("standardFoldersPrepared")),
+    })
+
     prepared = 0
     skipped = 0
     failed = 0
@@ -215,12 +259,30 @@ def ensure_project_standard_yandex_folder_structure(dialog_id: str) -> dict:
 
     if project_root_path:
         try:
+            write_debug_log("yandex_warmup_root_prepare_started", {
+                "dialogId": dialog_id,
+                "path": project_root_path,
+            })
+
             root_meta = ensure_folder_and_get_public_url(project_root_path)
+
+            write_debug_log("yandex_warmup_root_prepare_completed", {
+                "dialogId": dialog_id,
+                "path": root_meta.get("path") or project_root_path,
+                "urlExists": bool(root_meta.get("url")),
+            })
             yandex_disk["projectRootPath"] = root_meta.get("path") or normalize_yandex_disk_path(project_root_path)
             yandex_disk["projectRootUrl"] = root_meta.get("url") or clean_cell_value(yandex_disk.get("projectRootUrl"))
             prepared += 1
         except Exception as exc:
             failed += 1
+
+            write_debug_log("yandex_warmup_root_prepare_failed", {
+                "dialogId": dialog_id,
+                "path": project_root_path,
+                "error": str(exc),
+            })
+
             errors.append({
                 "alias": "projectRoot",
                 "path": project_root_path,
@@ -232,7 +294,12 @@ def ensure_project_standard_yandex_folder_structure(dialog_id: str) -> dict:
     for folder_alias, raw_folder in folders.items():
         folder = raw_folder if isinstance(raw_folder, dict) else {}
         folder_path = clean_cell_value(folder.get("path"))
-
+        write_debug_log("yandex_warmup_folder_seen", {
+            "dialogId": dialog_id,
+            "alias": folder_alias,
+            "path": folder_path,
+            "hasUrl": bool(clean_cell_value(folder.get("url"))),
+        })
         if not folder_path:
             skipped += 1
             continue
@@ -242,7 +309,20 @@ def ensure_project_standard_yandex_folder_structure(dialog_id: str) -> dict:
             continue
 
         try:
+            write_debug_log("yandex_warmup_folder_prepare_started", {
+                "dialogId": dialog_id,
+                "alias": folder_alias,
+                "path": folder_path,
+            })
+
             folder_meta = ensure_folder_and_get_public_url(folder_path)
+
+            write_debug_log("yandex_warmup_folder_prepare_completed", {
+                "dialogId": dialog_id,
+                "alias": folder_alias,
+                "path": folder_meta.get("path") or folder_path,
+                "urlExists": bool(folder_meta.get("url")),
+            })
 
             updated_folders[folder_alias] = {
                 **folder,
@@ -256,6 +336,14 @@ def ensure_project_standard_yandex_folder_structure(dialog_id: str) -> dict:
 
         except Exception as exc:
             failed += 1
+
+            write_debug_log("yandex_warmup_folder_prepare_failed", {
+                "dialogId": dialog_id,
+                "alias": folder_alias,
+                "path": folder_path,
+                "error": str(exc),
+            })
+
             errors.append({
                 "alias": folder_alias,
                 "path": folder_path,
@@ -275,7 +363,17 @@ def ensure_project_standard_yandex_folder_structure(dialog_id: str) -> dict:
         "yandexDisk": yandex_disk,
         "itemMappings": context.get("itemMappings") or [],
     })
-
+    write_debug_log("yandex_warmup_finished", {
+        "dialogId": dialog_id,
+        "ok": failed == 0,
+        "projectRootPath": clean_cell_value(yandex_disk.get("projectRootPath")),
+        "projectRootUrlExists": bool(clean_cell_value(yandex_disk.get("projectRootUrl"))),
+        "foldersCount": len(updated_folders),
+        "prepared": prepared,
+        "skipped": skipped,
+        "failed": failed,
+        "errors": errors[:20],
+    })
     return {
         "ok": failed == 0,
         "projectRootPath": clean_cell_value(yandex_disk.get("projectRootPath")),
