@@ -8,7 +8,7 @@ from app.checklists.utils import (
     normalize_checklist_key,
     slugify_folder_part,
 )
-
+from app.checklists.yandex_project_structure import PROJECT_YANDEX_STRUCTURE_RELATIVE_PATHS
 
 def normalize_yandex_context_path(path: str) -> str:
     value = clean_cell_value(path).replace("\\", "/")
@@ -144,6 +144,81 @@ def normalize_folder_spec_name(item_name: str, spec: dict, folder_path: str) -> 
     return path_name or clean_cell_value(item_name)
 
 
+def normalize_project_structure_folder_alias(relative_path: str) -> str:
+    return "project_" + slugify_folder_part(relative_path)
+
+
+def get_folder_public_url_by_path(existing_folders: dict, folder_path: str) -> str:
+    target_path = normalize_yandex_context_path(folder_path)
+
+    for folder in (existing_folders or {}).values():
+        if not isinstance(folder, dict):
+            continue
+
+        existing_path = normalize_yandex_context_path(folder.get("path"))
+        if existing_path == target_path:
+            return get_folder_public_url({"_": folder}, "_")
+
+    return ""
+
+
+def build_project_structure_yandex_folders(
+    context: dict,
+    result: dict,
+    existing_folders: dict,
+) -> dict:
+    project_root_path = get_project_root_path(context)
+    if not project_root_path:
+        return result
+
+    result = deepcopy(result or {})
+
+    path_index = {}
+    for alias, folder in result.items():
+        if not isinstance(folder, dict):
+            continue
+
+        folder_path = normalize_yandex_context_path(folder.get("path"))
+        if folder_path:
+            path_index[folder_path] = alias
+
+    for relative_path in PROJECT_YANDEX_STRUCTURE_RELATIVE_PATHS:
+        relative_path = clean_cell_value(relative_path).replace("\\", "/").strip("/")
+        if not relative_path:
+            continue
+
+        folder_path = join_yandex_path(project_root_path, relative_path)
+        folder_alias = normalize_project_structure_folder_alias(relative_path)
+        folder_name = folder_path.rstrip("/").rsplit("/", 1)[-1]
+
+        if folder_alias in result:
+            current = result.get(folder_alias) if isinstance(result.get(folder_alias), dict) else {}
+            result[folder_alias] = {
+                **current,
+                "name": clean_cell_value(current.get("name")) or folder_name,
+                "path": clean_cell_value(current.get("path")) or folder_path,
+                "url": get_folder_public_url(existing_folders, folder_alias)
+                    or clean_cell_value(current.get("url"))
+                    or get_folder_public_url_by_path(existing_folders, folder_path),
+                "isProjectStructure": True,
+            }
+            continue
+
+        if folder_path in path_index:
+            continue
+
+        result[folder_alias] = {
+            "name": folder_name,
+            "path": folder_path,
+            "url": get_folder_public_url(existing_folders, folder_alias)
+                or get_folder_public_url_by_path(existing_folders, folder_path),
+            "isProjectStructure": True,
+        }
+
+        path_index[folder_path] = folder_alias
+
+    return result
+
 def build_config_yandex_folders(context: dict) -> dict:
     context = context or {}
     existing_folders = get_existing_yandex_folders(context)
@@ -188,6 +263,12 @@ def build_config_yandex_folders(context: dict) -> dict:
                 "itemName": clean_cell_value(item_name),
                 "isStageRoot": False,
             }
+
+    result = build_project_structure_yandex_folders(
+        context=context,
+        result=result,
+        existing_folders=existing_folders,
+    )
 
     return result
 

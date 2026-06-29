@@ -1,4 +1,4 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, BackgroundTasks
 from fastapi.responses import JSONResponse
 from app.logging_utils import write_debug_log
 
@@ -17,7 +17,8 @@ from app.yandex_disk.client import (
 )
 
 from app.checklists.yandex_folders import (
-    ensure_project_standard_yandex_folder_structure,
+    ensure_project_yandex_root_folder,
+    run_project_yandex_folder_warmup,
 )
 
 
@@ -25,7 +26,7 @@ router = APIRouter()
 
 
 @router.get("/api/project-root-folder")
-def api_project_root_folder(dialogId: str = ""):
+def api_project_root_folder(background_tasks: BackgroundTasks, dialogId: str = ""):
     dialog_id = normalize_dialog_id(dialogId)
 
     write_debug_log("yandex_warmup_route_received", {
@@ -77,55 +78,50 @@ def api_project_root_folder(dialogId: str = ""):
             "standardFoldersPrepared": False,
         })
 
-    prepare_result = ensure_project_standard_yandex_folder_structure(dialog_id)
+    root_result = ensure_project_yandex_root_folder(dialog_id)
+
+    if not root_result.get("ok"):
+        write_debug_log("yandex_root_route_failed", {
+            "dialogId": dialog_id,
+            "path": normalized_root_path,
+            "rootResult": root_result,
+        })
+
+        return JSONResponse({
+            "ok": False,
+            "error": "failed to prepare yandex project root folder",
+            "details": root_result,
+            "path": normalized_root_path,
+            "url": clean_cell_value(yandex_disk.get("projectRootUrl")),
+            "standardFoldersPrepared": False,
+        }, status_code=500)
+
+    background_tasks.add_task(run_project_yandex_folder_warmup, dialog_id)
 
     refreshed_context = get_project_storage_context(dialog_id) or context
     refreshed_yandex_disk = refreshed_context.get("yandexDisk") or {}
 
     project_root_url = clean_cell_value(
-        prepare_result.get("projectRootUrl")
+        root_result.get("url")
         or refreshed_yandex_disk.get("projectRootUrl")
         or yandex_disk.get("projectRootUrl")
     )
 
-    if not prepare_result.get("ok"):
-        write_debug_log("yandex_warmup_route_failed", {
-            "dialogId": dialog_id,
-            "path": normalized_root_path,
-            "urlExists": bool(project_root_url),
-            "details": prepare_result,
-        })
-
-        return JSONResponse({
-            "ok": False,
-            "error": "failed to prepare yandex folder structure",
-            "details": prepare_result,
-            "path": normalized_root_path,
-            "url": project_root_url,
-            "standardFoldersPrepared": False,
-        }, status_code=500)
-
-    write_debug_log("yandex_warmup_route_completed", {
+    write_debug_log("yandex_root_route_completed", {
         "dialogId": dialog_id,
-        "ok": True,
-        "path": clean_cell_value(prepare_result.get("projectRootPath")) or normalized_root_path,
+        "path": clean_cell_value(root_result.get("path")) or normalized_root_path,
         "urlExists": bool(project_root_url),
-        "standardFoldersPrepared": bool(prepare_result.get("standardFoldersPrepared")),
-        "foldersCount": prepare_result.get("foldersCount", 0),
-        "prepared": prepare_result.get("prepared", 0),
-        "skipped": prepare_result.get("skipped", 0),
-        "failed": prepare_result.get("failed", 0),
+        "standardFoldersPrepared": bool(refreshed_yandex_disk.get("standardFoldersPrepared")),
     })
 
     return JSONResponse({
         "ok": True,
-        "path": clean_cell_value(prepare_result.get("projectRootPath")) or normalized_root_path,
+        "path": clean_cell_value(root_result.get("path")) or normalized_root_path,
         "url": project_root_url,
-        "fromCache": bool(prepare_result.get("prepared") == 0),
-        "standardFoldersPrepared": bool(prepare_result.get("standardFoldersPrepared")),
-        "standardFoldersPreparedAt": prepare_result.get("standardFoldersPreparedAt"),
-        "foldersCount": prepare_result.get("foldersCount", 0),
-        "prepared": prepare_result.get("prepared", 0),
-        "skipped": prepare_result.get("skipped", 0),
-        "failed": prepare_result.get("failed", 0),
+        "fromCache": bool(root_result.get("fromCache")),
+        "rootReady": bool(project_root_url),
+        "standardFoldersPrepared": bool(refreshed_yandex_disk.get("standardFoldersPrepared")),
+        "standardFoldersPreparedAt": refreshed_yandex_disk.get("standardFoldersPreparedAt"),
+        "standardFoldersPreparedCount": int(refreshed_yandex_disk.get("standardFoldersPreparedCount") or 0),
+        "yandexWarmupQueued": True,
     })

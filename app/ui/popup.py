@@ -2658,7 +2658,7 @@ def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
 
                 const folderUrl = String(projectRootYandexUrl || '').trim();
                 const folderPath = String(projectRootYandexPath || '').trim();
-                const isReady = !!(folderUrl && projectRootYandexPrepared && !projectRootYandexPreparing);
+                const isReady = !!folderUrl;
 
                 if (!folderPath) {{
                     projectRootFolderBoxEl.style.display = 'none';

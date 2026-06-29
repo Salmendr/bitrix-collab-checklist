@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 
@@ -10,7 +10,11 @@ from app.checklists.storage import (
     get_project_storage_context,
     save_project_storage_context,
 )
+from app.logging_utils import write_debug_log
 
+from app.checklists.yandex_folders import (
+    run_project_yandex_folder_warmup,
+)
 
 router = APIRouter()
 
@@ -38,7 +42,7 @@ def verify_n8n_token(request: Request):
 
 
 @router.post("/api/integrations/n8n/project-storage-context")
-def api_save_project_storage_context(payload: dict, request: Request):
+def api_save_project_storage_context(payload: dict, background_tasks: BackgroundTasks):
     verify_n8n_token(request)
 
     payload = dict(payload or {})
@@ -90,6 +94,16 @@ def api_save_project_storage_context(payload: dict, request: Request):
 
     save_project_storage_context(dialog_id, normalized_payload)
 
+    write_debug_log("n8n_project_context_saved", {
+        "dialogId": dialog_id,
+        "projectId": project_id,
+        "projectName": project_name,
+        "projectRootPath": clean_cell_value(yandex_disk.get("projectRootPath")),
+        "mirrorTargets": storage_mode.get("mirrorTargets") if isinstance(storage_mode, dict) else [],
+    })
+
+    background_tasks.add_task(run_project_yandex_folder_warmup, dialog_id)
+
     context = get_project_storage_context(dialog_id)
 
     return {
@@ -97,6 +111,7 @@ def api_save_project_storage_context(payload: dict, request: Request):
         "dialogId": dialog_id,
         "projectId": project_id,
         "projectName": project_name,
+        "yandexWarmupQueued": True,
         "foldersCount": len((context.get("yandexDisk") or {}).get("folders") or {}) if context else 0,
         "itemMappingsCount": len(context.get("itemMappings") or []) if context else 0,
     }

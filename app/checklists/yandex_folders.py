@@ -177,6 +177,179 @@ def ensure_folder_and_get_public_url(folder_path: str) -> dict:
         "name": clean_cell_value(meta.get("name")) or folder_path.rstrip("/").rsplit("/", 1)[-1],
     }
 
+def ensure_project_yandex_root_folder(dialog_id: str) -> dict:
+    write_debug_log("yandex_root_prepare_started", {
+        "dialogId": dialog_id,
+    })
+
+    context = get_project_storage_context(dialog_id)
+    if not context:
+        write_debug_log("yandex_root_prepare_failed", {
+            "dialogId": dialog_id,
+            "reason": "project storage context not found",
+        })
+
+        return {
+            "ok": False,
+            "error": "project storage context not found",
+            "path": "",
+            "url": "",
+        }
+
+    storage_mode = context.get("storageMode") or {}
+    mirror_targets = storage_mode.get("mirrorTargets") or []
+
+    if "yandex_disk" not in mirror_targets:
+        write_debug_log("yandex_root_prepare_skipped", {
+            "dialogId": dialog_id,
+            "reason": "yandex_disk is not in mirrorTargets",
+            "storageMode": storage_mode,
+        })
+
+        return {
+            "ok": True,
+            "yandexDisabled": True,
+            "reason": "yandex_disk is not in mirrorTargets",
+            "path": "",
+            "url": "",
+        }
+
+    if not is_yandex_disk_enabled():
+        write_debug_log("yandex_root_prepare_skipped", {
+            "dialogId": dialog_id,
+            "reason": "yandex disk is disabled",
+        })
+
+        return {
+            "ok": True,
+            "yandexDisabled": True,
+            "reason": "yandex disk is disabled",
+            "path": "",
+            "url": "",
+        }
+
+    yandex_disk = context.get("yandexDisk") or {}
+    project_root_path = clean_cell_value(yandex_disk.get("projectRootPath"))
+    project_root_url = clean_cell_value(yandex_disk.get("projectRootUrl"))
+
+    if not project_root_path:
+        write_debug_log("yandex_root_prepare_failed", {
+            "dialogId": dialog_id,
+            "reason": "projectRootPath is empty",
+        })
+
+        return {
+            "ok": False,
+            "error": "projectRootPath is empty",
+            "path": "",
+            "url": "",
+        }
+
+    if project_root_url:
+        write_debug_log("yandex_root_prepare_cached", {
+            "dialogId": dialog_id,
+            "path": project_root_path,
+            "urlExists": True,
+        })
+
+        return {
+            "ok": True,
+            "path": normalize_yandex_disk_path(project_root_path),
+            "url": project_root_url,
+            "fromCache": True,
+        }
+
+    try:
+        root_meta = ensure_folder_and_get_public_url(project_root_path)
+
+        yandex_disk["projectRootPath"] = root_meta.get("path") or normalize_yandex_disk_path(project_root_path)
+        yandex_disk["projectRootUrl"] = root_meta.get("url") or project_root_url
+        yandex_disk["projectRootPrepared"] = True
+        yandex_disk["projectRootPreparedAt"] = datetime.now().isoformat()
+
+        save_project_storage_context(dialog_id, {
+            "dialogId": dialog_id,
+            "projectId": context.get("projectId") or "",
+            "projectName": context.get("projectName") or "",
+            "storageMode": context.get("storageMode") or {},
+            "yandexDisk": yandex_disk,
+            "itemMappings": context.get("itemMappings") or [],
+        })
+
+        write_debug_log("yandex_root_prepare_completed", {
+            "dialogId": dialog_id,
+            "path": yandex_disk.get("projectRootPath"),
+            "urlExists": bool(yandex_disk.get("projectRootUrl")),
+        })
+
+        return {
+            "ok": True,
+            "path": clean_cell_value(yandex_disk.get("projectRootPath")),
+            "url": clean_cell_value(yandex_disk.get("projectRootUrl")),
+            "fromCache": False,
+        }
+
+    except Exception as exc:
+        write_debug_log("yandex_root_prepare_failed", {
+            "dialogId": dialog_id,
+            "path": project_root_path,
+            "error": str(exc),
+        })
+
+        return {
+            "ok": False,
+            "error": str(exc),
+            "path": project_root_path,
+            "url": project_root_url,
+        }
+
+
+def run_project_yandex_folder_warmup(dialog_id: str) -> dict:
+    dialog_id = clean_cell_value(dialog_id)
+
+    if not dialog_id:
+        return {
+            "ok": False,
+            "error": "dialogId is required",
+        }
+
+    if dialog_id in ACTIVE_YANDEX_WARMUPS:
+        write_debug_log("yandex_warmup_already_running", {
+            "dialogId": dialog_id,
+        })
+
+        return {
+            "ok": True,
+            "alreadyRunning": True,
+        }
+
+    ACTIVE_YANDEX_WARMUPS.add(dialog_id)
+
+    try:
+        write_debug_log("yandex_background_warmup_started", {
+            "dialogId": dialog_id,
+        })
+
+        root_result = ensure_project_yandex_root_folder(dialog_id)
+        if not root_result.get("ok"):
+            write_debug_log("yandex_background_warmup_root_failed", {
+                "dialogId": dialog_id,
+                "rootResult": root_result,
+            })
+            return root_result
+
+        result = ensure_project_standard_yandex_folder_structure(dialog_id)
+
+        write_debug_log("yandex_background_warmup_finished", {
+            "dialogId": dialog_id,
+            "result": result,
+        })
+
+        return result
+
+    finally:
+        ACTIVE_YANDEX_WARMUPS.discard(dialog_id)
+
 def ensure_project_standard_yandex_folder_structure(dialog_id: str) -> dict:
     write_debug_log("yandex_warmup_started", {
         "dialogId": dialog_id,
@@ -235,6 +408,24 @@ def ensure_project_standard_yandex_folder_structure(dialog_id: str) -> dict:
             "errors": [],
         }
 
+    root_result = ensure_project_yandex_root_folder(dialog_id)
+    if not root_result.get("ok"):
+        return {
+            "ok": False,
+            "error": "failed to prepare project root folder",
+            "rootResult": root_result,
+            "prepared": 0,
+            "skipped": 0,
+            "failed": 1,
+            "errors": [{
+                "alias": "projectRoot",
+                "path": root_result.get("path") or "",
+                "error": root_result.get("error") or root_result.get("reason") or "unknown root error",
+            }],
+        }
+
+    context = get_project_storage_context(dialog_id) or context    
+
     yandex_disk = context.get("yandexDisk") or {}
     folders = yandex_disk.get("folders") or {}
     project_root_path = clean_cell_value(yandex_disk.get("projectRootPath"))
@@ -256,40 +447,6 @@ def ensure_project_standard_yandex_folder_structure(dialog_id: str) -> dict:
     failed = 0
     errors = []
     prepared_at = datetime.now().isoformat()
-
-    if project_root_path:
-        try:
-            write_debug_log("yandex_warmup_root_prepare_started", {
-                "dialogId": dialog_id,
-                "path": project_root_path,
-            })
-
-            root_meta = ensure_folder_and_get_public_url(project_root_path)
-
-            write_debug_log("yandex_warmup_root_prepare_completed", {
-                "dialogId": dialog_id,
-                "path": root_meta.get("path") or project_root_path,
-                "urlExists": bool(root_meta.get("url")),
-            })
-            yandex_disk["projectRootPath"] = root_meta.get("path") or normalize_yandex_disk_path(project_root_path)
-            yandex_disk["projectRootUrl"] = root_meta.get("url") or clean_cell_value(yandex_disk.get("projectRootUrl"))
-            prepared += 1
-        except Exception as exc:
-            failed += 1
-
-            write_debug_log("yandex_warmup_root_prepare_failed", {
-                "dialogId": dialog_id,
-                "path": project_root_path,
-                "error": str(exc),
-            })
-
-            errors.append({
-                "alias": "projectRoot",
-                "path": project_root_path,
-                "error": str(exc),
-            })
-
-    updated_folders = dict(folders)
 
     for folder_alias, raw_folder in folders.items():
         folder = raw_folder if isinstance(raw_folder, dict) else {}
