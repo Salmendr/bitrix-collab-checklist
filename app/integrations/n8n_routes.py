@@ -125,7 +125,38 @@ def api_save_project_storage_context(
 def api_get_project_storage_context(request: Request, dialogId: str = ""):
     verify_n8n_token(request)
 
+    dialog_id = normalize_dialog_id(dialogId)
+
+    if not dialog_id:
+        return JSONResponse(
+            {"ok": False, "error": "dialogId is required"},
+            status_code=400,
+        )
+
+    context = get_project_storage_context(dialog_id)
+
+    if not context:
+        return JSONResponse(
+            {"ok": False, "error": "not found"},
+            status_code=404,
+        )
+
+    return JSONResponse({
+        "ok": True,
+        "context": context,
+    })
+
+
 def run_project_yandex_folder_warmup_safe(dialog_id: str):
+    dialog_id = normalize_dialog_id(dialog_id)
+
+    if not dialog_id:
+        write_debug_log("n8n_yandex_warmup_background_failed", {
+            "dialogId": dialog_id,
+            "error": "dialogId is required",
+        })
+        return
+
     try:
         result = run_project_yandex_folder_warmup(dialog_id)
 
@@ -139,18 +170,3 @@ def run_project_yandex_folder_warmup_safe(dialog_id: str):
             "dialogId": dialog_id,
             "error": str(exc),
         })
-
-    dialog_id = normalize_dialog_id(dialogId)
-
-    if not dialog_id:
-        return JSONResponse({"ok": False, "error": "dialogId is required"}, status_code=400)
-
-    context = get_project_storage_context(dialog_id)
-
-    if not context:
-        return JSONResponse({"ok": False, "error": "not found"}, status_code=404)
-
-    return JSONResponse({
-        "ok": True,
-        "context": context,
-    })
