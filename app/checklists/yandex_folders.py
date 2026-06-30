@@ -29,6 +29,7 @@ from app.yandex_disk.client import (
     is_yandex_disk_enabled,
     normalize_yandex_disk_path,
     yandex_disk_upload_bytes,
+     yandex_disk_upload_file,
     yandex_disk_ensure_folder,
     yandex_disk_publish_path,
     yandex_disk_get_resource_meta,
@@ -949,6 +950,86 @@ def mirror_document_to_yandex(
             "checklistKey": checklist_key,
             "itemName": item_name,
             "itemId": item_id,
+            "error": str(e),
+        })
+
+        return {
+            "ok": False,
+            "reason": str(e),
+        }
+    
+def mirror_document_file_to_yandex(
+    dialog_id: str,
+    checklist_key: str,
+    item_name: str,
+    filename: str,
+    local_path,
+    item_id: str = "",
+    item_group: int = 0,
+    is_custom: bool = False,
+    progress_callback=None,
+) -> dict:
+    if not is_yandex_disk_enabled():
+        return {
+            "ok": False,
+            "reason": "yandex disk is disabled",
+        }
+
+    checklist_key = normalize_checklist_key(checklist_key)
+
+    try:
+        folder_info = ensure_item_yandex_folder_for_upload(
+            dialog_id=dialog_id,
+            checklist_key=checklist_key,
+            item_name=item_name,
+            item_id=item_id,
+            item_group=item_group,
+            is_custom=is_custom,
+        )
+
+        if not folder_info:
+            return {
+                "ok": False,
+                "reason": "yandex folder not found",
+            }
+
+        folder = folder_info.get("folder") or {}
+        folder_alias = clean_cell_value(
+            folder_info.get("folderAlias")
+            or (folder_info.get("mapping") or {}).get("folderAlias")
+        )
+        folder_path = clean_cell_value(folder.get("path"))
+        folder_url = clean_cell_value(folder.get("url"))
+
+        if not folder_path:
+            return {
+                "ok": False,
+                "reason": "yandex folder path is empty",
+            }
+
+        target_path = build_yandex_file_target_path(folder_path, filename)
+
+        upload_result = yandex_disk_upload_file(
+            target_path=target_path,
+            local_path=local_path,
+            progress_callback=progress_callback,
+        )
+
+        return {
+            "ok": True,
+            "folderAlias": folder_alias,
+            "folderPath": normalize_yandex_disk_path(folder_path),
+            "folderUrl": folder_url,
+            "filePath": upload_result.get("path") or normalize_yandex_disk_path(target_path),
+        }
+
+    except Exception as e:
+        write_debug_log("yandex_mirror_file_upload_error", {
+            "dialogId": dialog_id,
+            "checklistKey": checklist_key,
+            "itemName": item_name,
+            "itemId": item_id,
+            "localPath": str(local_path),
             "error": str(e),
         })
 

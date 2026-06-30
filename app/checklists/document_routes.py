@@ -54,7 +54,20 @@ from app.checklists.documents import (
     remove_item_document_file,
 )
 
-from app.checklists.yandex_folders import mirror_document_to_yandex
+from app.checklists.upload_jobs import (
+    create_yandex_upload_job,
+    create_yandex_delete_job,
+    cancel_upload_jobs_for_document,
+    get_upload_job,
+    get_latest_document_job,
+    public_job_payload,
+)
+
+from app.checklists.yandex_mirror_queue import (
+    enqueue_yandex_mirror_job,
+    get_yandex_mirror_queue_state,
+)
+
 from app.ui.shell import normalize_base_path
 
 from app.yandex_disk.client import (
@@ -64,6 +77,21 @@ from app.yandex_disk.client import (
 
 
 router = APIRouter()
+
+async def save_upload_file_stream(file: UploadFile, abs_path: Path) -> int:
+    total_size = 0
+    chunk_size = 1024 * 1024
+
+    with open(abs_path, "wb") as f:
+        while True:
+            chunk = await file.read(chunk_size)
+            if not chunk:
+                break
+
+            total_size += len(chunk)
+            f.write(chunk)
+
+    return total_size
 
 @router.post("/api/checklist/upload-document")
 async def api_checklist_upload_document(
@@ -103,9 +131,7 @@ async def api_checklist_upload_document(
     abs_path = UPLOAD_ROOT / rel_path
     abs_path.parent.mkdir(parents=True, exist_ok=True)
 
-    file_bytes = await file.read()
-    with open(abs_path, "wb") as f:
-        f.write(file_bytes)
+    file_size = await save_upload_file_stream(file, abs_path)
 
     file_url = "/uploads/" + rel_path.replace("\\", "/")
     document_id = uuid.uuid4().hex
@@ -119,47 +145,35 @@ async def api_checklist_upload_document(
 
     uploaded_name = Path(file.filename or "file.bin").name
 
+    upload_job = create_yandex_upload_job(
+        dialog_id=dialog_id,
+        checklist_key=config.key,
+        item_id=item_id,
+        document_id=document_id,
+        local_path=str(abs_path),
+        file_name=uploaded_name,
+        file_size=file_size,
+    )
+
+    job_id = clean_cell_value(upload_job.get("job_id") or upload_job.get("jobId"))
+
     document_record = normalize_document_record({
         "id": document_id,
         "name": uploaded_name,
         "path": file_url,
         "fileUrl": file_url,
         "previewUrl": document_view_url,
-        "size": len(file_bytes),
+        "size": file_size,
         "modifiedAt": datetime.now().isoformat(timespec="seconds"),
         "source": "local",
 
-        "mirrorStatus": "",
+        "mirrorStatus": "queued",
         "mirrorError": "",
+        "mirrorJobId": job_id,
         "yandexPath": "",
         "yandexFileUrl": "",
         "yandexFolderAlias": "",
     })
-
-    try:
-        mirror_result = mirror_document_to_yandex(
-            dialog_id=dialog_id,
-            checklist_key=config.key,
-            item_name=clean_cell_value(target_item.get("name")),
-            filename=uploaded_name,
-            file_bytes=file_bytes,
-            item_id=str(target_item.get("id") or ""),
-            item_group=int(target_item.get("group") or 0),
-            is_custom=bool(target_item.get("isCustom", False)),
-        )
-
-        if mirror_result.get("ok"):
-            document_record["mirrorStatus"] = "synced"
-            document_record["mirrorError"] = ""
-            document_record["yandexPath"] = clean_cell_value(mirror_result.get("filePath"))
-            document_record["yandexFileUrl"] = clean_cell_value(mirror_result.get("folderUrl"))
-            document_record["yandexFolderAlias"] = clean_cell_value(mirror_result.get("folderAlias"))
-        else:
-            document_record["mirrorStatus"] = "error"
-            document_record["mirrorError"] = clean_cell_value(mirror_result.get("reason")) or "mirror failed"
-    except Exception as e:
-        document_record["mirrorStatus"] = "error"
-        document_record["mirrorError"] = str(e)
 
     existing_documents = normalize_documents_list(target_item.get("documents"))
     existing_documents.append(document_record)
@@ -182,6 +196,15 @@ async def api_checklist_upload_document(
     data = normalize_checklist_data(data, config.key)
     save_checklist(dialog_id, data, config.key)
 
+    enqueue_result = enqueue_yandex_mirror_job(
+        job_id,
+        source="upload_document",
+    ) if job_id else {
+        "ok": False,
+        "queued": False,
+        "error": "upload job id is empty",
+    }
+
     updated_item = None
     for item in data.get("items", []):
         if str(item.get("id") or "") == item_id:
@@ -196,6 +219,11 @@ async def api_checklist_upload_document(
         "dialogId": dialog_id,
         "checklistKey": config.key,
         "item": updated_item,
+        "document": document_record,
+        "uploadJobId": job_id,
+        "uploadJob": public_job_payload(get_upload_job(job_id)) if job_id else {},
+        "yandexMirrorQueued": bool(enqueue_result.get("queued")),
+        "yandexMirrorQueue": enqueue_result,
         "progressPercent": data.get("progressPercent", 0),
     })
 
@@ -261,7 +289,19 @@ async def api_checklist_remove_document(request: Request):
     if not doc_to_remove and documents:
         doc_to_remove = documents[0]
 
+    delete_job_id = ""
+    delete_enqueue_result = {}
+
     if doc_to_remove:
+        removed_document_id = clean_cell_value(doc_to_remove.get("id"))
+
+        cancel_upload_jobs_for_document(
+            dialog_id=dialog_id,
+            checklist_key=config.key,
+            item_id=item_id,
+            document_id=removed_document_id,
+        )
+
         local_document_url = (
             clean_cell_value(doc_to_remove.get("fileUrl"))
             or clean_cell_value(doc_to_remove.get("previewUrl"))
@@ -273,18 +313,22 @@ async def api_checklist_remove_document(request: Request):
         })
 
         yandex_path = clean_cell_value(doc_to_remove.get("yandexPath"))
-        if yandex_path and is_yandex_disk_enabled():
-            try:
-                yandex_disk_delete_path(yandex_path, permanently=True)
-            except Exception as e:
-                write_debug_log("yandex_mirror_delete_error", {
-                    "dialogId": dialog_id,
-                    "checklistKey": checklist_key,
-                    "itemId": item_id,
-                    "documentId": clean_cell_value(doc_to_remove.get("id")),
-                    "yandexPath": yandex_path,
-                    "error": str(e),
-                })
+        if yandex_path:
+            delete_job = create_yandex_delete_job(
+                dialog_id=dialog_id,
+                checklist_key=config.key,
+                item_id=item_id,
+                document_id=removed_document_id,
+                file_name=clean_cell_value(doc_to_remove.get("name")),
+                yandex_path=yandex_path,
+            )
+
+            delete_job_id = clean_cell_value(delete_job.get("job_id") or delete_job.get("jobId"))
+            if delete_job_id:
+                delete_enqueue_result = enqueue_yandex_mirror_job(
+                    delete_job_id,
+                    source="remove_document",
+                )
 
     remaining_documents = []
     removed = False
@@ -297,7 +341,11 @@ async def api_checklist_remove_document(request: Request):
             clean_cell_value(doc.get("path")),
         }
 
-        if not removed and (same_id or same_url or (doc_to_remove and str(doc.get("id") or "") == str(doc_to_remove.get("id") or ""))):
+        if not removed and (
+            same_id
+            or same_url
+            or (doc_to_remove and str(doc.get("id") or "") == str(doc_to_remove.get("id") or ""))
+        ):
             removed = True
             continue
 
@@ -346,8 +394,38 @@ async def api_checklist_remove_document(request: Request):
         "dialogId": dialog_id,
         "checklistKey": config.key,
         "item": updated_item,
+        "deleteJobId": delete_job_id,
+        "yandexDeleteQueued": bool(delete_enqueue_result.get("queued")),
+        "yandexDeleteQueue": delete_enqueue_result,
         "progressPercent": data.get("progressPercent", 0),
     })
+
+@router.get("/api/checklist/upload-job-status")
+def api_checklist_upload_job_status(jobId: str = ""):
+    job = get_upload_job(jobId)
+    return JSONResponse(public_job_payload(job))
+
+
+@router.get("/api/checklist/document-mirror-status")
+def api_checklist_document_mirror_status(
+    dialogId: str = "",
+    checklistKey: str = "id",
+    itemId: str = "",
+    documentId: str = "",
+):
+    job = get_latest_document_job(
+        dialog_id=dialogId,
+        checklist_key=checklistKey,
+        item_id=itemId,
+        document_id=documentId,
+    )
+
+    return JSONResponse(public_job_payload(job))
+
+
+@router.get("/api/checklist/yandex-mirror-queue-state")
+def api_checklist_yandex_mirror_queue_state():
+    return JSONResponse(get_yandex_mirror_queue_state())
 
 @router.get("/api/checklist/folder", response_class=HTMLResponse)
 def api_checklist_folder(dialogId: str = "", itemId: str = "", checklistKey: str = "id"):

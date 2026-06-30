@@ -35,6 +35,13 @@ from app.checklists.documents import (
 
 from app.checklists.permissions import can_user_delete_files
 
+from app.checklists.upload_jobs import (
+    cancel_upload_jobs_for_document,
+    create_yandex_delete_job,
+)
+
+from app.checklists.yandex_mirror_queue import enqueue_yandex_mirror_job
+
 from app.checklists.yandex_folders import (
     can_create_custom_item_yandex_folder,
     ensure_yandex_folder_for_custom_item,
@@ -45,6 +52,46 @@ router = APIRouter()
 def resolve_required_group_for_item(checklist_key: str, item: dict) -> int:
     config = get_checklist_config(checklist_key)
     return resolve_required_group_id_by_item_id_or_name(config.key, item)
+
+def enqueue_delete_jobs_for_documents(
+    dialog_id: str,
+    checklist_key: str,
+    item_id: str,
+    documents: list[dict],
+    source: str = "status_no",
+) -> list[str]:
+    job_ids = []
+
+    for doc in normalize_documents_list(documents):
+        document_id = clean_cell_value(doc.get("id"))
+
+        if document_id:
+            cancel_upload_jobs_for_document(
+                dialog_id=dialog_id,
+                checklist_key=checklist_key,
+                item_id=item_id,
+                document_id=document_id,
+            )
+
+        yandex_path = clean_cell_value(doc.get("yandexPath"))
+        if not yandex_path:
+            continue
+
+        delete_job = create_yandex_delete_job(
+            dialog_id=dialog_id,
+            checklist_key=checklist_key,
+            item_id=item_id,
+            document_id=document_id,
+            file_name=clean_cell_value(doc.get("name")),
+            yandex_path=yandex_path,
+        )
+
+        job_id = clean_cell_value(delete_job.get("job_id") or delete_job.get("jobId"))
+        if job_id:
+            enqueue_yandex_mirror_job(job_id, source=source)
+            job_ids.append(job_id)
+
+    return job_ids
 
 @router.get("/api/checklist")
 def api_get_checklist(dialogId: str = "", checklistKey: str = "id"):
@@ -274,6 +321,14 @@ async def api_checklist_update_item(request: Request):
         target_item["priority"] = derive_indicator_from_status(new_status)
 
         if new_status == "Нет":
+            enqueue_delete_jobs_for_documents(
+                dialog_id=dialog_id,
+                checklist_key=config.key,
+                item_id=item_id,
+                documents=documents_before_status_change,
+                source="status_no",
+            )
+
             cleared_item = remove_all_item_documents(dialog_id, config.key, item_id, target_item)
             target_item.clear()
             target_item.update(cleared_item)

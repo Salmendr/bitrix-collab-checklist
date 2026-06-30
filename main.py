@@ -23,6 +23,11 @@ from app.checklists.yandex_warmup_queue import (
     enqueue_all_saved_project_contexts,
 )
 
+from app.checklists.yandex_mirror_queue import (
+    start_yandex_mirror_workers,
+    enqueue_pending_yandex_mirror_jobs,
+)
+
 app = FastAPI()
 
 ensure_runtime_directories()
@@ -45,5 +50,9 @@ init_db()
 @app.on_event("startup")
 def startup_event():
     init_db()
+
     start_yandex_warmup_workers()
     enqueue_all_saved_project_contexts(source="startup")
+
+    start_yandex_mirror_workers()
+    enqueue_pending_yandex_mirror_jobs(source="startup")

@@ -1,5 +1,5 @@
 import requests
-
+from pathlib import Path
 from app.settings import (
     YANDEX_DISK_OAUTH_TOKEN,
     YANDEX_DISK_API_BASE,
@@ -76,6 +76,66 @@ def yandex_disk_upload_bytes(target_path: str, file_bytes: bytes) -> dict:
         "path": normalize_yandex_disk_path(target_path),
     }
 
+class ProgressFileReader:
+    def __init__(self, raw, total_bytes: int, progress_callback=None):
+        self.raw = raw
+        self.total_bytes = int(total_bytes or 0)
+        self.progress_callback = progress_callback
+        self.uploaded_bytes = 0
+
+    def read(self, size=-1):
+        chunk = self.raw.read(size)
+        if chunk:
+            self.uploaded_bytes += len(chunk)
+            if self.progress_callback:
+                self.progress_callback(self.uploaded_bytes, self.total_bytes)
+        return chunk
+
+    def __len__(self):
+        return self.total_bytes
+
+    def __getattr__(self, name):
+        return getattr(self.raw, name)
+
+
+def yandex_disk_upload_file(
+    target_path: str,
+    local_path,
+    progress_callback=None,
+    chunk_size: int = 1024 * 1024,
+) -> dict:
+    normalized_path = normalize_yandex_disk_path(target_path)
+    source_path = Path(local_path)
+
+    if not source_path.exists():
+        raise RuntimeError(f"Local file not found: {source_path}")
+
+    total_bytes = source_path.stat().st_size
+    upload_href = yandex_disk_get_upload_href(normalized_path, overwrite=True)
+
+    with open(source_path, "rb") as f:
+        reader = ProgressFileReader(
+            raw=f,
+            total_bytes=total_bytes,
+            progress_callback=progress_callback,
+        )
+
+        upload_response = requests.put(
+            upload_href,
+            data=reader,
+            headers={
+                "Content-Length": str(total_bytes),
+            },
+            timeout=300,
+        )
+
+    upload_response.raise_for_status()
+
+    return {
+        "ok": True,
+        "path": normalized_path,
+        "size": total_bytes,
+    }
 
 def yandex_disk_delete_path(target_path: str, permanently: bool = True):
     normalized_path = normalize_yandex_disk_path(target_path)

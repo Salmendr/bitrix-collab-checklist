@@ -73,6 +73,7 @@ def normalize_document_record(doc: dict) -> dict:
 
         "mirrorStatus": clean_cell_value(doc.get("mirrorStatus")) or "",
         "mirrorError": clean_cell_value(doc.get("mirrorError")) or "",
+        "mirrorJobId": clean_cell_value(doc.get("mirrorJobId")) or "",
         "yandexPath": clean_cell_value(doc.get("yandexPath")) or "",
         "yandexFileUrl": clean_cell_value(doc.get("yandexFileUrl")) or "",
         "yandexFolderAlias": clean_cell_value(doc.get("yandexFolderAlias")) or "",
@@ -138,20 +139,6 @@ def remove_all_item_documents(dialog_id: str, checklist_key: str, item_id: str, 
         remove_item_document_file({
             "documentUrl": local_document_url
         })
-
-        yandex_path = clean_cell_value(doc.get("yandexPath"))
-        if yandex_path and is_yandex_disk_enabled():
-            try:
-                yandex_disk_delete_path(yandex_path, permanently=True)
-            except Exception as e:
-                write_debug_log("yandex_mirror_delete_error", {
-                    "dialogId": dialog_id,
-                    "checklistKey": checklist_key,
-                    "itemId": item_id,
-                    "documentId": clean_cell_value(doc.get("id")),
-                    "yandexPath": yandex_path,
-                    "error": str(e),
-                })
 
     cleaned_item["documents"] = []
     cleaned_item["documentUrl"] = ""
