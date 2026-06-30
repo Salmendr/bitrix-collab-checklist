@@ -17,7 +17,7 @@ from app.checklists.project_routes import router as project_router
 from app.integrations.n8n_routes import router as n8n_router
 from app.checklists.checklist_routes import router as checklist_router
 from app.checklists.document_routes import router as document_router
-
+from app.admin_routes import router as admin_router
 from app.checklists.yandex_warmup_queue import (
     start_yandex_warmup_workers,
     enqueue_all_saved_project_contexts,
@@ -75,6 +75,10 @@ async def upload_request_debug_middleware(request: Request, call_next):
 ensure_runtime_directories()
 
 app.mount("/uploads", StaticFiles(directory=str(UPLOAD_ROOT)), name="uploads")
+
+# Новая админ-панель должна подключаться до ui_router,
+# потому что старая /admin могла быть внутри ui_router.
+app.include_router(admin_router)
 app.include_router(ui_router)
 app.include_router(popup_router)
 app.include_router(service_router)
@@ -84,7 +88,6 @@ app.include_router(project_router)
 app.include_router(n8n_router)
 app.include_router(checklist_router)
 app.include_router(document_router)
-
 # Страховочный вызов при импорте модуля
 init_db()
 

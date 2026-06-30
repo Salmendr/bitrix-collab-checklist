@@ -1689,6 +1689,67 @@ def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
             .progress-box.id-accent .progress-track {{ height:9px; }}
             .save-state.saving {{ background:#fff4e5; color:#b26a00; }}
             .save-state.error {{ background:#fdecec; color:#b42318; }}
+            .upload-progress-box {{
+                width: 310px;
+                padding: 9px 10px;
+                border: 1px solid #fed7aa;
+                border-radius: 12px;
+                background: #fff7ed;
+                color: #9a3412;
+                box-shadow: 0 6px 18px rgba(154,52,18,.10);
+            }}
+
+            .upload-progress-title {{
+                font-size: 12px;
+                font-weight: 800;
+                margin-bottom: 3px;
+            }}
+
+            .upload-progress-file {{
+                font-size: 12px;
+                font-weight: 700;
+                color: #1f2328;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                margin-bottom: 3px;
+            }}
+
+            .upload-progress-warning {{
+                font-size: 11px;
+                font-weight: 700;
+                color: #b45309;
+                margin-bottom: 6px;
+            }}
+
+            .upload-progress-track {{
+                width: 100%;
+                height: 8px;
+                border-radius: 999px;
+                background: #ffedd5;
+                overflow: hidden;
+            }}
+
+            .upload-progress-bar {{
+                height: 100%;
+                width: 0%;
+                border-radius: 999px;
+                background: #f97316;
+                transition: width .18s ease;
+            }}
+
+            .upload-progress-status {{
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                gap: 8px;
+                margin-top: 5px;
+                font-size: 11px;
+            }}
+
+            .upload-progress-status b {{
+                font-size: 12px;
+            }}
             .content {{ padding:14px 16px 16px; max-height:82vh; overflow:auto; }}
             .layout {{ display:flex; flex-direction:column; gap:12px; align-items:stretch; }}
             .tables-grid {{ display:grid; grid-template-columns:1fr 1fr; gap:14px; align-items:start; }}
@@ -1895,6 +1956,18 @@ def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
                         </div>
                     </div>
                     <div class="header-right">
+                        <div id="uploadProgressBox" class="upload-progress-box" style="display:none;">
+                            <div class="upload-progress-title">Загрузка файла</div>
+                            <div class="upload-progress-file" id="uploadProgressFile">Файл</div>
+                            <div class="upload-progress-warning">Не закрывайте приложение до завершения загрузки</div>
+                            <div class="upload-progress-track">
+                                <div class="upload-progress-bar" id="uploadProgressBar"></div>
+                            </div>
+                            <div class="upload-progress-status">
+                                <span id="uploadProgressStatus">Подготовка...</span>
+                                <b id="uploadProgressPercent">0%</b>
+                            </div>
+                        </div>
                         <div id="saveState" class="save-state">Сохранено</div>
                     </div>
                 </div>
@@ -1922,6 +1995,14 @@ def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
                             Остановить создание папок Яндекс.Диска
                         </button>
                         <span id="debugYandexWarmupStopState" style="font-size:12px;color:#667085;"></span>
+                        <a
+                            id="adminPanelLink"
+                            href="admin"
+                            target="_blank"
+                            style="margin-left:auto;height:28px;display:inline-flex;align-items:center;border:1px solid #bfdbfe;border-radius:8px;background:#eff6ff;color:#175cd3;font-size:12px;font-weight:700;text-decoration:none;padding:0 10px;"
+                        >
+                            Админ-панель
+                        </a>
                     </div>
                     </div>
                     <div class="layout">
@@ -2026,6 +2107,13 @@ def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
             let currentEditorReady = false;
             let currentEditorReadyPromise = null;
                         const saveStateEl = document.getElementById('saveState');
+                        const uploadProgressBoxEl = document.getElementById('uploadProgressBox');
+                        const uploadProgressFileEl = document.getElementById('uploadProgressFile');
+                        const uploadProgressBarEl = document.getElementById('uploadProgressBar');
+                        const uploadProgressStatusEl = document.getElementById('uploadProgressStatus');
+                        const uploadProgressPercentEl = document.getElementById('uploadProgressPercent');
+                        let uploadProgressHideTimer = null;
+                        let uploadJobPollTimer = null;
             const leftTableBodyEl = document.getElementById('leftTableBody');
             const middleTableBodyEl = document.getElementById('middleTableBody');
             const rightTableBodyEl = document.getElementById('rightTableBody');
@@ -2047,6 +2135,7 @@ def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
             const debugLastEventEl = document.getElementById('debugLastEvent');
             const debugPanelEl = document.getElementById('debugPanel');
             const debugLogsLinkEl = document.getElementById('debugLogsLink');
+            const adminPanelLinkEl = document.getElementById('adminPanelLink');
             const debugStopYandexWarmupBtn = document.getElementById('debugStopYandexWarmupBtn');
             const debugYandexWarmupStopStateEl = document.getElementById('debugYandexWarmupStopState');
             const allowedDebugUserIds = new Set(['138', '18']);
@@ -2074,6 +2163,9 @@ def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
                 }}
                 if (debugLogsLinkEl) {{
                     debugLogsLinkEl.href = 'debug/logs?userId=' + encodeURIComponent(currentUserId);
+                }}
+                if (adminPanelLinkEl) {{
+                    adminPanelLinkEl.href = appUrl('admin') + '?userId=' + encodeURIComponent(currentUserId);
                 }}
             }}
             function detectAppBasePath() {{
@@ -2158,6 +2250,138 @@ def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
                 }}
 
                 return [];
+            }}
+
+            function clearUploadProgressHideTimer() {{
+                if (uploadProgressHideTimer) {{
+                    clearTimeout(uploadProgressHideTimer);
+                    uploadProgressHideTimer = null;
+                }}
+            }}
+
+            function stopUploadJobPolling() {{
+                if (uploadJobPollTimer) {{
+                    clearInterval(uploadJobPollTimer);
+                    uploadJobPollTimer = null;
+                }}
+            }}
+
+            function setUploadProgressVisible(visible) {{
+                if (!uploadProgressBoxEl) return;
+                uploadProgressBoxEl.style.display = visible ? '' : 'none';
+            }}
+
+            function updateUploadProgress(fileName, percent, statusText) {{
+                clearUploadProgressHideTimer();
+
+                const safePercent = Math.max(0, Math.min(100, Math.round(Number(percent || 0))));
+
+                setUploadProgressVisible(true);
+
+                if (uploadProgressFileEl) {{
+                    uploadProgressFileEl.textContent = String(fileName || 'Файл');
+                    uploadProgressFileEl.title = String(fileName || 'Файл');
+                }}
+
+                if (uploadProgressBarEl) {{
+                    uploadProgressBarEl.style.width = safePercent + '%';
+                }}
+
+                if (uploadProgressPercentEl) {{
+                    uploadProgressPercentEl.textContent = safePercent + '%';
+                }}
+
+                if (uploadProgressStatusEl) {{
+                    uploadProgressStatusEl.textContent = String(statusText || 'Загрузка...');
+                }}
+            }}
+
+            function completeUploadProgress(fileName, statusText) {{
+                updateUploadProgress(fileName, 100, statusText || 'Готово');
+
+                uploadProgressHideTimer = setTimeout(function () {{
+                    setUploadProgressVisible(false);
+                }}, 2600);
+            }}
+
+            function failUploadProgress(fileName, statusText) {{
+                updateUploadProgress(fileName, 100, statusText || 'Ошибка загрузки');
+
+                if (uploadProgressBoxEl) {{
+                    uploadProgressBoxEl.style.background = '#fef2f2';
+                    uploadProgressBoxEl.style.borderColor = '#fecaca';
+                    uploadProgressBoxEl.style.color = '#b42318';
+                }}
+
+                uploadProgressHideTimer = setTimeout(function () {{
+                    if (uploadProgressBoxEl) {{
+                        uploadProgressBoxEl.style.background = '#fff7ed';
+                        uploadProgressBoxEl.style.borderColor = '#fed7aa';
+                        uploadProgressBoxEl.style.color = '#9a3412';
+                    }}
+                    setUploadProgressVisible(false);
+                }}, 5000);
+            }}
+
+            function getUploadJobStageText(job) {{
+                const status = String(job && job.status || '');
+                const stage = String(job && job.stage || '');
+
+                if (status === 'queued') return 'Файл сохранён. Ожидает синхронизации...';
+                if (status === 'running' && stage === 'folder_prepare') return 'Готовим папку Яндекс.Диска...';
+                if (status === 'running' && stage === 'yandex_upload') return 'Загружаем копию на Яндекс.Диск...';
+                if (status === 'synced') return 'Файл загружен и синхронизирован';
+                if (status === 'skipped' && stage === 'yandex_disabled') return 'Файл сохранён локально. Яндекс отключён';
+                if (status === 'error') return 'Файл сохранён, ошибка синхронизации';
+                if (status === 'cancelled') return 'Загрузка отменена';
+                return 'Обрабатываем файл...';
+            }}
+
+            function pollUploadJobStatus(jobId, fileName) {{
+                stopUploadJobPolling();
+
+                if (!jobId) {{
+                    completeUploadProgress(fileName, 'Файл сохранён');
+                    return;
+                }}
+
+                uploadJobPollTimer = setInterval(async function () {{
+                    try {{
+                        const response = await fetch(
+                            appUrl('api/checklist/upload-job-status') +
+                            '?jobId=' + encodeURIComponent(jobId)
+                        );
+
+                        const result = await response.json().catch(() => ({{}}));
+
+                        if (!response.ok || !result.ok) {{
+                            return;
+                        }}
+
+                        const status = String(result.status || '');
+                        const rawJobPercent = Number(result.progressPercent || 0);
+                        const displayPercent = status === 'queued'
+                            ? 82
+                            : status === 'running'
+                                ? Math.max(84, Math.min(98, 75 + Math.round(rawJobPercent * 0.23)))
+                                : 100;
+
+                        updateUploadProgress(fileName, displayPercent, getUploadJobStageText(result));
+
+                        if (['synced', 'skipped', 'error', 'cancelled', 'deleted'].includes(status)) {{
+                            stopUploadJobPolling();
+
+                            if (status === 'error') {{
+                                failUploadProgress(fileName, result.error || 'Ошибка синхронизации');
+                            }} else {{
+                                completeUploadProgress(fileName, getUploadJobStageText(result));
+                            }}
+                        }}
+
+                    }} catch (e) {{
+                        console.log('upload job polling error:', e);
+                    }}
+                }}, 900);
             }}
 
             function formatFileSize(size) {{
@@ -2759,6 +2983,7 @@ def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
                 }});
 
                 setSaveState('saving', 'Загружаем файл...');
+                updateUploadProgress(fileName, 0, 'Начинаем загрузку...');
 
                 const formData = new FormData();
                 formData.append('dialogId', dialogId);
@@ -2767,37 +2992,31 @@ def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
                 formData.append('checklistKey', currentChecklistKey);
                 formData.append('itemGroup', itemGroup);
 
-                let response = null;
-                let responseText = '';
+                return await new Promise(function (resolve, reject) {{
+                    const xhr = new XMLHttpRequest();
 
-                try {{
-                    response = await fetch(appUrl('api/checklist/upload-document'), {{
-                        method: 'POST',
-                        body: formData
-                    }});
+                    xhr.open('POST', appUrl('api/checklist/upload-document'), true);
 
-                    responseText = await response.text();
+                    xhr.upload.onprogress = function (event) {{
+                        if (!event.lengthComputable) {{
+                            updateUploadProgress(fileName, 15, 'Передаём файл в приложение...');
+                            return;
+                        }}
 
-                    debugLog('upload_frontend_response_received', {{
-                        uploadId,
-                        dialogId,
-                        checklistKey: currentChecklistKey,
-                        itemId,
-                        itemGroup,
-                        fileName,
-                        fileSize,
-                        fileType,
-                        status: response.status,
-                        ok: response.ok,
-                        responseTextStart: String(responseText || '').slice(0, 1600)
-                    }});
+                        const rawPercent = Math.round((event.loaded / event.total) * 100);
+                        const displayPercent = Math.max(1, Math.min(70, Math.round(rawPercent * 0.70)));
 
-                    let result = {{}};
+                        updateUploadProgress(
+                            fileName,
+                            displayPercent,
+                            'Передаём файл в приложение... ' + rawPercent + '%'
+                        );
+                    }};
 
-                    try {{
-                        result = JSON.parse(responseText || '{{}}');
-                    }} catch (parseError) {{
-                        debugLog('upload_frontend_json_parse_failed', {{
+                    xhr.onload = function () {{
+                        const responseText = String(xhr.responseText || '');
+
+                        debugLog('upload_frontend_response_received', {{
                             uploadId,
                             dialogId,
                             checklistKey: currentChecklistKey,
@@ -2805,16 +3024,61 @@ def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
                             itemGroup,
                             fileName,
                             fileSize,
-                            status: response.status,
-                            responseTextStart: String(responseText || '').slice(0, 1600),
-                            error: String(parseError && parseError.message || parseError)
+                            fileType,
+                            status: xhr.status,
+                            ok: xhr.status >= 200 && xhr.status < 300,
+                            responseTextStart: responseText.slice(0, 1600)
                         }});
 
-                        throw new Error('Некорректный ответ сервера при загрузке файла');
-                    }}
+                        let result = {{}};
 
-                    if (!response.ok || !result.ok) {{
-                        debugLog('upload_frontend_failed_response', {{
+                        try {{
+                            result = JSON.parse(responseText || '{{}}');
+                        }} catch (parseError) {{
+                            debugLog('upload_frontend_json_parse_failed', {{
+                                uploadId,
+                                dialogId,
+                                checklistKey: currentChecklistKey,
+                                itemId,
+                                itemGroup,
+                                fileName,
+                                fileSize,
+                                status: xhr.status,
+                                responseTextStart: responseText.slice(0, 1600),
+                                error: String(parseError && parseError.message || parseError)
+                            }});
+
+                            failUploadProgress(fileName, xhr.status === 413
+                                ? 'Файл слишком большой для сервера'
+                                : 'Некорректный ответ сервера'
+                            );
+
+                            reject(new Error(xhr.status === 413
+                                ? 'Файл слишком большой для сервера'
+                                : 'Некорректный ответ сервера при загрузке файла'
+                            ));
+                            return;
+                        }}
+
+                        if (xhr.status < 200 || xhr.status >= 300 || !result.ok) {{
+                            debugLog('upload_frontend_failed_response', {{
+                                uploadId,
+                                dialogId,
+                                checklistKey: currentChecklistKey,
+                                itemId,
+                                itemGroup,
+                                fileName,
+                                fileSize,
+                                status: xhr.status,
+                                result
+                            }});
+
+                            failUploadProgress(fileName, result.error || result.details || 'Ошибка загрузки файла');
+                            reject(new Error(result.error || result.details || 'upload document failed'));
+                            return;
+                        }}
+
+                        debugLog('upload_frontend_completed', {{
                             uploadId,
                             dialogId,
                             checklistKey: currentChecklistKey,
@@ -2822,46 +3086,69 @@ def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
                             itemGroup,
                             fileName,
                             fileSize,
-                            status: response.status,
-                            result
+                            uploadJobId: result.uploadJobId || '',
+                            yandexMirrorQueued: !!result.yandexMirrorQueued
                         }});
 
-                        throw new Error(result.error || result.details || 'upload document failed');
-                    }}
+                        updateUploadProgress(fileName, 80, 'Файл сохранён. Запускаем синхронизацию...');
+                        pollUploadJobStatus(result.uploadJobId || '', fileName);
 
-                    debugLog('upload_frontend_completed', {{
-                        uploadId,
-                        dialogId,
-                        checklistKey: currentChecklistKey,
-                        itemId,
-                        itemGroup,
-                        fileName,
-                        fileSize,
-                        uploadJobId: result.uploadJobId || '',
-                        yandexMirrorQueued: !!result.yandexMirrorQueued
-                    }});
+                        setSaveState('', 'Сохранено');
+                        resolve(result);
+                    }};
 
-                    setSaveState('', 'Сохранено');
-                    return result;
+                    xhr.onerror = function () {{
+                        debugLog('upload_frontend_xhr_error', {{
+                            uploadId,
+                            dialogId,
+                            checklistKey: currentChecklistKey,
+                            itemId,
+                            itemGroup,
+                            fileName,
+                            fileSize,
+                            fileType,
+                            status: xhr.status || '',
+                            responseTextStart: String(xhr.responseText || '').slice(0, 1600)
+                        }});
 
-                }} catch (e) {{
-                    debugLog('upload_frontend_exception', {{
-                        uploadId,
-                        dialogId,
-                        checklistKey: currentChecklistKey,
-                        itemId,
-                        itemGroup,
-                        fileName,
-                        fileSize,
-                        fileType,
-                        status: response ? response.status : '',
-                        responseTextStart: String(responseText || '').slice(0, 1600),
-                        error: String(e && e.message || e)
-                    }});
+                        failUploadProgress(fileName, 'Ошибка сети при загрузке файла');
+                        reject(new Error('network upload error'));
+                    }};
 
-                    setSaveState('error', 'Ошибка загрузки файла');
-                    throw e;
-                }}
+                    xhr.onabort = function () {{
+                        debugLog('upload_frontend_xhr_abort', {{
+                            uploadId,
+                            dialogId,
+                            checklistKey: currentChecklistKey,
+                            itemId,
+                            itemGroup,
+                            fileName,
+                            fileSize,
+                            fileType
+                        }});
+
+                        failUploadProgress(fileName, 'Загрузка отменена');
+                        reject(new Error('upload aborted'));
+                    }};
+
+                    xhr.ontimeout = function () {{
+                        debugLog('upload_frontend_xhr_timeout', {{
+                            uploadId,
+                            dialogId,
+                            checklistKey: currentChecklistKey,
+                            itemId,
+                            itemGroup,
+                            fileName,
+                            fileSize,
+                            fileType
+                        }});
+
+                        failUploadProgress(fileName, 'Истекло время загрузки');
+                        reject(new Error('upload timeout'));
+                    }};
+
+                    xhr.send(formData);
+                }});
             }}
             function getItemsByGroup(groupId) {{
                 return items
