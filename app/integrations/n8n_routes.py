@@ -1,4 +1,4 @@
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 
@@ -12,8 +12,8 @@ from app.checklists.storage import (
 )
 from app.logging_utils import write_debug_log
 
-from app.checklists.yandex_folders import (
-    run_project_yandex_folder_warmup,
+from app.checklists.yandex_warmup_queue import (
+    enqueue_yandex_warmup,
 )
 
 router = APIRouter()
@@ -45,7 +45,6 @@ def verify_n8n_token(request: Request):
 def api_save_project_storage_context(
     request: Request,
     payload: dict,
-    background_tasks: BackgroundTasks,
 ):
     verify_n8n_token(request)
 
@@ -106,7 +105,7 @@ def api_save_project_storage_context(
         "mirrorTargets": storage_mode.get("mirrorTargets") if isinstance(storage_mode, dict) else [],
     })
 
-    background_tasks.add_task(run_project_yandex_folder_warmup_safe, dialog_id)
+    queue_result = enqueue_yandex_warmup(dialog_id, source="n8n_context_saved")
 
     context = get_project_storage_context(dialog_id)
 
@@ -115,7 +114,8 @@ def api_save_project_storage_context(
         "dialogId": dialog_id,
         "projectId": project_id,
         "projectName": project_name,
-        "yandexWarmupQueued": True,
+        "yandexWarmupQueued": bool(queue_result.get("queued")),
+        "yandexWarmupQueue": queue_result,
         "foldersCount": len((context.get("yandexDisk") or {}).get("folders") or {}) if context else 0,
         "itemMappingsCount": len(context.get("itemMappings") or []) if context else 0,
     }
@@ -145,28 +145,3 @@ def api_get_project_storage_context(request: Request, dialogId: str = ""):
         "ok": True,
         "context": context,
     })
-
-
-def run_project_yandex_folder_warmup_safe(dialog_id: str):
-    dialog_id = normalize_dialog_id(dialog_id)
-
-    if not dialog_id:
-        write_debug_log("n8n_yandex_warmup_background_failed", {
-            "dialogId": dialog_id,
-            "error": "dialogId is required",
-        })
-        return
-
-    try:
-        result = run_project_yandex_folder_warmup(dialog_id)
-
-        write_debug_log("n8n_yandex_warmup_background_completed", {
-            "dialogId": dialog_id,
-            "result": result,
-        })
-
-    except Exception as exc:
-        write_debug_log("n8n_yandex_warmup_background_failed", {
-            "dialogId": dialog_id,
-            "error": str(exc),
-        })

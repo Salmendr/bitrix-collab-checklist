@@ -153,7 +153,7 @@ STANDARD_P_YANDEX_FOLDER_SPECS = {
 
 CHECKLIST_CONFIG = ChecklistConfig(
     key="p",
-    title="Стадия П",
+    title="Чек-лист Стадия П",
     groups=groups_from_list(P_GROUPS),
     not_required_group_id=4,
     default_group_id=2,

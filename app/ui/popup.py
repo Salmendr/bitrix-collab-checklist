@@ -9,6 +9,7 @@ from app.checklists.utils import (
 
 from app.checklists.storage import (
     get_checklist,
+    get_project_storage_context,
     get_project_root_yandex_folder_info,
 )
 
@@ -18,10 +19,14 @@ def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
     dialog_id = normalize_dialog_id(dialogId)
     checklist_key = normalize_checklist_key(checklistKey)
     data = get_checklist(dialog_id, checklist_key)
+    project_context = get_project_storage_context(dialog_id) or {}
 
-    title_raw = data.get("title", "Чек-лист ИД")
+    title_raw = clean_cell_value(data.get("title")) or "Чек-лист"
     title = html.escape(title_raw)
-    collab_title_raw = (data.get("collabTitle", "") or "").strip()
+
+    project_name_raw = clean_cell_value(project_context.get("projectName"))
+    collab_title_raw = clean_cell_value(data.get("collabTitle")) or project_name_raw
+
     collab_title = html.escape(collab_title_raw)
     full_title = f"{title} — {collab_title}" if collab_title_raw else title
     progress_percent = int(data.get("progressPercent", 0) or 0)
@@ -126,7 +131,7 @@ def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
 
                 return found || {
                     key: targetKey,
-                    title: targetKey === 'id' ? 'Чек-лист ИД' : 'Чек-лист',
+                    title: 'Чек-лист',
                     notRequiredGroupId: 0,
                     defaultGroupId: 0,
                     allowCustomItemGroupIds: []
@@ -137,17 +142,8 @@ def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
                 const meta = getChecklistMeta(key);
                 const title = String(meta && meta.title || '').trim();
 
-                if (title) {
-                    return title;
-                }
-
-                if (key === 'concept') return 'Чек-лист Концепция';
-                if (key === 'opr') return 'Чек-лист ОПР';
-                if (key === 'p') return 'Стадия П';
-
-                return 'Чек-лист ИД';
+                return title || 'Чек-лист';
             }
-
             function getCurrentNotRequiredGroupId() {
                 const meta = getChecklistMeta(currentChecklistKey);
                 return Number(meta && meta.notRequiredGroupId || 0);
@@ -1279,27 +1275,55 @@ def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
                 return `<div class="group-block"><div class="group-title">${esc(group.title)}</div>${rows}${addBlock}</div>`;
             }
 
-            function renderGenericPanel(mainGroup, appendNotRequired = false) {
-                const showDates = isGenericDatesVisible(mainGroup.id);
+            function splitGroupsIntoPanels(sourceGroups, panelCount) {
+                const result = Array.from({ length: panelCount }, () => []);
+                const safeGroups = Array.isArray(sourceGroups) ? sourceGroups : [];
+
+                if (!safeGroups.length) {
+                    return result;
+                }
+
+                safeGroups.forEach((group, index) => {
+                    const panelIndex = Math.min(
+                        panelCount - 1,
+                        Math.floor(index * panelCount / safeGroups.length)
+                    );
+
+                    result[panelIndex].push(group);
+                });
+
+                return result;
+            }
+
+            function renderGenericPanel(panelGroups, appendNotRequired = false) {
+                const safePanelGroups = Array.isArray(panelGroups) ? panelGroups : [];
                 const notRequiredGroupId = getCurrentNotRequiredGroupId();
                 const notRequiredGroup = appendNotRequired
-                    ? groups.find(g => Number(g.id) === notRequiredGroupId)
+                    ? groups.find(g => Number(g.id) === Number(notRequiredGroupId))
                     : null;
 
-                return `
-                    <div class="table id-table">
+                const groupBlocks = safePanelGroups.map(group => {
+                    const showDates = isGenericDatesVisible(group.id);
+
+                    return `
                         <div class="thead">
-                            ${buildGenericTableHeader(mainGroup, showDates)}
+                            ${buildGenericTableHeader(group, showDates)}
                         </div>
                         <div>
-                            ${renderGenericGroup(mainGroup, showDates)}
-                            ${appendNotRequired && notRequiredGroup && hasItemsInGroup(notRequiredGroupId)
-                                ? renderGenericGroup(notRequiredGroup, false)
-                                : ''
-                            }
+                            ${renderGenericGroup(group, showDates)}
                         </div>
-                    </div>
-                `;
+                    `;
+                }).join('');
+
+                const notRequiredBlock = appendNotRequired && notRequiredGroup && hasItemsInGroup(notRequiredGroupId)
+                    ? `
+                        <div>
+                            ${renderGenericGroup(notRequiredGroup, false)}
+                        </div>
+                    `
+                    : '';
+
+                return groupBlocks + notRequiredBlock;
             }
 
             function resetTablePanelsForGeneric(panelCount) {
@@ -1340,26 +1364,21 @@ def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
                     Number(group.id) !== Number(notRequiredGroupId)
                 );
 
-                const visibleGroups = activeGroups.length ? activeGroups : groups.slice(0, 1);
+                const visibleGroups = activeGroups.length ? activeGroups : (Array.isArray(groups) ? groups : []).slice(0, 1);
                 const panelCount = Math.min(Math.max(visibleGroups.length, 1), 3);
                 const targetTables = [leftTableEl, middleTableEl, rightTableEl];
+                const groupedPanels = splitGroupsIntoPanels(visibleGroups, panelCount);
 
                 resetTablePanelsForGeneric(panelCount);
 
-                visibleGroups.slice(0, 3).forEach((group, index) => {
+                groupedPanels.forEach((panelGroups, index) => {
                     const appendNotRequired = index === panelCount - 1;
-                    targetTables[index].innerHTML = renderGenericPanel(group, appendNotRequired);
+                    targetTables[index].innerHTML = renderGenericPanel(panelGroups, appendNotRequired);
                 });
             }
 
-            const previousRenderTablesGeneric = renderTables;
             renderTables = function () {
-                if (!['id', 'opr', 'concept'].includes(currentChecklistKey)) {
-                    renderGenericTables();
-                    return;
-                }
-
-                previousRenderTablesGeneric();
+                renderGenericTables();
             };
 
             const previousRenderAll = renderAll;
@@ -1865,7 +1884,7 @@ def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
             <div class="modal">
                 <div class="header">
                     <div class="header-main">
-                        <div class="title" id="popupTitle">Чек-лист ИД</div>
+                        <div class="title" id="popupTitle">{full_title}</div>
                         <div style="display:flex; align-items:flex-end; gap:10px; flex-wrap:wrap;">
                             <div class="progress-box">
                                 <div class="progress-label">Прогресс</div>
@@ -1894,6 +1913,16 @@ def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
                         <div style="margin-top:4px;">
                             <a id="debugLogsLink" href="debug/logs" target="_blank">Открыть /debug/logs</a>
                         </div>
+                        <div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                        <button
+                            id="debugStopYandexWarmupBtn"
+                            type="button"
+                            style="height:28px;border:1px solid #fca5a5;border-radius:8px;background:#fef2f2;color:#b42318;font-size:12px;font-weight:700;cursor:pointer;padding:0 10px;"
+                        >
+                            Остановить создание папок Яндекс.Диска
+                        </button>
+                        <span id="debugYandexWarmupStopState" style="font-size:12px;color:#667085;"></span>
+                    </div>
                     </div>
                     <div class="layout">
                         <div class="tables-grid">
@@ -2018,6 +2047,8 @@ def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
             const debugLastEventEl = document.getElementById('debugLastEvent');
             const debugPanelEl = document.getElementById('debugPanel');
             const debugLogsLinkEl = document.getElementById('debugLogsLink');
+            const debugStopYandexWarmupBtn = document.getElementById('debugStopYandexWarmupBtn');
+            const debugYandexWarmupStopStateEl = document.getElementById('debugYandexWarmupStopState');
             const allowedDebugUserIds = new Set(['138', '18']);
             const fileDeleteAllowedUserIds = new Set({file_delete_allowed_user_ids_json});
 
@@ -2283,6 +2314,85 @@ def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
                     setDebugText(event + ' | js error');
                 }}
             }}
+
+            async function stopCurrentYandexWarmupFromDebugPanel() {{
+                await fetchCurrentUserIfPossible();
+
+                const actor = getFileDeleteActor();
+
+                if (!allowedDebugUserIds.has(String(actor.id || '').trim())) {{
+                    alert('Остановка warmup доступна только техническим пользователям');
+                    return;
+                }}
+
+                if (!window.confirm('Остановить создание папок Яндекс.Диска для текущей коллабы? Уже созданные папки останутся на месте.')) {{
+                    return;
+                }}
+
+                if (debugStopYandexWarmupBtn) {{
+                    debugStopYandexWarmupBtn.disabled = true;
+                    debugStopYandexWarmupBtn.style.opacity = '0.65';
+                }}
+
+                if (debugYandexWarmupStopStateEl) {{
+                    debugYandexWarmupStopStateEl.textContent = 'Отправляем команду остановки...';
+                }}
+
+                try {{
+                    const response = await fetch(appUrl('api/project-yandex-warmup/stop'), {{
+                        method: 'POST',
+                        headers: {{
+                            'Content-Type': 'application/json'
+                        }},
+                        body: JSON.stringify({{
+                            dialogId,
+                            checklistKey: currentChecklistKey,
+                            userId: actor.id,
+                            userName: actor.name
+                        }})
+                    }});
+
+                    const result = await response.json().catch(() => ({{}}));
+
+                    if (!response.ok || !result.ok) {{
+                        throw new Error(result.error || 'warmup stop failed');
+                    }}
+
+                    debugLog('debug_yandex_warmup_stop_requested', result);
+
+                    if (debugYandexWarmupStopStateEl) {{
+                        const stateText = result.wasRunning
+                            ? 'Остановка запрошена. Текущая папка завершится, следующая уже не начнётся.'
+                            : result.wasQueued
+                                ? 'Проект убран из очереди.'
+                                : 'Команда остановки принята.';
+
+                        debugYandexWarmupStopStateEl.textContent = stateText;
+                    }}
+
+                }} catch (e) {{
+                    console.log('stop warmup error:', e);
+
+                    if (debugYandexWarmupStopStateEl) {{
+                        debugYandexWarmupStopStateEl.textContent = 'Ошибка остановки: ' + String(e && e.message || e);
+                    }}
+
+                    debugLog('debug_yandex_warmup_stop_failed', {{
+                        message: String(e && e.message || e)
+                    }});
+
+                }} finally {{
+                    if (debugStopYandexWarmupBtn) {{
+                        debugStopYandexWarmupBtn.disabled = false;
+                        debugStopYandexWarmupBtn.style.opacity = '1';
+                    }}
+                }}
+            }}
+
+            if (debugStopYandexWarmupBtn) {{
+                debugStopYandexWarmupBtn.addEventListener('click', stopCurrentYandexWarmupFromDebugPanel);
+            }}
+
             function logRenderState(stage) {{
                 debugLog('render_state', {{
                     stage,
@@ -3470,7 +3580,7 @@ def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
                 renderProjectRootFolderButton();
 
                 if (progressBoxEl) {{
-                    progressBoxEl.classList.toggle('id-accent', true);
+                    progressBoxEl.classList.toggle('id-accent', false);
                 }}
 
                 updateDebugPanelAccess();

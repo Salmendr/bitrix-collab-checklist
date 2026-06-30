@@ -18,6 +18,11 @@ from app.integrations.n8n_routes import router as n8n_router
 from app.checklists.checklist_routes import router as checklist_router
 from app.checklists.document_routes import router as document_router
 
+from app.checklists.yandex_warmup_queue import (
+    start_yandex_warmup_workers,
+    enqueue_all_saved_project_contexts,
+)
+
 app = FastAPI()
 
 ensure_runtime_directories()
@@ -40,3 +45,5 @@ init_db()
 @app.on_event("startup")
 def startup_event():
     init_db()
+    start_yandex_warmup_workers()
+    enqueue_all_saved_project_contexts(source="startup")

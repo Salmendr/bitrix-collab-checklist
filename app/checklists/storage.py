@@ -277,3 +277,30 @@ def get_project_root_yandex_folder_info(dialog_id: str) -> dict:
         "standardFoldersPreparedAt": clean_cell_value(yandex_disk.get("standardFoldersPreparedAt")),
         "standardFoldersPreparedCount": int(yandex_disk.get("standardFoldersPreparedCount") or 0),
     }
+
+def list_project_storage_context_dialog_ids() -> list[str]:
+    conn = get_conn()
+
+    try:
+        rows = conn.execute("""
+            SELECT dialog_id
+            FROM project_storage_contexts
+            ORDER BY updated_at DESC, dialog_id
+        """).fetchall()
+
+        result = []
+
+        for row in rows:
+            dialog_id = normalize_dialog_id(row["dialog_id"])
+            if dialog_id:
+                result.append(dialog_id)
+
+        return result
+
+    except sqlite3.OperationalError as e:
+        if "no such table" in str(e).lower():
+            return []
+        raise
+
+    finally:
+        conn.close()

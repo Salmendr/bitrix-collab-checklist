@@ -23,6 +23,8 @@ from app.checklists.storage import (
     get_item_yandex_folder,
 )
 
+from app.checklists.yandex_warmup_control import is_yandex_warmup_stop_requested
+
 from app.yandex_disk.client import (
     is_yandex_disk_enabled,
     normalize_yandex_disk_path,
@@ -31,6 +33,8 @@ from app.yandex_disk.client import (
     yandex_disk_publish_path,
     yandex_disk_get_resource_meta,
 )
+
+
 
 ACTIVE_YANDEX_WARMUPS: set[str] = set()
 
@@ -315,6 +319,18 @@ def run_project_yandex_folder_warmup(dialog_id: str) -> dict:
             "error": "dialogId is required",
         }
 
+    if is_yandex_warmup_stop_requested(dialog_id):
+        write_debug_log("yandex_background_warmup_cancelled_before_start", {
+            "dialogId": dialog_id,
+        })
+
+        return {
+            "ok": True,
+            "cancelled": True,
+            "dialogId": dialog_id,
+            "reason": "stop requested before start",
+        }    
+
     if dialog_id in ACTIVE_YANDEX_WARMUPS:
         write_debug_log("yandex_warmup_already_running", {
             "dialogId": dialog_id,
@@ -333,6 +349,21 @@ def run_project_yandex_folder_warmup(dialog_id: str) -> dict:
         })
 
         root_result = ensure_project_yandex_root_folder(dialog_id)
+
+        if is_yandex_warmup_stop_requested(dialog_id):
+            write_debug_log("yandex_background_warmup_cancelled_after_root", {
+                "dialogId": dialog_id,
+                "rootResult": root_result,
+            })
+
+            return {
+                "ok": True,
+                "cancelled": True,
+                "dialogId": dialog_id,
+                "rootResult": root_result,
+                "reason": "stop requested after root folder prepared",
+            }
+
         if not root_result.get("ok"):
             write_debug_log("yandex_background_warmup_root_failed", {
                 "dialogId": dialog_id,
@@ -452,7 +483,51 @@ def ensure_project_standard_yandex_folder_structure(dialog_id: str) -> dict:
 
     updated_folders = dict(folders)
 
+    def save_cancelled_warmup_progress(reason: str) -> dict:
+        yandex_disk["folders"] = updated_folders
+        yandex_disk["standardFoldersPrepared"] = False
+        yandex_disk["standardFoldersPreparedAt"] = prepared_at
+        yandex_disk["standardFoldersPreparedCount"] = len(updated_folders)
+
+        save_project_storage_context(dialog_id, {
+            "dialogId": dialog_id,
+            "projectId": context.get("projectId") or "",
+            "projectName": context.get("projectName") or "",
+            "storageMode": context.get("storageMode") or {},
+            "yandexDisk": yandex_disk,
+            "itemMappings": context.get("itemMappings") or [],
+        })
+
+        write_debug_log("yandex_warmup_cancelled", {
+            "dialogId": dialog_id,
+            "reason": reason,
+            "projectRootPath": clean_cell_value(yandex_disk.get("projectRootPath")),
+            "projectRootUrlExists": bool(clean_cell_value(yandex_disk.get("projectRootUrl"))),
+            "foldersCount": len(updated_folders),
+            "prepared": prepared,
+            "skipped": skipped,
+            "failed": failed,
+            "errors": errors[:20],
+        })
+
+        return {
+            "ok": True,
+            "cancelled": True,
+            "reason": reason,
+            "projectRootPath": clean_cell_value(yandex_disk.get("projectRootPath")),
+            "projectRootUrl": clean_cell_value(yandex_disk.get("projectRootUrl")),
+            "standardFoldersPrepared": False,
+            "standardFoldersPreparedAt": prepared_at,
+            "foldersCount": len(updated_folders),
+            "prepared": prepared,
+            "skipped": skipped,
+            "failed": failed,
+            "errors": errors[:20],
+        }
+
     for folder_alias, raw_folder in folders.items():
+        if is_yandex_warmup_stop_requested(dialog_id):
+            return save_cancelled_warmup_progress("stop requested before next folder")
         folder = raw_folder if isinstance(raw_folder, dict) else {}
         folder_path = clean_cell_value(folder.get("path"))
         write_debug_log("yandex_warmup_folder_seen", {

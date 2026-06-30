@@ -1,4 +1,4 @@
-from fastapi import APIRouter, BackgroundTasks
+from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from app.logging_utils import write_debug_log
 
@@ -18,15 +18,19 @@ from app.yandex_disk.client import (
 
 from app.checklists.yandex_folders import (
     ensure_project_yandex_root_folder,
-    run_project_yandex_folder_warmup,
 )
 
+from app.checklists.yandex_warmup_queue import (
+    enqueue_yandex_warmup,
+    stop_yandex_warmup_for_dialog,
+    get_yandex_warmup_queue_state,
+)
 
 router = APIRouter()
 
 
 @router.get("/api/project-root-folder")
-def api_project_root_folder(background_tasks: BackgroundTasks, dialogId: str = ""):
+def api_project_root_folder(dialogId: str = ""):
     dialog_id = normalize_dialog_id(dialogId)
 
     write_debug_log("yandex_warmup_route_received", {
@@ -96,7 +100,7 @@ def api_project_root_folder(background_tasks: BackgroundTasks, dialogId: str = "
             "standardFoldersPrepared": False,
         }, status_code=500)
 
-    background_tasks.add_task(run_project_yandex_folder_warmup, dialog_id)
+    queue_result = enqueue_yandex_warmup(dialog_id, source="project_root_route")
 
     refreshed_context = get_project_storage_context(dialog_id) or context
     refreshed_yandex_disk = refreshed_context.get("yandexDisk") or {}
@@ -123,5 +127,55 @@ def api_project_root_folder(background_tasks: BackgroundTasks, dialogId: str = "
         "standardFoldersPrepared": bool(refreshed_yandex_disk.get("standardFoldersPrepared")),
         "standardFoldersPreparedAt": refreshed_yandex_disk.get("standardFoldersPreparedAt"),
         "standardFoldersPreparedCount": int(refreshed_yandex_disk.get("standardFoldersPreparedCount") or 0),
-        "yandexWarmupQueued": True,
+        "yandexWarmupQueued": bool(queue_result.get("queued")),
+        "yandexWarmupQueue": queue_result,
+    })
+
+@router.post("/api/project-yandex-warmup/stop")
+async def api_project_yandex_warmup_stop(request: Request):
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+
+    dialog_id = normalize_dialog_id(payload.get("dialogId"))
+    user_id = clean_cell_value(payload.get("userId"))
+    user_name = clean_cell_value(payload.get("userName")) or "Пользователь"
+
+    allowed_debug_user_ids = {"138", "18"}
+
+    if user_id not in allowed_debug_user_ids:
+        write_debug_log("yandex_warmup_stop_forbidden", {
+            "dialogId": dialog_id,
+            "userId": user_id,
+            "userName": user_name,
+        })
+
+        return JSONResponse({
+            "ok": False,
+            "error": "forbidden",
+        }, status_code=403)
+
+    if not dialog_id:
+        return JSONResponse({
+            "ok": False,
+            "error": "dialogId is required",
+        }, status_code=400)
+
+    result = stop_yandex_warmup_for_dialog(
+        dialog_id,
+        source=f"debug_panel_user_{user_id}",
+    )
+
+    write_debug_log("yandex_warmup_stop_api_completed", {
+        "dialogId": dialog_id,
+        "userId": user_id,
+        "userName": user_name,
+        "result": result,
+        "queueState": get_yandex_warmup_queue_state(),
+    })
+
+    return JSONResponse({
+        **result,
+        "queueState": get_yandex_warmup_queue_state(),
     })
