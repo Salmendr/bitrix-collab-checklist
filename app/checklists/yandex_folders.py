@@ -29,7 +29,7 @@ from app.yandex_disk.client import (
     is_yandex_disk_enabled,
     normalize_yandex_disk_path,
     yandex_disk_upload_bytes,
-     yandex_disk_upload_file,
+    yandex_disk_upload_file,
     yandex_disk_ensure_folder,
     yandex_disk_publish_path,
     yandex_disk_get_resource_meta,
@@ -121,7 +121,10 @@ def iter_yandex_disk_folder_chain(target_path: str) -> list[str]:
     return result
 
 
-def ensure_yandex_folder_chain(target_path: str) -> dict:
+def ensure_yandex_folder_chain(
+    target_path: str,
+    ensured_folder_paths: set[str] | None = None,
+) -> dict:
     normalized_path = normalize_yandex_disk_path(target_path)
     chain = iter_yandex_disk_folder_chain(normalized_path)
 
@@ -134,8 +137,24 @@ def ensure_yandex_folder_chain(target_path: str) -> dict:
         }
 
     created = []
+    cache = ensured_folder_paths if ensured_folder_paths is not None else set()
 
     for folder_path in chain:
+        folder_path = normalize_yandex_disk_path(folder_path)
+
+        if folder_path in cache:
+            write_debug_log("yandex_folder_chain_ensure_cached", {
+                "targetPath": normalized_path,
+                "folderPath": folder_path,
+            })
+
+            created.append({
+                "path": folder_path,
+                "alreadyExists": True,
+                "cached": True,
+            })
+            continue
+
         write_debug_log("yandex_folder_chain_ensure_started", {
             "targetPath": normalized_path,
             "folderPath": folder_path,
@@ -143,23 +162,33 @@ def ensure_yandex_folder_chain(target_path: str) -> dict:
 
         result = yandex_disk_ensure_folder(folder_path)
 
+        cache.add(folder_path)
+
         write_debug_log("yandex_folder_chain_ensure_completed", {
             "targetPath": normalized_path,
             "folderPath": folder_path,
             "alreadyExists": bool(result.get("alreadyExists")),
+            "cached": False,
         })
+
         created.append({
             "path": folder_path,
             "alreadyExists": bool(result.get("alreadyExists")),
+            "cached": False,
         })
 
     return {
         "ok": True,
         "path": normalized_path,
         "created": created,
+        "cacheSize": len(cache),
     }
 
-def ensure_folder_and_get_public_url(folder_path: str) -> dict:
+def ensure_folder_and_get_public_url(
+    folder_path: str,
+    ensured_folder_paths: set[str] | None = None,
+    folder_meta_cache: dict[str, dict] | None = None,
+) -> dict:
     folder_path = normalize_yandex_disk_path(folder_path)
 
     if not folder_path:
@@ -171,18 +200,42 @@ def ensure_folder_and_get_public_url(folder_path: str) -> dict:
             "reason": "empty yandex folder path",
         }
 
-    chain_result = ensure_yandex_folder_chain(folder_path)
+    meta_cache = folder_meta_cache if folder_meta_cache is not None else {}
+
+    if folder_path in meta_cache:
+        cached_meta = meta_cache[folder_path]
+
+        write_debug_log("yandex_folder_public_url_cached", {
+            "path": folder_path,
+            "urlExists": bool(clean_cell_value(cached_meta.get("url"))),
+        })
+
+        return {
+            **cached_meta,
+            "fromCache": True,
+        }
+
+    chain_result = ensure_yandex_folder_chain(
+        folder_path,
+        ensured_folder_paths=ensured_folder_paths,
+    )
+
     yandex_disk_publish_path(folder_path)
 
     meta = yandex_disk_get_resource_meta(folder_path)
 
-    return {
+    result = {
         "ok": True,
         "path": clean_cell_value(meta.get("path")) or folder_path,
         "url": clean_cell_value(meta.get("public_url")),
         "name": clean_cell_value(meta.get("name")) or folder_path.rstrip("/").rsplit("/", 1)[-1],
         "chain": chain_result.get("created") or [],
+        "fromCache": False,
     }
+
+    meta_cache[folder_path] = result
+
+    return result
 
 def ensure_project_yandex_root_folder(dialog_id: str) -> dict:
     write_debug_log("yandex_root_prepare_started", {
@@ -484,6 +537,9 @@ def ensure_project_standard_yandex_folder_structure(dialog_id: str) -> dict:
 
     updated_folders = dict(folders)
 
+    ensured_folder_paths: set[str] = set()
+    folder_meta_cache: dict[str, dict] = {}
+
     def save_cancelled_warmup_progress(reason: str) -> dict:
         yandex_disk["folders"] = updated_folders
         yandex_disk["standardFoldersPrepared"] = False
@@ -508,6 +564,8 @@ def ensure_project_standard_yandex_folder_structure(dialog_id: str) -> dict:
             "prepared": prepared,
             "skipped": skipped,
             "failed": failed,
+            "ensuredFolderPathsCount": len(ensured_folder_paths),
+            "folderMetaCacheCount": len(folder_meta_cache),
             "errors": errors[:20],
         })
 
@@ -523,6 +581,8 @@ def ensure_project_standard_yandex_folder_structure(dialog_id: str) -> dict:
             "prepared": prepared,
             "skipped": skipped,
             "failed": failed,
+            "ensuredFolderPathsCount": len(ensured_folder_paths),
+            "folderMetaCacheCount": len(folder_meta_cache),
             "errors": errors[:20],
         }
 
@@ -552,7 +612,11 @@ def ensure_project_standard_yandex_folder_structure(dialog_id: str) -> dict:
                 "path": folder_path,
             })
 
-            folder_meta = ensure_folder_and_get_public_url(folder_path)
+            folder_meta = ensure_folder_and_get_public_url(
+                folder_path,
+                ensured_folder_paths=ensured_folder_paths,
+                folder_meta_cache=folder_meta_cache,
+            )
 
             write_debug_log("yandex_warmup_folder_prepare_completed", {
                 "dialogId": dialog_id,
@@ -609,6 +673,8 @@ def ensure_project_standard_yandex_folder_structure(dialog_id: str) -> dict:
         "prepared": prepared,
         "skipped": skipped,
         "failed": failed,
+        "ensuredFolderPathsCount": len(ensured_folder_paths),
+        "folderMetaCacheCount": len(folder_meta_cache),
         "errors": errors[:20],
     })
     return {
@@ -621,6 +687,8 @@ def ensure_project_standard_yandex_folder_structure(dialog_id: str) -> dict:
         "prepared": prepared,
         "skipped": skipped,
         "failed": failed,
+        "ensuredFolderPathsCount": len(ensured_folder_paths),
+        "folderMetaCacheCount": len(folder_meta_cache),
         "errors": errors[:20],
     }
 

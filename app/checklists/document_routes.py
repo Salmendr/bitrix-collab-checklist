@@ -4,6 +4,8 @@ from logging import config
 import mimetypes
 import uuid
 from datetime import datetime
+import time
+import traceback
 from pathlib import Path
 from urllib.parse import quote
 
@@ -78,20 +80,64 @@ from app.yandex_disk.client import (
 
 router = APIRouter()
 
-async def save_upload_file_stream(file: UploadFile, abs_path: Path) -> int:
+async def save_upload_file_stream(
+    file: UploadFile,
+    abs_path: Path,
+    upload_id: str = "",
+    log_payload: dict | None = None,
+) -> int:
     total_size = 0
     chunk_size = 1024 * 1024
+    next_progress_log = 5 * 1024 * 1024
+    started_at = time.monotonic()
 
-    with open(abs_path, "wb") as f:
-        while True:
-            chunk = await file.read(chunk_size)
-            if not chunk:
-                break
+    base_payload = dict(log_payload or {})
+    base_payload["uploadId"] = upload_id
+    base_payload["absPath"] = str(abs_path)
+    base_payload["chunkSize"] = chunk_size
 
-            total_size += len(chunk)
-            f.write(chunk)
+    write_debug_log("upload_stream_write_started", base_payload)
 
-    return total_size
+    try:
+        with open(abs_path, "wb") as f:
+            while True:
+                chunk = await file.read(chunk_size)
+                if not chunk:
+                    break
+
+                total_size += len(chunk)
+                f.write(chunk)
+
+                if total_size >= next_progress_log:
+                    write_debug_log("upload_stream_write_progress", {
+                        **base_payload,
+                        "writtenBytes": total_size,
+                        "durationMs": int((time.monotonic() - started_at) * 1000),
+                    })
+                    next_progress_log += 5 * 1024 * 1024
+
+        write_debug_log("upload_stream_write_completed", {
+            **base_payload,
+            "writtenBytes": total_size,
+            "durationMs": int((time.monotonic() - started_at) * 1000),
+            "fileExists": abs_path.exists(),
+            "fileSizeOnDisk": abs_path.stat().st_size if abs_path.exists() else 0,
+        })
+
+        return total_size
+
+    except Exception as exc:
+        write_debug_log("upload_stream_write_failed", {
+            **base_payload,
+            "writtenBytes": total_size,
+            "durationMs": int((time.monotonic() - started_at) * 1000),
+            "error": str(exc),
+            "errorType": type(exc).__name__,
+            "traceback": traceback.format_exc()[-4000:],
+            "fileExists": abs_path.exists(),
+            "fileSizeOnDisk": abs_path.stat().st_size if abs_path.exists() else 0,
+        })
+        raise
 
 @router.post("/api/checklist/upload-document")
 async def api_checklist_upload_document(
@@ -101,131 +147,264 @@ async def api_checklist_upload_document(
     checklistKey: str = Form("id"),
     itemGroup: str = Form("")
 ):
+    upload_id = uuid.uuid4().hex
+    started_at = time.monotonic()
+
     dialog_id = normalize_dialog_id(dialogId)
     checklist_key = normalize_checklist_key(checklistKey)
-    config = get_checklist_config(checklist_key)
-
     item_id = str(itemId or "").strip()
-    item_group = int(str(itemGroup or "0").strip() or 0)
-
-    if not dialog_id:
-        return JSONResponse({"ok": False, "error": "dialogId is required"}, status_code=400)
-
-    if not item_id:
-        return JSONResponse({"ok": False, "error": "itemId is required"}, status_code=400)
-
-    data = get_checklist(dialog_id, config.key)
-    items = data.get("items", []) or []
-
-    target_item = None
-    for index, item in enumerate(items):
-        if str(item.get("id") or "") == item_id:
-            target_item = migrate_legacy_document_fields(item)
-            items[index] = target_item
-            break
-
-    if not target_item:
-        return JSONResponse({"ok": False, "error": "item not found"}, status_code=404)
-
-    rel_path = build_upload_rel_path(dialog_id, item_id, file.filename or "file.bin")
-    abs_path = UPLOAD_ROOT / rel_path
-    abs_path.parent.mkdir(parents=True, exist_ok=True)
-
-    file_size = await save_upload_file_stream(file, abs_path)
-
-    file_url = "/uploads/" + rel_path.replace("\\", "/")
-    document_id = uuid.uuid4().hex
-    document_view_url = build_document_view_url(dialog_id, config.key, item_id, document_id)
-    folder_view_url = build_folder_view_url(dialog_id, config.key, item_id)
-
-    try:
-        folder_path = "/" + str(abs_path.parent.relative_to(BASE_DIR)).replace("\\", "/")
-    except Exception:
-        folder_path = file_url.rsplit("/", 1)[0]
-
     uploaded_name = Path(file.filename or "file.bin").name
 
-    upload_job = create_yandex_upload_job(
-        dialog_id=dialog_id,
-        checklist_key=config.key,
-        item_id=item_id,
-        document_id=document_id,
-        local_path=str(abs_path),
-        file_name=uploaded_name,
-        file_size=file_size,
-    )
-
-    job_id = clean_cell_value(upload_job.get("job_id") or upload_job.get("jobId"))
-
-    document_record = normalize_document_record({
-        "id": document_id,
-        "name": uploaded_name,
-        "path": file_url,
-        "fileUrl": file_url,
-        "previewUrl": document_view_url,
-        "size": file_size,
-        "modifiedAt": datetime.now().isoformat(timespec="seconds"),
-        "source": "local",
-
-        "mirrorStatus": "queued",
-        "mirrorError": "",
-        "mirrorJobId": job_id,
-        "yandexPath": "",
-        "yandexFileUrl": "",
-        "yandexFolderAlias": "",
-    })
-
-    existing_documents = normalize_documents_list(target_item.get("documents"))
-    existing_documents.append(document_record)
-    normalized_documents = normalize_documents_list(existing_documents)
-
-    target_item["documents"] = normalized_documents
-    target_item["folderPath"] = folder_path
-    target_item["folderUrl"] = folder_view_url if normalized_documents else ""
-
-    first_doc = normalized_documents[0] if normalized_documents else {}
-    target_item["documentUrl"] = clean_cell_value(first_doc.get("fileUrl"))
-    target_item["documentName"] = clean_cell_value(first_doc.get("name"))
-
-    actual_group = int(target_item.get("group") or item_group or 0)
-    if config.is_active_group(actual_group):
-        target_item["status"] = "Есть"
-        target_item["priority"] = derive_indicator_from_status("Есть")
-
-    data["items"] = items
-    data = normalize_checklist_data(data, config.key)
-    save_checklist(dialog_id, data, config.key)
-
-    enqueue_result = enqueue_yandex_mirror_job(
-        job_id,
-        source="upload_document",
-    ) if job_id else {
-        "ok": False,
-        "queued": False,
-        "error": "upload job id is empty",
+    log_base = {
+        "uploadId": upload_id,
+        "dialogId": dialog_id,
+        "checklistKey": checklist_key,
+        "itemId": item_id,
+        "itemGroup": str(itemGroup or ""),
+        "fileName": uploaded_name,
+        "contentType": clean_cell_value(file.content_type),
     }
 
-    updated_item = None
-    for item in data.get("items", []):
-        if str(item.get("id") or "") == item_id:
-            updated_item = item
-            break
+    write_debug_log("upload_document_endpoint_entered", log_base)
 
-    if not updated_item:
-        return JSONResponse({"ok": False, "error": "updated item not found"}, status_code=500)
+    try:
+        config = get_checklist_config(checklist_key)
+        item_group = int(str(itemGroup or "0").strip() or 0)
 
-    return JSONResponse({
-        "ok": True,
-        "dialogId": dialog_id,
-        "checklistKey": config.key,
-        "item": updated_item,
-        "document": document_record,
-        "uploadJobId": job_id,
-        "uploadJob": public_job_payload(get_upload_job(job_id)) if job_id else {},
-        "yandexMirrorQueued": bool(enqueue_result.get("queued")),
-        "yandexMirrorQueue": enqueue_result,
-        "progressPercent": data.get("progressPercent", 0),
-    })
+        if not dialog_id:
+            write_debug_log("upload_document_rejected", {
+                **log_base,
+                "reason": "dialogId is required",
+            })
+            return JSONResponse({"ok": False, "error": "dialogId is required"}, status_code=400)
+
+        if not item_id:
+            write_debug_log("upload_document_rejected", {
+                **log_base,
+                "reason": "itemId is required",
+            })
+            return JSONResponse({"ok": False, "error": "itemId is required"}, status_code=400)
+
+        write_debug_log("upload_document_checklist_load_started", log_base)
+
+        data = get_checklist(dialog_id, config.key)
+        items = data.get("items", []) or []
+
+        write_debug_log("upload_document_checklist_loaded", {
+            **log_base,
+            "itemsCount": len(items),
+        })
+
+        target_item = None
+        for index, item in enumerate(items):
+            if str(item.get("id") or "") == item_id:
+                target_item = migrate_legacy_document_fields(item)
+                items[index] = target_item
+                break
+
+        if not target_item:
+            write_debug_log("upload_document_rejected", {
+                **log_base,
+                "reason": "item not found",
+            })
+            return JSONResponse({"ok": False, "error": "item not found"}, status_code=404)
+
+        write_debug_log("upload_document_target_item_found", {
+            **log_base,
+            "itemName": clean_cell_value(target_item.get("name")),
+            "itemGroup": int(target_item.get("group") or 0),
+            "existingDocumentsCount": len(normalize_documents_list(target_item.get("documents"))),
+        })
+
+        rel_path = build_upload_rel_path(dialog_id, item_id, uploaded_name)
+        abs_path = UPLOAD_ROOT / rel_path
+
+        write_debug_log("upload_document_local_path_built", {
+            **log_base,
+            "relPath": rel_path,
+            "absPath": str(abs_path),
+            "parent": str(abs_path.parent),
+        })
+
+        abs_path.parent.mkdir(parents=True, exist_ok=True)
+
+        write_debug_log("upload_document_local_dir_ready", {
+            **log_base,
+            "parent": str(abs_path.parent),
+            "parentExists": abs_path.parent.exists(),
+        })
+
+        file_size = await save_upload_file_stream(
+            file=file,
+            abs_path=abs_path,
+            upload_id=upload_id,
+            log_payload={
+                **log_base,
+                "relPath": rel_path,
+            },
+        )
+
+        file_url = "/uploads/" + rel_path.replace("\\", "/")
+        document_id = uuid.uuid4().hex
+        document_view_url = build_document_view_url(dialog_id, config.key, item_id, document_id)
+        folder_view_url = build_folder_view_url(dialog_id, config.key, item_id)
+
+        try:
+            folder_path = "/" + str(abs_path.parent.relative_to(BASE_DIR)).replace("\\", "/")
+        except Exception:
+            folder_path = file_url.rsplit("/", 1)[0]
+
+        write_debug_log("upload_document_record_build_started", {
+            **log_base,
+            "documentId": document_id,
+            "fileSize": file_size,
+            "fileUrl": file_url,
+            "folderPath": folder_path,
+        })
+
+        upload_job = create_yandex_upload_job(
+            dialog_id=dialog_id,
+            checklist_key=config.key,
+            item_id=item_id,
+            document_id=document_id,
+            local_path=str(abs_path),
+            file_name=uploaded_name,
+            file_size=file_size,
+        )
+
+        job_id = clean_cell_value(upload_job.get("job_id") or upload_job.get("jobId"))
+
+        write_debug_log("upload_document_job_created", {
+            **log_base,
+            "documentId": document_id,
+            "jobId": job_id,
+            "job": upload_job,
+        })
+
+        document_record = normalize_document_record({
+            "id": document_id,
+            "name": uploaded_name,
+            "path": file_url,
+            "fileUrl": file_url,
+            "previewUrl": document_view_url,
+            "size": file_size,
+            "modifiedAt": datetime.now().isoformat(timespec="seconds"),
+            "source": "local",
+
+            "mirrorStatus": "queued",
+            "mirrorError": "",
+            "mirrorJobId": job_id,
+            "yandexPath": "",
+            "yandexFileUrl": "",
+            "yandexFolderAlias": "",
+        })
+
+        existing_documents = normalize_documents_list(target_item.get("documents"))
+        existing_documents.append(document_record)
+        normalized_documents = normalize_documents_list(existing_documents)
+
+        target_item["documents"] = normalized_documents
+        target_item["folderPath"] = folder_path
+        target_item["folderUrl"] = folder_view_url if normalized_documents else ""
+
+        first_doc = normalized_documents[0] if normalized_documents else {}
+        target_item["documentUrl"] = clean_cell_value(first_doc.get("fileUrl"))
+        target_item["documentName"] = clean_cell_value(first_doc.get("name"))
+
+        actual_group = int(target_item.get("group") or item_group or 0)
+        if config.is_active_group(actual_group):
+            target_item["status"] = "Есть"
+            target_item["priority"] = derive_indicator_from_status("Есть")
+
+        data["items"] = items
+
+        write_debug_log("upload_document_checklist_save_started", {
+            **log_base,
+            "documentId": document_id,
+            "jobId": job_id,
+            "documentsCount": len(normalized_documents),
+        })
+
+        data = normalize_checklist_data(data, config.key)
+        save_checklist(dialog_id, data, config.key)
+
+        write_debug_log("upload_document_checklist_saved", {
+            **log_base,
+            "documentId": document_id,
+            "jobId": job_id,
+            "progressPercent": data.get("progressPercent", 0),
+        })
+
+        enqueue_result = enqueue_yandex_mirror_job(
+            job_id,
+            source="upload_document",
+        ) if job_id else {
+            "ok": False,
+            "queued": False,
+            "error": "upload job id is empty",
+        }
+
+        write_debug_log("upload_document_mirror_enqueue_completed", {
+            **log_base,
+            "documentId": document_id,
+            "jobId": job_id,
+            "enqueueResult": enqueue_result,
+        })
+
+        updated_item = None
+        for item in data.get("items", []):
+            if str(item.get("id") or "") == item_id:
+                updated_item = item
+                break
+
+        if not updated_item:
+            write_debug_log("upload_document_failed", {
+                **log_base,
+                "documentId": document_id,
+                "jobId": job_id,
+                "reason": "updated item not found",
+            })
+            return JSONResponse({"ok": False, "error": "updated item not found"}, status_code=500)
+
+        response_payload = {
+            "ok": True,
+            "dialogId": dialog_id,
+            "checklistKey": config.key,
+            "item": updated_item,
+            "document": document_record,
+            "uploadJobId": job_id,
+            "uploadJob": public_job_payload(get_upload_job(job_id)) if job_id else {},
+            "yandexMirrorQueued": bool(enqueue_result.get("queued")),
+            "yandexMirrorQueue": enqueue_result,
+            "progressPercent": data.get("progressPercent", 0),
+        }
+
+        write_debug_log("upload_document_completed", {
+            **log_base,
+            "documentId": document_id,
+            "jobId": job_id,
+            "fileSize": file_size,
+            "durationMs": int((time.monotonic() - started_at) * 1000),
+            "yandexMirrorQueued": bool(enqueue_result.get("queued")),
+        })
+
+        return JSONResponse(response_payload)
+
+    except Exception as exc:
+        write_debug_log("upload_document_exception", {
+            **log_base,
+            "durationMs": int((time.monotonic() - started_at) * 1000),
+            "error": str(exc),
+            "errorType": type(exc).__name__,
+            "traceback": traceback.format_exc()[-6000:],
+        })
+
+        return JSONResponse({
+            "ok": False,
+            "error": "upload document failed",
+            "details": str(exc),
+            "uploadId": upload_id,
+        }, status_code=500)
 
 @router.post("/api/checklist/remove-document")
 async def api_checklist_remove_document(request: Request):

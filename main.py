@@ -1,4 +1,4 @@
-﻿from fastapi import FastAPI
+﻿from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 
 from app.settings import (
@@ -28,7 +28,49 @@ from app.checklists.yandex_mirror_queue import (
     enqueue_pending_yandex_mirror_jobs,
 )
 
+from app.logging_utils import write_debug_log
+
 app = FastAPI()
+
+@app.middleware("http")
+async def upload_request_debug_middleware(request: Request, call_next):
+    path = str(request.url.path or "")
+
+    if path.endswith("/api/checklist/upload-document"):
+        write_debug_log("upload_http_request_received", {
+            "method": request.method,
+            "path": path,
+            "contentLength": request.headers.get("content-length", ""),
+            "contentType": request.headers.get("content-type", ""),
+            "xForwardedFor": request.headers.get("x-forwarded-for", ""),
+            "xForwardedProto": request.headers.get("x-forwarded-proto", ""),
+            "xForwardedHost": request.headers.get("x-forwarded-host", ""),
+        })
+
+        try:
+            response = await call_next(request)
+
+            write_debug_log("upload_http_request_completed", {
+                "method": request.method,
+                "path": path,
+                "statusCode": response.status_code,
+                "contentLength": request.headers.get("content-length", ""),
+            })
+
+            return response
+
+        except Exception as exc:
+            write_debug_log("upload_http_request_failed_before_response", {
+                "method": request.method,
+                "path": path,
+                "contentLength": request.headers.get("content-length", ""),
+                "contentType": request.headers.get("content-type", ""),
+                "error": str(exc),
+                "errorType": type(exc).__name__,
+            })
+            raise
+
+    return await call_next(request)
 
 ensure_runtime_directories()
 

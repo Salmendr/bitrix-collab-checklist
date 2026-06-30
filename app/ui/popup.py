@@ -2739,19 +2739,129 @@ def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
             }}
 
             async function uploadDocument(itemId, file) {{
-                setSaveState('saving', 'Сохраняем...');
+                const uploadId = 'front_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
                 const item = items.find(x => x.id === itemId);
+                const itemGroup = String(item && item.group ? item.group : '');
+                const fileName = String(file && file.name || '');
+                const fileSize = Number(file && file.size || 0);
+                const fileType = String(file && file.type || '');
+
+                debugLog('upload_frontend_started', {{
+                    uploadId,
+                    dialogId,
+                    checklistKey: currentChecklistKey,
+                    itemId,
+                    itemGroup,
+                    itemName: item ? String(item.name || '') : '',
+                    fileName,
+                    fileSize,
+                    fileType
+                }});
+
+                setSaveState('saving', 'Загружаем файл...');
+
                 const formData = new FormData();
                 formData.append('dialogId', dialogId);
                 formData.append('itemId', itemId);
                 formData.append('file', file);
                 formData.append('checklistKey', currentChecklistKey);
-                formData.append('itemGroup', String(item && item.group ? item.group : ''));
-                const response = await fetch(appUrl('api/checklist/upload-document'), {{ method: 'POST', body: formData }})
-                const result = await response.json();
-                if (!response.ok || !result.ok) throw new Error(result.error || 'upload document failed');
-                setSaveState('', 'Сохранено');
-                return result;
+                formData.append('itemGroup', itemGroup);
+
+                let response = null;
+                let responseText = '';
+
+                try {{
+                    response = await fetch(appUrl('api/checklist/upload-document'), {{
+                        method: 'POST',
+                        body: formData
+                    }});
+
+                    responseText = await response.text();
+
+                    debugLog('upload_frontend_response_received', {{
+                        uploadId,
+                        dialogId,
+                        checklistKey: currentChecklistKey,
+                        itemId,
+                        itemGroup,
+                        fileName,
+                        fileSize,
+                        fileType,
+                        status: response.status,
+                        ok: response.ok,
+                        responseTextStart: String(responseText || '').slice(0, 1600)
+                    }});
+
+                    let result = {{}};
+
+                    try {{
+                        result = JSON.parse(responseText || '{{}}');
+                    }} catch (parseError) {{
+                        debugLog('upload_frontend_json_parse_failed', {{
+                            uploadId,
+                            dialogId,
+                            checklistKey: currentChecklistKey,
+                            itemId,
+                            itemGroup,
+                            fileName,
+                            fileSize,
+                            status: response.status,
+                            responseTextStart: String(responseText || '').slice(0, 1600),
+                            error: String(parseError && parseError.message || parseError)
+                        }});
+
+                        throw new Error('Некорректный ответ сервера при загрузке файла');
+                    }}
+
+                    if (!response.ok || !result.ok) {{
+                        debugLog('upload_frontend_failed_response', {{
+                            uploadId,
+                            dialogId,
+                            checklistKey: currentChecklistKey,
+                            itemId,
+                            itemGroup,
+                            fileName,
+                            fileSize,
+                            status: response.status,
+                            result
+                        }});
+
+                        throw new Error(result.error || result.details || 'upload document failed');
+                    }}
+
+                    debugLog('upload_frontend_completed', {{
+                        uploadId,
+                        dialogId,
+                        checklistKey: currentChecklistKey,
+                        itemId,
+                        itemGroup,
+                        fileName,
+                        fileSize,
+                        uploadJobId: result.uploadJobId || '',
+                        yandexMirrorQueued: !!result.yandexMirrorQueued
+                    }});
+
+                    setSaveState('', 'Сохранено');
+                    return result;
+
+                }} catch (e) {{
+                    debugLog('upload_frontend_exception', {{
+                        uploadId,
+                        dialogId,
+                        checklistKey: currentChecklistKey,
+                        itemId,
+                        itemGroup,
+                        fileName,
+                        fileSize,
+                        fileType,
+                        status: response ? response.status : '',
+                        responseTextStart: String(responseText || '').slice(0, 1600),
+                        error: String(e && e.message || e)
+                    }});
+
+                    setSaveState('error', 'Ошибка загрузки файла');
+                    throw e;
+                }}
             }}
             function getItemsByGroup(groupId) {{
                 return items
@@ -3930,15 +4040,58 @@ def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
                     input.addEventListener('change', async function() {{
                         const itemId = this.dataset.itemId;
                         const files = Array.from(this.files || []);
-                        if (!files.length) return;
+
+                        if (!files.length) {{
+                            debugLog('upload_frontend_input_empty', {{
+                                dialogId,
+                                checklistKey: currentChecklistKey,
+                                itemId
+                            }});
+                            return;
+                        }}
 
                         const item = items.find(x => x.id === itemId);
                         const initialStatus = item ? normalizeStatus(item.status) : '';
                         let currentStatus = initialStatus;
 
+                        debugLog('upload_frontend_input_selected', {{
+                            dialogId,
+                            checklistKey: currentChecklistKey,
+                            itemId,
+                            itemName: item ? String(item.name || '') : '',
+                            filesCount: files.length,
+                            files: files.map(file => ({{
+                                name: String(file && file.name || ''),
+                                size: Number(file && file.size || 0),
+                                type: String(file && file.type || '')
+                            }}))
+                        }});
+
                         try {{
                             for (const file of files) {{
+                                debugLog('upload_frontend_file_loop_started', {{
+                                    dialogId,
+                                    checklistKey: currentChecklistKey,
+                                    itemId,
+                                    itemName: item ? String(item.name || '') : '',
+                                    fileName: String(file && file.name || ''),
+                                    fileSize: Number(file && file.size || 0),
+                                    fileType: String(file && file.type || '')
+                                }});
+
                                 const result = await uploadDocument(itemId, file);
+
+                                debugLog('upload_frontend_file_loop_result', {{
+                                    dialogId,
+                                    checklistKey: currentChecklistKey,
+                                    itemId,
+                                    fileName: String(file && file.name || ''),
+                                    fileSize: Number(file && file.size || 0),
+                                    uploadJobId: result && result.uploadJobId || '',
+                                    resultOk: !!(result && result.ok),
+                                    hasItem: !!(result && result.item)
+                                }});
+
                                 replaceItem(result.item);
 
                                 const uploadedDocs = getItemDocuments(result.item);
@@ -3969,12 +4122,39 @@ def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
                                     sessionDirty = true;
                                     currentStatus = newStatus;
                                 }}
+
+                                debugLog('upload_frontend_file_loop_completed', {{
+                                    dialogId,
+                                    checklistKey: currentChecklistKey,
+                                    itemId,
+                                    fileName: String(file && file.name || ''),
+                                    fileSize: Number(file && file.size || 0),
+                                    currentStatus
+                                }});
                             }}
 
                             renderAll();
+
+                            debugLog('upload_frontend_batch_completed', {{
+                                dialogId,
+                                checklistKey: currentChecklistKey,
+                                itemId,
+                                filesCount: files.length
+                            }});
+
                         }} catch (e) {{
                             console.log(e);
+
+                            debugLog('upload_frontend_batch_exception', {{
+                                dialogId,
+                                checklistKey: currentChecklistKey,
+                                itemId,
+                                filesCount: files.length,
+                                error: String(e && e.message || e)
+                            }});
+
                             setSaveState('error', 'Ошибка загрузки файлов');
+
                         }} finally {{
                             this.value = '';
                         }}
