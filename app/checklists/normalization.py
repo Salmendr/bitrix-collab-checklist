@@ -56,12 +56,32 @@ def resolve_required_group_id_by_item_id_or_name(checklist_key: str, item: dict)
     item = dict(item or {})
     item_id = str(item.get("id") or "").strip()
     name = clean_cell_value(item.get("name"))
-    current_group = int(item.get("group") or 0)
+
+    try:
+        current_group = int(item.get("group") or 0)
+    except (TypeError, ValueError):
+        current_group = 0
 
     parsed_group_id = extract_group_id_from_item_id(config.key, item_id)
 
     if parsed_group_id in config.active_group_ids():
         return parsed_group_id
+
+    if current_group in config.active_group_ids():
+        current_config_group = next(
+            (group for group in config.groups if group.id == current_group),
+            None
+        )
+
+        if current_config_group:
+            for order, item_name in enumerate(current_config_group.items, start=1):
+                expected_id = build_standard_item_id(config, current_config_group.id, order)
+                expected_name = clean_cell_value(item_name)
+
+                if item_id == expected_id or name == expected_name:
+                    return current_group
+
+        return current_group
 
     for group in config.groups:
         if group.id == config.not_required_group_id:
@@ -73,9 +93,6 @@ def resolve_required_group_id_by_item_id_or_name(checklist_key: str, item: dict)
 
             if item_id == expected_id or name == expected_name:
                 return group.id
-
-    if current_group in config.active_group_ids():
-        return current_group
 
     return config.default_group_id
 
@@ -330,6 +347,22 @@ def normalize_checklist_data(data: dict, checklist_key: str = "id") -> dict:
         normalized_items = []
         current_default_names = build_current_default_name_set(config.key)
 
+        default_id_order = {}
+        default_identities = set()
+
+        for group in config.groups:
+            if group.id == config.not_required_group_id:
+                continue
+
+            for default_order, default_name in enumerate(group.items, start=1):
+                normalized_name = clean_cell_value(default_name).lower()
+                if not normalized_name:
+                    continue
+
+                default_identity = (group.id, normalized_name)
+                default_identities.add(default_identity)
+                default_id_order[default_identity] = default_order
+
         for raw_item in raw_items:
             item, documents, first_doc, folder_key, folder_path, folder_url, legacy_document_url, legacy_document_name = prepare_item_common(raw_item)
 
@@ -344,12 +377,26 @@ def normalize_checklist_data(data: dict, checklist_key: str = "id") -> dict:
                 continue
 
             status = normalize_status(item.get("status"))
-            group_id = int(item.get("group") or 0)
+
+            try:
+                raw_group_id = int(item.get("group") or 0)
+            except (TypeError, ValueError):
+                raw_group_id = 0
+
+            required_group_id = resolve_required_group_id_by_item_id_or_name(config.key, {
+                **item,
+                "name": name,
+                "group": raw_group_id,
+            })
 
             if status == "Не требуется":
                 group_id = config.not_required_group_id
-            elif group_id == config.not_required_group_id or not group_id:
-                group_id = resolve_required_group_id_by_item_id_or_name(config.key, item)
+            elif raw_group_id == config.not_required_group_id or not raw_group_id:
+                group_id = required_group_id
+            elif raw_group_id not in config.active_group_ids():
+                group_id = required_group_id
+            else:
+                group_id = raw_group_id
 
             normalized_items.append({
                 "id": str(item.get("id") or ""),
@@ -367,28 +414,54 @@ def normalize_checklist_data(data: dict, checklist_key: str = "id") -> dict:
                 "documentUrl": legacy_document_url,
                 "documentName": legacy_document_name,
                 "isCustom": is_custom,
+                "_requiredGroupId": required_group_id,
             })
 
         deduped_items = []
-        seen_builtin_names = set()
+        seen_builtin_identities = set()
 
         for existing_item in normalized_items:
             name_key = clean_cell_value(existing_item.get("name")).lower()
 
             if not existing_item.get("isCustom"):
-                if name_key in seen_builtin_names:
+                try:
+                    identity_group_id = int(existing_item.get("_requiredGroupId") or 0)
+                except (TypeError, ValueError):
+                    identity_group_id = 0
+
+                if not identity_group_id:
+                    identity_group_id = resolve_required_group_id_by_item_id_or_name(config.key, existing_item)
+
+                identity = (identity_group_id, name_key)
+
+                if identity in seen_builtin_identities:
                     continue
-                seen_builtin_names.add(name_key)
+
+                seen_builtin_identities.add(identity)
 
             deduped_items.append(existing_item)
 
         normalized_items = deduped_items
 
-        existing_names = {
-            clean_cell_value(existing_item.get("name")).lower()
-            for existing_item in normalized_items
-            if clean_cell_value(existing_item.get("name"))
-        }
+        existing_default_identities = set()
+
+        for existing_item in normalized_items:
+            if existing_item.get("isCustom"):
+                continue
+
+            name_key = clean_cell_value(existing_item.get("name")).lower()
+            if not name_key:
+                continue
+
+            try:
+                identity_group_id = int(existing_item.get("_requiredGroupId") or 0)
+            except (TypeError, ValueError):
+                identity_group_id = 0
+
+            if not identity_group_id:
+                identity_group_id = resolve_required_group_id_by_item_id_or_name(config.key, existing_item)
+
+            existing_default_identities.add((identity_group_id, name_key))
 
         for group in config.groups:
             if group.id == config.not_required_group_id:
@@ -396,10 +469,12 @@ def normalize_checklist_data(data: dict, checklist_key: str = "id") -> dict:
 
             for default_order, default_name in enumerate(group.items, start=1):
                 normalized_name = clean_cell_value(default_name).lower()
-                if not normalized_name or normalized_name in existing_names:
+                default_identity = (group.id, normalized_name)
+
+                if not normalized_name or default_identity in existing_default_identities:
                     continue
 
-                migrated_item_id = f"{config.key}_g{group.id}_{default_order}_migrated_{slugify_folder_part(default_name)}"
+                migrated_item_id = f"{build_standard_item_id(config, group.id, default_order)}_migrated_{slugify_folder_part(default_name)}"
 
                 normalized_items.append({
                     "id": migrated_item_id,
@@ -417,11 +492,25 @@ def normalize_checklist_data(data: dict, checklist_key: str = "id") -> dict:
                     "documentUrl": "",
                     "documentName": "",
                     "isCustom": False,
+                    "_requiredGroupId": group.id,
                 })
 
-                existing_names.add(normalized_name)
+                existing_default_identities.add(default_identity)
 
-        normalized_items.sort(key=lambda x: (x["group"], x["order"], x["name"]))
+        normalized_items.sort(
+            key=lambda x: (
+                int(x.get("group") or 0),
+                default_id_order.get(
+                    (
+                        int(x.get("_requiredGroupId") or x.get("group") or 0),
+                        clean_cell_value(x.get("name")).lower(),
+                    ),
+                    10000,
+                ),
+                int(x.get("order") or 0),
+                clean_cell_value(x.get("name")),
+            )
+        )
 
         for group in config.groups:
             group_items = [x for x in normalized_items if x["group"] == group.id]
@@ -432,7 +521,11 @@ def normalize_checklist_data(data: dict, checklist_key: str = "id") -> dict:
                 if not item.get("folderKey"):
                     item["folderKey"] = build_folder_key(config.key, item.get("name"), item.get("id"))
 
+        for item in normalized_items:
+            item.pop("_requiredGroupId", None)
+
         return normalized_items
+
 
     if checklist_key != "id":
         normalized_items = normalize_config_table_items(config)

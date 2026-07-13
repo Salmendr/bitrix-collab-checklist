@@ -700,6 +700,7 @@ def upsert_item_yandex_mapping(
     folder_name: str,
     folder_path: str,
     folder_url: str,
+    group_id: int = 0,
 ):
     context = get_project_storage_context(dialog_id)
     if not context:
@@ -707,6 +708,11 @@ def upsert_item_yandex_mapping(
 
     checklist_key = normalize_checklist_key(checklist_key)
     item_name = clean_cell_value(item_name)
+
+    try:
+        group_id = int(group_id or 0)
+    except (TypeError, ValueError):
+        group_id = 0
 
     yandex_disk = context.get("yandexDisk") or {}
     folders = yandex_disk.get("folders") or {}
@@ -716,6 +722,9 @@ def upsert_item_yandex_mapping(
         "name": folder_name,
         "path": folder_path,
         "url": folder_url,
+        "checklistKey": checklist_key,
+        "groupId": group_id,
+        "itemName": item_name,
     }
 
     yandex_disk["folders"] = folders
@@ -724,13 +733,28 @@ def upsert_item_yandex_mapping(
     replaced = False
 
     for mapping in item_mappings:
+        if not isinstance(mapping, dict):
+            continue
+
         mapping_key = normalize_checklist_key(mapping.get("checklistKey"))
         mapping_name = clean_cell_value(mapping.get("itemName"))
 
-        if mapping_key == checklist_key and mapping_name.lower() == item_name.lower():
+        try:
+            mapping_group_id = int(mapping.get("groupId") or 0)
+        except (TypeError, ValueError):
+            mapping_group_id = 0
+
+        same_item = (
+            mapping_key == checklist_key
+            and mapping_name.lower() == item_name.lower()
+            and mapping_group_id == group_id
+        )
+
+        if same_item:
             updated_mappings.append({
                 **mapping,
                 "checklistKey": checklist_key,
+                "groupId": group_id,
                 "itemName": item_name,
                 "folderAlias": folder_alias,
             })
@@ -741,6 +765,7 @@ def upsert_item_yandex_mapping(
     if not replaced:
         updated_mappings.append({
             "checklistKey": checklist_key,
+            "groupId": group_id,
             "itemName": item_name,
             "folderAlias": folder_alias,
         })
@@ -753,6 +778,7 @@ def upsert_item_yandex_mapping(
         "yandexDisk": yandex_disk,
         "itemMappings": updated_mappings,
     })
+
 
 
 def ensure_yandex_folder_for_custom_item(
@@ -782,6 +808,7 @@ def ensure_yandex_folder_for_custom_item(
         folder_name=folder_name,
         folder_path=folder_meta["path"],
         folder_url=folder_meta["url"],
+        group_id=group_id,
     )
 
     return {
@@ -809,22 +836,79 @@ def ensure_yandex_folder_for_custom_opr_item(
     )
 
 
-def ensure_standard_yandex_folder_for_item(dialog_id: str, checklist_key: str, item_name: str):
-    checklist_key = normalize_checklist_key(checklist_key)
+def resolve_standard_folder_spec_for_item(
+    checklist_key: str,
+    item_name: str,
+    group_id: int = 0,
+) -> tuple[str, dict] | None:
     specs = get_folder_specs_for_checklist(checklist_key)
+    target_name = clean_cell_value(item_name).lower()
+
+    try:
+        target_group_id = int(group_id or 0)
+    except (TypeError, ValueError):
+        target_group_id = 0
+
+    fallback = None
+    first_name_match = None
+
+    for spec_key, raw_spec in (specs or {}).items():
+        spec = raw_spec or {}
+        spec_item_name = clean_cell_value(spec.get("itemName")) or clean_cell_value(spec_key)
+
+        if spec_item_name.lower() != target_name:
+            continue
+
+        try:
+            spec_group_id = int(spec.get("groupId") or 0)
+        except (TypeError, ValueError):
+            spec_group_id = 0
+
+        if first_name_match is None:
+            first_name_match = (spec_key, spec)
+
+        if target_group_id and spec_group_id == target_group_id:
+            return spec_key, spec
+
+        if spec_group_id == 0 and fallback is None:
+            fallback = (spec_key, spec)
+
+    return fallback or first_name_match
+
+
+def ensure_standard_yandex_folder_for_item(
+    dialog_id: str,
+    checklist_key: str,
+    item_name: str,
+    group_id: int = 0,
+):
+    checklist_key = normalize_checklist_key(checklist_key)
     item_name = clean_cell_value(item_name)
 
-    spec = specs.get(item_name)
-    if not spec:
+    resolved_spec = resolve_standard_folder_spec_for_item(
+        checklist_key=checklist_key,
+        item_name=item_name,
+        group_id=group_id,
+    )
+
+    if not resolved_spec:
         return None
+
+    spec_key, spec = resolved_spec
+
+    try:
+        group_id = int(group_id or spec.get("groupId") or 0)
+    except (TypeError, ValueError):
+        group_id = 0
 
     root_path = get_root_path_from_context(dialog_id, checklist_key)
     if not root_path:
         return None
 
-    folder_alias = clean_cell_value(spec.get("alias")) or f"{checklist_key}_{slugify_folder_part(item_name)}"
-    relative_path = clean_cell_value(spec.get("relativePath")) or clean_cell_value(spec.get("folderName")) or item_name
-    folder_name = clean_cell_value(spec.get("folderName")) or sanitize_yandex_folder_name(item_name)
+    spec_item_name = clean_cell_value(spec.get("itemName")) or item_name
+    folder_alias = clean_cell_value(spec.get("alias")) or f"{checklist_key}_{slugify_folder_part(spec_key)}"
+    relative_path = clean_cell_value(spec.get("relativePath")) or clean_cell_value(spec.get("folderName")) or spec_key
+    folder_name = clean_cell_value(spec.get("folderName")) or sanitize_yandex_folder_name(spec_item_name)
     folder_path = normalize_yandex_disk_path(f"{root_path.rstrip('/')}/{relative_path.strip('/')}")
 
     folder_meta = ensure_folder_and_get_public_url(folder_path)
@@ -832,11 +916,12 @@ def ensure_standard_yandex_folder_for_item(dialog_id: str, checklist_key: str, i
     upsert_item_yandex_mapping(
         dialog_id=dialog_id,
         checklist_key=checklist_key,
-        item_name=item_name,
+        item_name=spec_item_name,
         folder_alias=folder_alias,
         folder_name=folder_name,
         folder_path=folder_meta["path"],
         folder_url=folder_meta["url"],
+        group_id=group_id,
     )
 
     return {
@@ -846,6 +931,7 @@ def ensure_standard_yandex_folder_for_item(dialog_id: str, checklist_key: str, i
         "folderPath": folder_meta["path"],
         "folderUrl": folder_meta["url"],
     }
+
 
 
 def ensure_standard_yandex_folder_for_opr_item(dialog_id: str, checklist_key: str, item_name: str):
@@ -863,7 +949,18 @@ def ensure_item_yandex_folder_for_upload(
     checklist_key = normalize_checklist_key(checklist_key)
     item_name = clean_cell_value(item_name)
 
-    existing = get_item_yandex_folder(dialog_id, checklist_key, item_name)
+    try:
+        item_group = int(item_group or 0)
+    except (TypeError, ValueError):
+        item_group = 0
+
+    existing = get_item_yandex_folder(
+        dialog_id,
+        checklist_key,
+        item_name,
+        group_id=item_group,
+    )
+
     if existing:
         folder = existing.get("folder") or {}
         folder_path = clean_cell_value(folder.get("path"))
@@ -871,7 +968,6 @@ def ensure_item_yandex_folder_for_upload(
 
         if folder_path and folder_url:
             return existing
-
 
         if folder_path:
             folder_meta = ensure_folder_and_get_public_url(folder_path)
@@ -901,9 +997,15 @@ def ensure_item_yandex_folder_for_upload(
                     folder_name=folder_name,
                     folder_path=folder_meta.get("path") or folder_path,
                     folder_url=folder_url,
+                    group_id=item_group,
                 )
 
-                refreshed = get_item_yandex_folder(dialog_id, checklist_key, item_name)
+                refreshed = get_item_yandex_folder(
+                    dialog_id,
+                    checklist_key,
+                    item_name,
+                    group_id=item_group,
+                )
                 if refreshed:
                     return refreshed
 
@@ -920,21 +1022,27 @@ def ensure_item_yandex_folder_for_upload(
         restored = ensure_yandex_folder_for_custom_item(
             dialog_id=dialog_id,
             checklist_key=checklist_key,
-            group_id=int(item_group or 0),
+            group_id=item_group,
             item_name=item_name,
             item_id=item_id,
         )
     else:
         restored = ensure_standard_yandex_folder_for_item(
-            dialog_id,
-            checklist_key,
-            item_name,
+            dialog_id=dialog_id,
+            checklist_key=checklist_key,
+            item_name=item_name,
+            group_id=item_group,
         )
 
     if not restored:
         return None
 
-    return get_item_yandex_folder(dialog_id, checklist_key, item_name) or {
+    return get_item_yandex_folder(
+        dialog_id,
+        checklist_key,
+        item_name,
+        group_id=item_group,
+    ) or {
         "folderAlias": restored.get("folderAlias"),
         "folder": {
             "name": restored.get("folderName"),
@@ -943,11 +1051,13 @@ def ensure_item_yandex_folder_for_upload(
         },
         "mapping": {
             "checklistKey": checklist_key,
+            "groupId": item_group,
             "itemName": item_name,
             "folderAlias": restored.get("folderAlias"),
         },
         "context": get_project_storage_context(dialog_id),
     }
+
 
 
 def build_yandex_file_target_path(folder_path: str, filename: str) -> str:

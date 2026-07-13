@@ -61,6 +61,34 @@ def get_project_root_path(context: dict) -> str:
     return ""
 
 
+
+DEPRECATED_PROJECT_ROOT_FOLDER_NAMES = {
+    "\u0030\u0031\u005f\u0420\u0430\u0431\u043e\u0447\u0430\u044f\u0020\u043f\u0430\u043f\u043a\u0430",
+    "\u0030\u0033\u005f\u041e\u0431\u043c\u0435\u043d",
+    "\u0030\u0034\u005f\u0042\u0049\u004d\u002d\u041c\u043e\u0434\u0435\u043b\u044c",
+    "\u0030\u0035\u005f\u0410\u0440\u0445\u0438\u0432",
+}
+
+
+def is_deprecated_project_root_folder_path(path: str, project_root_path: str = "") -> bool:
+    raw_path = normalize_yandex_context_path(path)
+    root_path = normalize_yandex_context_path(project_root_path)
+
+    if not raw_path:
+        return False
+
+    relative_path = raw_path
+
+    if root_path and raw_path.startswith(root_path.rstrip("/") + "/"):
+        relative_path = raw_path[len(root_path.rstrip("/")) + 1:]
+
+    relative_path = relative_path.lstrip("/")
+
+    first_part = relative_path.split("/", 1)[0].strip()
+
+    return first_part in DEPRECATED_PROJECT_ROOT_FOLDER_NAMES
+
+
 def resolve_checklist_yandex_root_path(context: dict, config: ChecklistConfig) -> str:
     context = context or {}
     yandex_disk = get_context_yandex_disk(context)
@@ -219,9 +247,31 @@ def build_project_structure_yandex_folders(
 
     return result
 
+def normalize_folder_spec_item_name(item_name: str, spec: dict) -> str:
+    return clean_cell_value((spec or {}).get("itemName")) or clean_cell_value(item_name)
+
+
+def normalize_folder_spec_group_id(spec: dict) -> int:
+    try:
+        return int((spec or {}).get("groupId") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
 def build_config_yandex_folders(context: dict) -> dict:
     context = context or {}
-    existing_folders = get_existing_yandex_folders(context)
+    project_root_path = get_project_root_path(context)
+    raw_existing_folders = get_existing_yandex_folders(context)
+
+    existing_folders = {
+        alias: folder
+        for alias, folder in raw_existing_folders.items()
+        if isinstance(folder, dict)
+        and not is_deprecated_project_root_folder_path(
+            folder.get("path"),
+            project_root_path=project_root_path,
+        )
+    }
 
     result = deepcopy(existing_folders)
 
@@ -244,6 +294,8 @@ def build_config_yandex_folders(context: dict) -> dict:
         for item_name, raw_spec in specs.items():
             spec = raw_spec or {}
             folder_alias = normalize_folder_spec_alias(config, item_name, spec)
+            spec_item_name = normalize_folder_spec_item_name(item_name, spec)
+            spec_group_id = normalize_folder_spec_group_id(spec)
 
             relative_path = (
                 clean_cell_value(spec.get("relativePath"))
@@ -252,7 +304,7 @@ def build_config_yandex_folders(context: dict) -> dict:
             )
 
             folder_path = join_yandex_path(root_path, relative_path)
-            folder_name = normalize_folder_spec_name(item_name, spec, folder_path)
+            folder_name = normalize_folder_spec_name(spec_item_name, spec, folder_path)
 
             result[folder_alias] = {
                 **result.get(folder_alias, {}),
@@ -260,7 +312,8 @@ def build_config_yandex_folders(context: dict) -> dict:
                 "path": folder_path,
                 "url": get_folder_public_url(existing_folders, folder_alias),
                 "checklistKey": config.key,
-                "itemName": clean_cell_value(item_name),
+                "itemName": spec_item_name,
+                "groupId": spec_group_id,
                 "isStageRoot": False,
             }
 
@@ -269,6 +322,16 @@ def build_config_yandex_folders(context: dict) -> dict:
         result=result,
         existing_folders=existing_folders,
     )
+
+    result = {
+        alias: folder
+        for alias, folder in (result or {}).items()
+        if isinstance(folder, dict)
+        and not is_deprecated_project_root_folder_path(
+            folder.get("path"),
+            project_root_path=project_root_path,
+        )
+    }
 
     return result
 
@@ -282,20 +345,29 @@ def build_config_item_mappings() -> list[dict]:
         for item_name, raw_spec in specs.items():
             spec = raw_spec or {}
             folder_alias = normalize_folder_spec_alias(config, item_name, spec)
+            spec_item_name = normalize_folder_spec_item_name(item_name, spec)
+            spec_group_id = normalize_folder_spec_group_id(spec)
 
             result.append({
                 "checklistKey": config.key,
-                "itemName": clean_cell_value(item_name),
+                "groupId": spec_group_id,
+                "itemName": spec_item_name,
                 "folderAlias": folder_alias,
             })
 
     return result
 
 
-def mapping_identity(mapping: dict) -> tuple[str, str]:
+def mapping_identity(mapping: dict) -> tuple[str, int, str]:
+    try:
+        group_id = int((mapping or {}).get("groupId") or 0)
+    except (TypeError, ValueError):
+        group_id = 0
+
     return (
-        normalize_checklist_key(mapping.get("checklistKey")),
-        clean_cell_value(mapping.get("itemName")).lower(),
+        normalize_checklist_key((mapping or {}).get("checklistKey")),
+        group_id,
+        clean_cell_value((mapping or {}).get("itemName")).lower(),
     )
 
 

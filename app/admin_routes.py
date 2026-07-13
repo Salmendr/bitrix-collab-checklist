@@ -8,6 +8,11 @@ from app.db import get_conn
 from app.settings import UPLOAD_ROOT
 from app.checklists.utils import clean_cell_value, normalize_dialog_id
 from app.checklists.yandex_warmup_control import request_yandex_warmup_stop
+from app.checklists.permissions import (
+    list_user_permissions,
+    upsert_user_permission,
+    delete_user_permission,
+)
 
 
 router = APIRouter()
@@ -202,6 +207,7 @@ def admin_page(userId: str = ""):
 <head>
     <meta charset="utf-8">
     <title>Админ-панель чек-листов</title>
+    <script src="https://api.bitrix24.com/api/v1/"></script>
     <style>
         * { box-sizing: border-box; }
         body {
@@ -353,6 +359,43 @@ def admin_page(userId: str = ""):
             font-size: 13px;
             line-height: 1.4;
         }
+
+        .section-title {
+            margin-top: 18px;
+            padding-top: 14px;
+            border-top: 1px solid #edf0f2;
+            font-size: 17px;
+            font-weight: 800;
+        }
+        .permission-input-id {
+            width: 120px;
+        }
+        .permission-input-name {
+            width: 260px;
+        }
+        .permissions-table td,
+        .permissions-table th {
+            vertical-align: middle;
+        }
+        .permissions-table input[type="checkbox"] {
+            height: auto;
+        }
+        .mini-actions {
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+        }
+        .bitrix-users-box {
+            display: none;
+            margin-top: 10px;
+            border: 1px solid #e5e7eb;
+            border-radius: 12px;
+            padding: 10px;
+            background: #fafbfc;
+        }
+        .bitrix-users-box.visible {
+            display: block;
+        }
     </style>
 </head>
 <body>
@@ -382,6 +425,54 @@ def admin_page(userId: str = ""):
                 Если включить <b>checklists</b>, будут удалены все чек-листы этого chatId, включая ключи вида <b>chat3122::opr</b>, <b>chat3122::p</b>, <b>chat3122::concept</b>.
             </div>
 
+
+            <div class="section-title">Права пользователей</div>
+            <div class="muted">
+                Здесь можно менять права без перезапуска приложения. Серверная проверка удаления файлов читает эти права из БД.
+                Уже открытый popup лучше обновить, чтобы frontend получил свежий список прав.
+            </div>
+
+            <div class="toolbar">
+                <button id="reloadPermissionsBtn" class="primary" type="button">Обновить права</button>
+                <input id="permissionUserIdInput" class="permission-input-id" type="text" placeholder="ID">
+                <input id="permissionUserNameInput" class="permission-input-name" type="text" placeholder="Имя сотрудника">
+                <label><input id="permissionAccessInput" type="checkbox" checked> доступ к чек-листам</label>
+                <label><input id="permissionDeleteInput" type="checkbox"> удаление файлов</label>
+                <button id="addPermissionBtn" type="button">Добавить / обновить</button>
+                <button id="loadBitrixUsersBtn" type="button">Подтянуть сотрудников из Bitrix</button>
+            </div>
+
+            <table class="permissions-table">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Сотрудник</th>
+                        <th>Доступ к чек-листам</th>
+                        <th>Удаление файлов</th>
+                        <th>Источник / обновлено</th>
+                        <th>Действия</th>
+                    </tr>
+                </thead>
+                <tbody id="permissionsBody"></tbody>
+            </table>
+
+            <div id="bitrixUsersBox" class="bitrix-users-box">
+                <b>Сотрудники из Bitrix</b>
+                <div class="muted">Нажми «Добавить» рядом с нужным сотрудником. Если список пустой, админка открыта не внутри Bitrix или REST user.get недоступен.</div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Сотрудник</th>
+                            <th>Email</th>
+                            <th>Действие</th>
+                        </tr>
+                    </thead>
+                    <tbody id="bitrixUsersBody"></tbody>
+                </table>
+            </div>
+
+
             <table>
                 <thead>
                     <tr>
@@ -406,6 +497,14 @@ def admin_page(userId: str = ""):
         const statusBox = document.getElementById('statusBox');
         const projectsBody = document.getElementById('projectsBody');
         const dialogInput = document.getElementById('dialogInput');
+        const permissionsBody = document.getElementById('permissionsBody');
+        const bitrixUsersBox = document.getElementById('bitrixUsersBox');
+        const bitrixUsersBody = document.getElementById('bitrixUsersBody');
+        const permissionUserIdInput = document.getElementById('permissionUserIdInput');
+        const permissionUserNameInput = document.getElementById('permissionUserNameInput');
+        const permissionAccessInput = document.getElementById('permissionAccessInput');
+        const permissionDeleteInput = document.getElementById('permissionDeleteInput');
+
 
         userIdText.textContent = USER_ID;
 
@@ -472,6 +571,211 @@ def admin_page(userId: str = ""):
                 deleteLocalUploads: document.getElementById('deleteLocalUploads').checked
             };
         }
+
+
+        function renderPermissions(items) {
+            if (!permissionsBody) return;
+
+            const safeItems = Array.isArray(items) ? items : [];
+
+            if (!safeItems.length) {
+                permissionsBody.innerHTML = `
+                    <tr>
+                        <td colspan="6" class="muted">Права пользователей пока не настроены.</td>
+                    </tr>
+                `;
+                return;
+            }
+
+            permissionsBody.innerHTML = safeItems.map(item => `
+                <tr data-user-id="${esc(item.userId)}">
+                    <td><b>${esc(item.userId)}</b></td>
+                    <td>
+                        <input
+                            data-role="permission-name"
+                            data-user-id="${esc(item.userId)}"
+                            class="permission-input-name"
+                            value="${esc(item.userName || '')}"
+                            placeholder="Имя сотрудника"
+                        >
+                    </td>
+                    <td>
+                        <input
+                            type="checkbox"
+                            data-role="permission-access"
+                            data-user-id="${esc(item.userId)}"
+                            ${item.canAccessChecklists ? 'checked' : ''}
+                        >
+                    </td>
+                    <td>
+                        <input
+                            type="checkbox"
+                            data-role="permission-delete"
+                            data-user-id="${esc(item.userId)}"
+                            ${item.canDeleteFiles ? 'checked' : ''}
+                        >
+                    </td>
+                    <td>
+                        <div class="muted">source: ${esc(item.source || '')}</div>
+                        <div class="muted">${esc(item.updatedAt || '')}</div>
+                    </td>
+                    <td>
+                        <div class="mini-actions">
+                            <button type="button" class="primary" data-action="permission-save" data-user-id="${esc(item.userId)}">Сохранить</button>
+                            <button type="button" class="danger" data-action="permission-delete-row" data-user-id="${esc(item.userId)}">Удалить</button>
+                        </div>
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        async function reloadPermissions() {
+            try {
+                const result = await apiGet('api/admin/user-permissions');
+                renderPermissions(result.items || []);
+                setStatus(result);
+            } catch (e) {
+                setStatus('Ошибка загрузки прав: ' + String(e.message || e));
+            }
+        }
+
+        async function savePermissionPayload(payload) {
+            const result = await apiPost('api/admin/user-permissions/upsert', payload);
+            setStatus(result);
+            await reloadPermissions();
+            return result;
+        }
+
+        async function addPermissionFromInputs() {
+            const userId = String(permissionUserIdInput.value || '').trim();
+            const userName = String(permissionUserNameInput.value || '').trim();
+
+            if (!userId) {
+                alert('Укажи ID сотрудника');
+                return;
+            }
+
+            await savePermissionPayload({
+                targetUserId: userId,
+                targetUserName: userName,
+                canAccessChecklists: !!permissionAccessInput.checked,
+                canDeleteFiles: !!permissionDeleteInput.checked,
+                source: 'admin'
+            });
+
+            permissionUserIdInput.value = '';
+            permissionUserNameInput.value = '';
+            permissionAccessInput.checked = true;
+            permissionDeleteInput.checked = false;
+        }
+
+        async function savePermissionFromRow(userId) {
+            const nameInput = document.querySelector('[data-role="permission-name"][data-user-id="' + CSS.escape(userId) + '"]');
+            const accessInput = document.querySelector('[data-role="permission-access"][data-user-id="' + CSS.escape(userId) + '"]');
+            const deleteInput = document.querySelector('[data-role="permission-delete"][data-user-id="' + CSS.escape(userId) + '"]');
+
+            await savePermissionPayload({
+                targetUserId: userId,
+                targetUserName: nameInput ? nameInput.value : '',
+                canAccessChecklists: accessInput ? !!accessInput.checked : false,
+                canDeleteFiles: deleteInput ? !!deleteInput.checked : false,
+                source: 'admin'
+            });
+        }
+
+        async function deletePermissionRow(userId) {
+            if (!confirm('Удалить пользователя ' + userId + ' из таблицы прав?')) {
+                return;
+            }
+
+            const result = await apiPost('api/admin/user-permissions/delete', {
+                targetUserId: userId
+            });
+
+            setStatus(result);
+            await reloadPermissions();
+        }
+
+        function renderBitrixUsers(users) {
+            if (!bitrixUsersBox || !bitrixUsersBody) return;
+
+            const safeUsers = Array.isArray(users) ? users : [];
+            bitrixUsersBox.classList.add('visible');
+
+            if (!safeUsers.length) {
+                bitrixUsersBody.innerHTML = `
+                    <tr>
+                        <td colspan="4" class="muted">Сотрудники не получены.</td>
+                    </tr>
+                `;
+                return;
+            }
+
+            bitrixUsersBody.innerHTML = safeUsers.map(user => {
+                const id = String(user.ID || user.id || '').trim();
+                const name = [user.NAME, user.LAST_NAME].filter(Boolean).join(' ').trim()
+                    || String(user.name || '').trim()
+                    || String(user.EMAIL || user.email || '').trim();
+
+                const email = String(user.EMAIL || user.email || '').trim();
+
+                return `
+                    <tr>
+                        <td><b>${esc(id)}</b></td>
+                        <td>${esc(name)}</td>
+                        <td>${esc(email)}</td>
+                        <td>
+                            <button
+                                type="button"
+                                data-action="permission-add-bitrix"
+                                data-user-id="${esc(id)}"
+                                data-user-name="${esc(name)}"
+                            >
+                                Добавить
+                            </button>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        async function loadBitrixUsers() {
+            if (!(window.BX24 && typeof window.BX24.init === 'function')) {
+                alert('BX24 недоступен. Открой админку внутри Bitrix24 или добавь пользователя вручную по ID.');
+                return;
+            }
+
+            setStatus('Запрашиваем сотрудников из Bitrix...');
+
+            window.BX24.init(function () {
+                try {
+                    window.BX24.callMethod('user.get', {
+                        FILTER: {
+                            ACTIVE: true
+                        }
+                    }, function(result) {
+                        try {
+                            if (result.error()) {
+                                throw new Error(result.error());
+                            }
+
+                            const users = result.data() || [];
+                            renderBitrixUsers(users);
+                            setStatus({
+                                ok: true,
+                                loadedFromBitrix: users.length,
+                                note: 'Загружена первая страница user.get. При необходимости можно добавить пагинацию отдельным этапом.'
+                            });
+                        } catch (e) {
+                            setStatus('Ошибка Bitrix user.get: ' + String(e.message || e));
+                        }
+                    });
+                } catch (e) {
+                    setStatus('Ошибка вызова Bitrix user.get: ' + String(e.message || e));
+                }
+            });
+        }
+
 
         function renderProjects(items) {
             projectsBody.innerHTML = '';
@@ -616,6 +920,56 @@ def admin_page(userId: str = ""):
             }
         }
 
+
+        document.getElementById('reloadPermissionsBtn').addEventListener('click', reloadPermissions);
+        document.getElementById('addPermissionBtn').addEventListener('click', function () {
+            addPermissionFromInputs();
+        });
+        document.getElementById('loadBitrixUsersBtn').addEventListener('click', loadBitrixUsers);
+
+        permissionsBody.addEventListener('click', function (event) {
+            const btn = event.target.closest('button[data-action]');
+            if (!btn) return;
+
+            const action = btn.dataset.action;
+            const userId = btn.dataset.userId;
+
+            if (action === 'permission-save') {
+                savePermissionFromRow(userId);
+            }
+
+            if (action === 'permission-delete-row') {
+                deletePermissionRow(userId);
+            }
+        });
+
+        permissionsBody.addEventListener('change', function (event) {
+            const el = event.target;
+            if (!el || !el.dataset || !el.dataset.userId) return;
+
+            if (el.dataset.role === 'permission-access' || el.dataset.role === 'permission-delete') {
+                savePermissionFromRow(el.dataset.userId);
+            }
+        });
+
+        bitrixUsersBody.addEventListener('click', function (event) {
+            const btn = event.target.closest('button[data-action="permission-add-bitrix"]');
+            if (!btn) return;
+
+            const userId = String(btn.dataset.userId || '').trim();
+            const userName = String(btn.dataset.userName || '').trim();
+
+            if (!userId) return;
+
+            permissionUserIdInput.value = userId;
+            permissionUserNameInput.value = userName;
+            permissionAccessInput.checked = true;
+            permissionDeleteInput.checked = false;
+
+            addPermissionFromInputs();
+        });
+
+
         document.getElementById('reloadBtn').addEventListener('click', reloadProjects);
         document.getElementById('inspectBtn').addEventListener('click', function () {
             inspectProject('');
@@ -642,6 +996,7 @@ def admin_page(userId: str = ""):
         });
 
         reloadProjects();
+        reloadPermissions();
     </script>
 </body>
 </html>
@@ -649,6 +1004,76 @@ def admin_page(userId: str = ""):
 
     html = html.replace("__USER_ID_JSON__", user_id_json)
     return HTMLResponse(html)
+
+
+
+@router.get("/api/admin/user-permissions")
+def api_admin_user_permissions(userId: str = ""):
+    if not is_admin_user(userId):
+        return json_admin_denied()
+
+    return JSONResponse({
+        "ok": True,
+        "items": list_user_permissions(),
+    })
+
+
+@router.post("/api/admin/user-permissions/upsert")
+async def api_admin_user_permissions_upsert(request: Request):
+    payload = await request.json()
+
+    user_id = clean_cell_value(payload.get("userId"))
+    if not is_admin_user(user_id):
+        return json_admin_denied()
+
+    target_user_id = clean_cell_value(payload.get("targetUserId"))
+    target_user_name = clean_cell_value(payload.get("targetUserName"))
+
+    if not target_user_id:
+        return JSONResponse({
+            "ok": False,
+            "error": "targetUserId is required",
+        }, status_code=400)
+
+    item = upsert_user_permission(
+        user_id=target_user_id,
+        user_name=target_user_name,
+        can_access_checklists=bool(payload.get("canAccessChecklists", True)),
+        can_delete_files=bool(payload.get("canDeleteFiles", False)),
+        source=clean_cell_value(payload.get("source")) or "admin",
+    )
+
+    return JSONResponse({
+        "ok": True,
+        "item": item,
+        "items": list_user_permissions(),
+    })
+
+
+@router.post("/api/admin/user-permissions/delete")
+async def api_admin_user_permissions_delete(request: Request):
+    payload = await request.json()
+
+    user_id = clean_cell_value(payload.get("userId"))
+    if not is_admin_user(user_id):
+        return json_admin_denied()
+
+    target_user_id = clean_cell_value(payload.get("targetUserId"))
+
+    if not target_user_id:
+        return JSONResponse({
+            "ok": False,
+            "error": "targetUserId is required",
+        }, status_code=400)
+
+    deleted = delete_user_permission(target_user_id)
+
+    return JSONResponse({
+        "ok": True,
+        "targetUserId": target_user_id,
+        "deleted": deleted,
+        "items": list_user_permissions(),
+    })
 
 
 @router.get("/api/admin/projects")

@@ -33,6 +33,10 @@ def get_project_checklists_from_config() -> list[dict]:
             "notRequiredGroupId": config.not_required_group_id,
             "defaultGroupId": config.default_group_id,
             "allowCustomItemGroupIds": list(config.allow_custom_item_group_ids),
+            "stageYandexFolderAlias": config.stage_yandex_folder_alias,
+            "layoutMode": config.layout_mode,
+            "bimGroupId": config.bim_group_id,
+            "bimPlacement": config.bim_placement,
         }
         for config in list_checklist_configs()
     ]

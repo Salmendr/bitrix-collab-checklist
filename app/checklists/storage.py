@@ -191,7 +191,19 @@ def get_project_storage_context(dialog_id: str):
     return hydrate_project_storage_context_from_configs(context)
 
 
-def get_item_yandex_mapping(dialog_id: str, checklist_key: str, item_name: str):
+def normalize_mapping_group_id(mapping: dict) -> int:
+    try:
+        return int((mapping or {}).get("groupId") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def get_item_yandex_mapping(
+    dialog_id: str,
+    checklist_key: str,
+    item_name: str,
+    group_id: int = 0,
+):
     context = get_project_storage_context(dialog_id)
     if not context:
         return None
@@ -199,22 +211,54 @@ def get_item_yandex_mapping(dialog_id: str, checklist_key: str, item_name: str):
     checklist_key = normalize_checklist_key(checklist_key)
     item_name = clean_cell_value(item_name).lower()
 
+    try:
+        target_group_id = int(group_id or 0)
+    except (TypeError, ValueError):
+        target_group_id = 0
+
+    fallback_mapping = None
+    first_name_match = None
+
     for mapping in context.get("itemMappings", []):
+        if not isinstance(mapping, dict):
+            continue
+
         mapping_key = normalize_checklist_key(mapping.get("checklistKey"))
         mapping_name = clean_cell_value(mapping.get("itemName")).lower()
 
-        if mapping_key == checklist_key and mapping_name == item_name:
+        if mapping_key != checklist_key or mapping_name != item_name:
+            continue
+
+        mapping_group_id = normalize_mapping_group_id(mapping)
+
+        if first_name_match is None:
+            first_name_match = mapping
+
+        if target_group_id and mapping_group_id == target_group_id:
             return mapping
 
-    return None
+        if mapping_group_id == 0 and fallback_mapping is None:
+            fallback_mapping = mapping
+
+    return fallback_mapping or first_name_match
 
 
-def get_item_yandex_folder(dialog_id: str, checklist_key: str, item_name: str):
+def get_item_yandex_folder(
+    dialog_id: str,
+    checklist_key: str,
+    item_name: str,
+    group_id: int = 0,
+):
     context = get_project_storage_context(dialog_id)
     if not context:
         return None
 
-    mapping = get_item_yandex_mapping(dialog_id, checklist_key, item_name)
+    mapping = get_item_yandex_mapping(
+        dialog_id,
+        checklist_key,
+        item_name,
+        group_id=group_id,
+    )
     if not mapping:
         return None
 
@@ -235,6 +279,7 @@ def get_item_yandex_folder(dialog_id: str, checklist_key: str, item_name: str):
         "mapping": mapping,
         "context": context,
     }
+
 
 def list_checklist_summaries() -> list[dict]:
     conn = get_conn()

@@ -13,7 +13,9 @@ from app.checklists.storage import (
     get_project_root_yandex_folder_info,
 )
 
-from app.checklists.permissions import FILE_DELETE_ALLOWED_USER_IDS
+from app.checklists.permissions import get_file_delete_allowed_user_ids
+from app.checklists.config import list_checklist_configs
+from app.checklists.yandex_context import resolve_checklist_yandex_root_path, get_project_root_path
 
 def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
     dialog_id = normalize_dialog_id(dialogId)
@@ -32,17 +34,78 @@ def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
     progress_percent = int(data.get("progressPercent", 0) or 0)
 
     project_root_folder_info = get_project_root_yandex_folder_info(dialog_id)
+
+    project_root_yandex_path_value = (
+        clean_cell_value(project_root_folder_info.get("path"))
+        or clean_cell_value((project_context.get("yandexDisk") or {}).get("projectRootPath"))
+        or clean_cell_value(get_project_root_path(project_context))
+    )
+
+    project_root_yandex_url_value = (
+        clean_cell_value(project_root_folder_info.get("url"))
+        or clean_cell_value((project_context.get("yandexDisk") or {}).get("projectRootUrl"))
+    )
+
     project_root_yandex_path_json = json.dumps(
-        clean_cell_value(project_root_folder_info.get("path")),
+        project_root_yandex_path_value,
         ensure_ascii=False
     )
     project_root_yandex_url_json = json.dumps(
-        clean_cell_value(project_root_folder_info.get("url")),
+        project_root_yandex_url_value,
         ensure_ascii=False
     )
 
     project_root_yandex_prepared_json = json.dumps(
         bool(project_root_folder_info.get("standardFoldersPrepared")),
+        ensure_ascii=False
+    )
+
+    project_yandex_disk = project_context.get("yandexDisk") or {}
+    project_yandex_folders = project_yandex_disk.get("folders") or {}
+
+    stage_yandex_folders_by_key = {}
+
+    for checklist_config in list_checklist_configs():
+        stage_alias = (
+            clean_cell_value(checklist_config.stage_yandex_folder_alias)
+            or clean_cell_value(checklist_config.yandex_root_alias)
+        )
+
+        folder = project_yandex_folders.get(stage_alias) or {}
+
+        stage_path = (
+            clean_cell_value(folder.get("path"))
+            or clean_cell_value(resolve_checklist_yandex_root_path(project_context, checklist_config))
+        )
+
+        stage_yandex_folders_by_key[checklist_config.key] = {
+            "alias": stage_alias,
+            "path": stage_path,
+            "url": clean_cell_value(folder.get("url") or folder.get("public_url")),
+        }
+
+    stage_yandex_folders_json = json.dumps(
+        stage_yandex_folders_by_key,
+        ensure_ascii=False
+    )
+
+    checklist_layout_meta_by_key = {}
+
+    for checklist_config in list_checklist_configs():
+        checklist_layout_meta_by_key[checklist_config.key] = {
+            "key": checklist_config.key,
+            "title": checklist_config.title,
+            "notRequiredGroupId": checklist_config.not_required_group_id,
+            "defaultGroupId": checklist_config.default_group_id,
+            "allowCustomItemGroupIds": list(checklist_config.allow_custom_item_group_ids),
+            "stageYandexFolderAlias": checklist_config.stage_yandex_folder_alias,
+            "layoutMode": checklist_config.layout_mode,
+            "bimGroupId": checklist_config.bim_group_id,
+            "bimPlacement": checklist_config.bim_placement,
+        }
+
+    checklist_layout_meta_json = json.dumps(
+        checklist_layout_meta_by_key,
         ensure_ascii=False
     )
 
@@ -54,7 +117,7 @@ def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
     checklist_key_json = json.dumps(checklist_key, ensure_ascii=False)
     checklist_title_json = json.dumps(title_raw, ensure_ascii=False)
     file_delete_allowed_user_ids_json = json.dumps(
-        sorted(FILE_DELETE_ALLOWED_USER_IDS),
+        sorted(get_file_delete_allowed_user_ids()),
         ensure_ascii=False
     )
     popup_session_enhancements_js = """
@@ -804,7 +867,7 @@ def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
                         <input class="add-item-input" id="addItemInput_${group.id}" type="text" placeholder="Новый пункт" ${disabledAttr()}>
                         <button class="add-item-btn" type="button" data-role="add-item" data-group-id="${group.id}" ${disabledAttr()}>Добавить пункт</button>
                     </div>` : '';
-                return `<div class="group-block"><div class="group-title">${esc(group.title)}</div>${rows}${addBlock}</div>`;
+                return `<div class="group-block">${rows}${addBlock}</div>`;
             };
 
             function getInlineEditorDomId(role, itemId) {
@@ -939,7 +1002,7 @@ def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
                     </div>
                 ` : '';
 
-                return `<div class="group-block"><div class="group-title">${esc(group.title)}</div>${rows}${addBlock}</div>`;
+                return `<div class="group-block">${rows}${addBlock}</div>`;
             };
 
             function buildConceptTableHtmlEnhanced(conceptGroups) {
@@ -1108,7 +1171,7 @@ def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
                     </div>
                 ` : '';
 
-                return `<div class="group-block"><div class="group-title">${esc(group.title)}</div>${rows}${addBlock}</div>`;
+                return `<div class="group-block">${rows}${addBlock}</div>`;
             }
 
             renderOprTables = function () {
@@ -1195,8 +1258,9 @@ def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
                 const toggleTitle = showDates ? 'Скрыть даты' : 'Показать даты';
 
                 return `
+                    <div class="group-title group-title-generic-head">${esc(group.title)}</div>
                     <div class="thead-top ${getGenericGridClass(showDates)}">
-                        <div class="th">${esc(group.title)}</div>
+                        <div class="th">Пункты раздела</div>
                         <div class="th">Документ</div>
                         <div class="th th-status-with-toggle">
                             <span>Статус</span>
@@ -1272,7 +1336,7 @@ def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
                     </div>
                 ` : '';
 
-                return `<div class="group-block"><div class="group-title">${esc(group.title)}</div>${rows}${addBlock}</div>`;
+                return `<div class="group-block">${rows}${addBlock}</div>`;
             }
 
             function splitGroupsIntoPanels(sourceGroups, panelCount) {
@@ -1306,11 +1370,13 @@ def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
                     const showDates = isGenericDatesVisible(group.id);
 
                     return `
-                        <div class="thead">
-                            ${buildGenericTableHeader(group, showDates)}
-                        </div>
-                        <div>
-                            ${renderGenericGroup(group, showDates)}
+                        <div class="generic-subtable">
+                            <div class="thead">
+                                ${buildGenericTableHeader(group, showDates)}
+                            </div>
+                            <div>
+                                ${renderGenericGroup(group, showDates)}
+                            </div>
                         </div>
                     `;
                 }).join('');
@@ -1326,7 +1392,18 @@ def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
                 return groupBlocks + notRequiredBlock;
             }
 
+            function setGenericSplitTableMode(enabled) {
+                [leftTableEl, middleTableEl, rightTableEl].forEach(table => {
+                    if (!table) return;
+                    table.classList.toggle('generic-split-table', !!enabled);
+                });
+            }
+
             function resetTablePanelsForGeneric(panelCount) {
+                if (typeof setGenericSplitTableMode === 'function') {
+                    setGenericSplitTableMode(true);
+                }
+
                 if (tablesGridEl) {
                     tablesGridEl.classList.toggle('id-three-cols', panelCount >= 3);
                     tablesGridEl.style.gridTemplateColumns = panelCount >= 3
@@ -1378,6 +1455,35 @@ def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
             }
 
             renderTables = function () {
+                const meta = typeof getCurrentChecklistLayoutMeta === 'function'
+                    ? getCurrentChecklistLayoutMeta()
+                    : {};
+
+                const layoutMode = String(meta && meta.layoutMode || '').trim();
+
+                if (
+                    ['concept_with_bim', 'opr_with_bim', 'stage_with_bim'].includes(layoutMode)
+                    && typeof renderConfiguredBimTables === 'function'
+                ) {
+                    renderConfiguredBimTables();
+                    return;
+                }
+
+                if (currentChecklistKey === 'id') {
+                    renderIdTables();
+                    return;
+                }
+
+                if (currentChecklistKey === 'opr') {
+                    renderOprTables();
+                    return;
+                }
+
+                if (currentChecklistKey === 'concept') {
+                    renderConceptTables();
+                    return;
+                }
+
                 renderGenericTables();
             };
 
@@ -1658,6 +1764,8 @@ def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
                         renderProjectRootFolderButton();
                     }
                 }
+
+                await refreshCurrentStageYandexFolderInfo();
             }, 0);
     """
 
@@ -1752,15 +1860,76 @@ def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
             }}
             .content {{ padding:14px 16px 16px; max-height:82vh; overflow:auto; }}
             .layout {{ display:flex; flex-direction:column; gap:12px; align-items:stretch; }}
+            .stage-folder-box {{
+                display:flex;
+                justify-content:flex-end;
+                align-items:flex-start;
+                min-height:34px;
+                flex:0 0 320px;
+                margin-left:auto;
+            }}
+            .stage-folder-box .doc-btn {{
+                width:auto;
+                min-width:300px;
+                max-width:320px;
+                height:34px;
+                padding:6px 14px;
+                white-space:nowrap;
+                overflow:hidden;
+                text-overflow:ellipsis;
+            }}
             .tables-grid {{ display:grid; grid-template-columns:1fr 1fr; gap:14px; align-items:start; }}
             .table-panel {{ min-width:0; display:flex; }}
             .table-panel .table {{ flex:1 1 auto; }}
             .side-panel {{ order:-1; border:1px solid #e5e7eb; border-radius:12px; background:#fff; overflow:hidden; position:static; }}
             .side-panel-title {{ padding:12px 14px; background:#fafbfc; border-bottom:1px solid #e5e7eb; font-size:13px; font-weight:700; color:#344054; }}
-            .side-panel-list {{ padding:10px; display:flex; flex-wrap:wrap; gap:8px; }}
+            .side-panel-toolbar {{
+                padding:10px;
+                display:flex;
+                align-items:flex-start;
+                gap:10px;
+                width:100%;
+            }}
+            .side-panel-list {{
+                padding:0;
+                display:flex;
+                flex-wrap:wrap;
+                gap:8px;
+                flex:1 1 auto;
+                min-width:0;
+                align-content:flex-start;
+            }}
             .side-link {{ display:inline-flex; width:auto; text-align:left; border:1px solid #d0d7de; border-radius:8px; background:#fff; padding:9px 12px; font-size:13px; cursor:pointer; align-items:center; }}
             .side-link.active {{ background:#eef2ff; border-color:#c7d2fe; font-weight:700; }}
             .table {{ width:100%; border:1px solid #e5e7eb; border-radius:12px; overflow:hidden; background:#fff; }}
+            .generic-split-table {{
+                border: none !important;
+                border-radius: 0 !important;
+                overflow: visible !important;
+                background: transparent !important;
+            }}
+
+            .generic-split-table .generic-subtable {{
+                border: 1px solid #e5e7eb;
+                border-radius: 12px;
+                overflow: hidden;
+                background: #fff;
+            }}
+
+            .generic-split-table .generic-subtable + .generic-subtable {{
+                margin-top: 14px;
+                padding-top: 0 !important;
+                border-top: 1px solid #e5e7eb !important;
+            }}
+
+            .generic-split-table .thead {{
+                position: static;
+            }}
+
+            .generic-split-table .group-title-generic-head {{
+                border-top: none;
+            }}
+
             .thead {{ position:sticky; top:0; z-index:10; background:#f8fafc; border-bottom:1px solid #e5e7eb; }}
             .thead-top,.thead-bottom {{ min-height:38px; }}
             .thead-top,.thead-bottom,.row {{ display:grid; grid-template-columns:190px 190px 100px 136px 136px; gap:0; align-items:stretch; justify-content:start; }}
@@ -1769,8 +1938,15 @@ def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
             .th {{ font-size:12px; font-weight:700; color:#475467; min-height:38px; display:flex; align-items:center; }}
             .thead-top .th,.thead-bottom .th {{ min-height:38px; }}
             .th.center {{ text-align:center; justify-content:center; }}
-            .group-block {{ border-top:8px solid #f8fafc; }}
+            .generic-subtable {{ background:#fff; }}
+            .generic-subtable + .generic-subtable {{
+                margin-top:14px;
+                padding-top:14px;
+                border-top:10px solid #ffffff;
+            }}
+            .group-block {{ border-top:none; }}
             .group-title {{ padding:9px 12px; min-height:40px; background:#fafbfc; border-top:1px solid #e5e7eb; border-bottom:1px solid #e5e7eb; font-size:13px; font-weight:700; color:#344054; display:flex; align-items:center; }}
+            .group-title-generic-head {{ border-top:none; }}
             .row {{ border-top:1px solid #edf0f2; background:#fff; }}
             .row.not-required {{ background:#fafafa; }}
             .row.not-required .item-name {{ text-decoration:line-through; color:#98a2b3; }}
@@ -1934,6 +2110,19 @@ def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
             }}
 
             @media (max-width:980px) {{
+                .side-panel-toolbar {{
+                    flex-direction:column;
+                    align-items:stretch;
+                }}
+                .stage-folder-box {{
+                    flex:0 0 auto;
+                    width:100%;
+                    justify-content:flex-end;
+                    margin-left:0;
+                }}
+            }}
+
+            @media (max-width:980px) {{
                 .thead-top,.thead-bottom,.row {{ grid-template-columns:1fr; }}
                 .th,.td {{ border-right:none; border-bottom:1px solid #edf0f2; }}
                 .th:last-child,.td:last-child {{ border-bottom:none; }}
@@ -2072,7 +2261,10 @@ def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
                         </div>
                         <div class="side-panel">
                             <div class="side-panel-title">Список чек-листов по проекту</div>
-                            <div class="side-panel-list" id="projectChecklistList"></div>
+                            <div class="side-panel-toolbar">
+                                <div class="side-panel-list" id="projectChecklistList"></div>
+                                <div id="stageFolderBox" class="stage-folder-box"></div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -2085,6 +2277,8 @@ def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
 
             let projectRootYandexPrepared = {project_root_yandex_prepared_json};
             let projectRootYandexPreparing = false;
+            let stageYandexFoldersByKey = {stage_yandex_folders_json};
+            const checklistLayoutMetaByKey = {checklist_layout_meta_json};
 
             let rawGroups = {groups_json};
             let rawProjectChecklists = {project_checklists_json};
@@ -2122,6 +2316,7 @@ def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
             const progressBoxEl = document.querySelector('.progress-box');
             const popupTitleEl = document.getElementById('popupTitle');
             const projectRootFolderBoxEl = document.getElementById('projectRootFolderBox');
+            const stageFolderBoxEl = document.getElementById('stageFolderBox');
             const projectChecklistListEl = document.getElementById('projectChecklistList');
             const tablePanels = document.querySelectorAll('.table-panel');
             const tablesGridEl = document.querySelector('.tables-grid');
@@ -3158,6 +3353,225 @@ def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
             function hasItemsInGroup(groupId) {{
                 return getItemsByGroup(groupId).length > 0;
             }}
+            function getProjectChecklistMetaForKey(key) {{
+                const targetKey = String(key || currentChecklistKey || '').trim() || 'id';
+
+                const savedMeta = (Array.isArray(projectChecklists) ? projectChecklists : []).find(item =>
+                    String(item && item.key || '').trim() === targetKey
+                ) || {{}};
+
+                const configMeta = checklistLayoutMetaByKey[targetKey] || {{}};
+
+                return {{
+                    key: targetKey,
+                    title: String(configMeta.title || savedMeta.title || 'Чек-лист'),
+                    notRequiredGroupId: Number(configMeta.notRequiredGroupId || savedMeta.notRequiredGroupId || 0),
+                    defaultGroupId: Number(configMeta.defaultGroupId || savedMeta.defaultGroupId || 0),
+                    allowCustomItemGroupIds: Array.isArray(configMeta.allowCustomItemGroupIds)
+                        ? configMeta.allowCustomItemGroupIds
+                        : Array.isArray(savedMeta.allowCustomItemGroupIds)
+                            ? savedMeta.allowCustomItemGroupIds
+                            : [],
+                    stageYandexFolderAlias: String(configMeta.stageYandexFolderAlias || savedMeta.stageYandexFolderAlias || ''),
+                    layoutMode: String(configMeta.layoutMode || savedMeta.layoutMode || 'generic'),
+                    bimGroupId: Number(configMeta.bimGroupId || savedMeta.bimGroupId || 0),
+                    bimPlacement: String(configMeta.bimPlacement || savedMeta.bimPlacement || '')
+                }};
+            }}
+
+            function getCurrentChecklistLayoutMeta() {{
+                return getProjectChecklistMetaForKey(currentChecklistKey);
+            }}
+
+            function getCurrentStageFolderInfo() {{
+                const key = String(currentChecklistKey || '').trim() || 'id';
+                return stageYandexFoldersByKey[key] || {{}};
+            }}
+
+            const stageYandexFolderRefreshInProgress = new Set();
+
+            async function refreshCurrentStageYandexFolderInfo() {{
+                const key = String(currentChecklistKey || '').trim() || 'id';
+
+                if (stageYandexFolderRefreshInProgress.has(key)) {{
+                    return;
+                }}
+
+                stageYandexFolderRefreshInProgress.add(key);
+
+                try {{
+                    const response = await fetch(
+                        appUrl('api/checklist/stage-yandex-folder') +
+                        '?dialogId=' + encodeURIComponent(dialogId) +
+                        '&checklistKey=' + encodeURIComponent(key) +
+                        '&prepare=1'
+                    );
+
+                    const result = await response.json().catch(() => ({{}}));
+
+                    if (!response.ok || !result || !result.ok) {{
+                        debugLog('stage_yandex_folder_prepare_failed', {{
+                            checklistKey: key,
+                            result
+                        }});
+                        return;
+                    }}
+
+                    stageYandexFoldersByKey[key] = {{
+                        alias: String(result.alias || ''),
+                        path: String(result.path || ''),
+                        url: String(result.url || '')
+                    }};
+
+                    debugLog('stage_yandex_folder_prepared', {{
+                        checklistKey: key,
+                        alias: result.alias || '',
+                        pathExists: !!String(result.path || '').trim(),
+                        urlExists: !!String(result.url || '').trim(),
+                        preparedNow: !!result.preparedNow
+                    }});
+
+                    renderStageFolderButton();
+
+                }} catch (e) {{
+                    console.log('stage yandex folder refresh error:', e);
+                    debugLog('stage_yandex_folder_prepare_exception', {{
+                        checklistKey: key,
+                        message: String(e && e.message || e)
+                    }});
+                }} finally {{
+                    stageYandexFolderRefreshInProgress.delete(key);
+                }}
+            }}
+
+            function renderStageFolderButton() {{
+                if (!stageFolderBoxEl) {{
+                    return;
+                }}
+
+                const key = String(currentChecklistKey || '').trim() || 'id';
+                const folderInfo = stageYandexFoldersByKey[key] || {{}};
+                const folderPath = String(folderInfo && folderInfo.path || '').trim();
+                const folderUrl = String(folderInfo && folderInfo.url || '').trim();
+
+                stageFolderBoxEl.style.display = 'flex';
+
+                const buttonText = folderUrl
+                    ? 'Открыть Стадию в Яндекс Диске'
+                    : folderPath
+                        ? 'Готовим ссылку на папку стадии...'
+                        : 'Готовим папку стадии...';
+
+                stageFolderBoxEl.innerHTML = `
+                    <button
+                        class="doc-btn"
+                        type="button"
+                        data-role="view-stage-folder"
+                        data-folder-url="${{esc(folderUrl)}}"
+                        title="${{esc(folderPath || 'Папка текущего чек-листа')}}"
+                        ${{folderUrl ? '' : 'disabled'}}
+                    >
+                        ${{esc(buttonText)}}
+                    </button>
+                `;
+
+                const btn = stageFolderBoxEl.querySelector('[data-role="view-stage-folder"]');
+                if (!btn) {{
+                    return;
+                }}
+
+                if (!folderUrl) {{
+                    btn.disabled = true;
+                    btn.style.opacity = '0.65';
+                    btn.style.cursor = 'default';
+
+                    setTimeout(function () {{
+                        refreshCurrentStageYandexFolderInfo();
+                    }}, 0);
+
+                    return;
+                }}
+
+                btn.addEventListener('click', function () {{
+                    const url = String(this.dataset.folderUrl || '').trim();
+                    if (url) {{
+                        window.open(url, '_blank', 'noopener');
+                    }}
+                }});
+            }}
+
+
+            function getConfiguredBimGroup(meta = getCurrentChecklistLayoutMeta()) {{
+                const bimGroupId = Number(meta && meta.bimGroupId || 0);
+                if (!bimGroupId) {{
+                    return null;
+                }}
+
+                return (Array.isArray(groups) ? groups : []).find(group =>
+                    Number(group && group.id) === bimGroupId
+                ) || null;
+            }}
+
+            function getConfiguredActiveGroupsWithoutBim(meta = getCurrentChecklistLayoutMeta()) {{
+                const notRequiredGroupId = Number(meta && meta.notRequiredGroupId || 0);
+                const bimGroupId = Number(meta && meta.bimGroupId || 0);
+
+                return (Array.isArray(groups) ? groups : []).filter(group => {{
+                    const groupId = Number(group && group.id || 0);
+                    return groupId !== notRequiredGroupId && groupId !== bimGroupId;
+                }});
+            }}
+
+            function renderConfiguredBimTables() {{
+                if (!leftTableEl || !middleTableEl || !rightTableEl || !tablesGridEl) {{
+                    throw new Error('configured BIM table containers not found');
+                }}
+
+                const meta = getCurrentChecklistLayoutMeta();
+                const bimGroup = getConfiguredBimGroup(meta);
+                const placement = String(meta && meta.bimPlacement || '').trim();
+                const activeGroups = getConfiguredActiveGroupsWithoutBim(meta);
+
+                if (!bimGroup) {{
+                    renderGenericTables();
+                    return;
+                }}
+
+                if (placement === 'right') {{
+                    resetTablePanelsForGeneric(3);
+
+                    if (tablePanels[2]) {{
+                        tablePanels[2].style.display = 'none';
+                    }}
+                    if (rightTableEl) {{
+                        rightTableEl.innerHTML = '';
+                    }}
+
+                    const mainGroups = activeGroups.length
+                        ? activeGroups
+                        : (Array.isArray(groups) ? groups.slice(0, 1) : []);
+
+                    leftTableEl.innerHTML = renderGenericPanel(mainGroups, true);
+                    middleTableEl.innerHTML = renderGenericPanel([bimGroup], false);
+                    return;
+                }}
+
+                if (placement === 'below_first_group') {{
+                    resetTablePanelsForGeneric(3);
+
+                    const firstGroup = activeGroups[0] ? [activeGroups[0]] : [];
+                    const secondGroup = activeGroups[1] ? [activeGroups[1]] : [];
+                    const thirdGroup = activeGroups[2] ? [activeGroups[2]] : [];
+
+                    leftTableEl.innerHTML = renderGenericPanel(firstGroup.concat([bimGroup]), false);
+                    middleTableEl.innerHTML = renderGenericPanel(secondGroup, false);
+                    rightTableEl.innerHTML = renderGenericPanel(thirdGroup, true);
+                    return;
+                }}
+
+                renderGenericTables();
+            }}
+
             function renderProjectRootFolderButton() {{
                 if (!projectRootFolderBoxEl) {{
                     return;
@@ -3176,7 +3590,7 @@ def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
                 projectRootFolderBoxEl.style.display = 'flex';
 
                 const buttonText = isReady
-                    ? 'Открыть папку в Яндекс Диске'
+                    ? 'Открыть Проект на Яндекс Диске'
                     : 'Готовим структуру Яндекс.Диска...';
 
                 projectRootFolderBoxEl.innerHTML = `
@@ -3529,7 +3943,7 @@ def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
                     </div>
                 ` : '';
 
-                return `<div class="group-block"><div class="group-title">${{esc(group.title)}}</div>${{rows}}${{addBlock}}</div>`;
+                return `<div class="group-block">${{rows}}${{addBlock}}</div>`;
             }}
             function buildConceptTableHtml(conceptGroups) {{
                 return `
@@ -3679,7 +4093,7 @@ def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
                     </div>
                 ` : '';
 
-                return `<div class="group-block"><div class="group-title">${{esc(group.title)}}</div>${{rows}}${{addBlock}}</div>`;
+                return `<div class="group-block">${{rows}}${{addBlock}}</div>`;
             }}
 
             function renderIdPanel(mainGroup, appendNotRequired = false) {{
@@ -3772,7 +4186,7 @@ def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
                         <input class="add-item-input" id="addItemInput_${{group.id}}" type="text" placeholder="Новый пункт" ${{disabledAttr()}}>
                         <button class="add-item-btn" type="button" data-role="add-item" data-group-id="${{group.id}}" ${{disabledAttr()}}>Добавить пункт</button>
                     </div>` : '';
-                return `<div class="group-block"><div class="group-title">${{esc(group.title)}}</div>${{rows}}${{addBlock}}</div>`;
+                return `<div class="group-block">${{rows}}${{addBlock}}</div>`;
             }}
 
             function isConceptDatesVisible(groupId) {{
@@ -3862,7 +4276,7 @@ def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
                     </div>
                 ` : '';
 
-                return `<div class="group-block"><div class="group-title">${{esc(group.title)}}</div>${{rows}}${{addBlock}}</div>`;
+                return `<div class="group-block">${{rows}}${{addBlock}}</div>`;
             }}
 
             function renderConceptPanel(mainGroup, appendNotRequired = false) {{
@@ -3921,8 +4335,11 @@ def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
             }}
 
             function renderTables() {{
-                if (currentChecklistKey === 'concept') {{
-                    renderConceptTables();
+                const meta = getCurrentChecklistLayoutMeta();
+                const layoutMode = String(meta && meta.layoutMode || '').trim();
+
+                if (['concept_with_bim', 'opr_with_bim', 'stage_with_bim'].includes(layoutMode)) {{
+                    renderConfiguredBimTables();
                     return;
                 }}
 
@@ -3936,37 +4353,12 @@ def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
                     return;
                 }}
 
-                if (tablesGridEl) {{
-                    tablesGridEl.classList.remove('id-three-cols');
-                    tablesGridEl.style.gridTemplateColumns = '1fr 1fr';
+                if (currentChecklistKey === 'concept') {{
+                    renderConceptTables();
+                    return;
                 }}
 
-                if (tablePanels[0]) tablePanels[0].style.display = '';
-                if (tablePanels[1]) tablePanels[1].style.display = '';
-                if (tablePanels[2]) tablePanels[2].style.display = 'none';
-
-                if (leftTableEl) leftTableEl.innerHTML = idTableShellHtml;
-                if (middleTableEl) middleTableEl.innerHTML = idTableShellHtml;
-
-                const leftBody = document.getElementById('leftTableBody');
-                const middleBody = document.getElementById('middleTableBody');
-
-                if (!leftBody || !middleBody) {{
-                    throw new Error('leftTableBody or middleTableBody not found');
-                }}
-
-                const leftGroups = groups.filter(g => Number(g.id) === 1 || Number(g.id) === 3);
-                const rightGroups = groups.filter(g => Number(g.id) === 2);
-
-                if (hasItemsInGroup(4)) {{
-                    const notRequiredGroup = groups.find(g => Number(g.id) === 4);
-                    if (notRequiredGroup) {{
-                        rightGroups.push(notRequiredGroup);
-                    }}
-                }}
-
-                leftBody.innerHTML = leftGroups.map(renderGroup).join('');
-                middleBody.innerHTML = rightGroups.map(renderGroup).join('');
+                renderGenericTables();
             }}
             function renderAll() {{
                 renderTables();
@@ -3975,6 +4367,7 @@ def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
                 renderTitle();
                 renderProjectChecklistList();
                 renderProjectRootFolderButton();
+                renderStageFolderButton();
 
                 if (progressBoxEl) {{
                     progressBoxEl.classList.toggle('id-accent', false);

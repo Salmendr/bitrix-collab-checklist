@@ -30,8 +30,8 @@ from app.checklists.utils import (
 )
 
 from app.checklists.permissions import (
-    FILE_DELETE_ALLOWED_USER_IDS,
     can_user_delete_files,
+    get_file_delete_allowed_user_ids,
 )
 
 from app.checklists.storage import (
@@ -632,7 +632,8 @@ def api_checklist_folder(dialogId: str = "", itemId: str = "", checklistKey: str
     yandex_folder_data = get_item_yandex_folder(
         dialog_id,
         checklist_key,
-        clean_cell_value(target_item.get("name"))
+        clean_cell_value(target_item.get("name")),
+        group_id=int(target_item.get("group") or 0),
     )
     yandex_folder = (yandex_folder_data or {}).get("folder") or {}
     yandex_folder_url = clean_cell_value(yandex_folder.get("url"))
@@ -713,7 +714,7 @@ def api_checklist_folder(dialogId: str = "", itemId: str = "", checklistKey: str
         </div>
     '''
     folder_delete_allowed_user_ids_json = json.dumps(
-        sorted(FILE_DELETE_ALLOWED_USER_IDS),
+        sorted(get_file_delete_allowed_user_ids()),
         ensure_ascii=False
     )
 

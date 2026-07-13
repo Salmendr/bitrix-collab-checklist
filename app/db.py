@@ -70,5 +70,56 @@ def init_db():
         ON upload_jobs(dialog_id, checklist_key, item_id, document_id)
     """)
 
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS user_permissions (
+            user_id TEXT PRIMARY KEY,
+            user_name TEXT,
+            can_access_checklists INTEGER DEFAULT 1,
+            can_delete_files INTEGER DEFAULT 0,
+            source TEXT,
+            updated_at TEXT
+        )
+    """)
+
+    permission_rows_count = cur.execute(
+        "SELECT COUNT(*) AS cnt FROM user_permissions"
+    ).fetchone()["cnt"]
+
+    if int(permission_rows_count or 0) == 0:
+        default_delete_user_ids = [
+            18,
+            26,
+            56,
+            72,
+            100,
+            106,
+            108,
+            114,
+            116,
+            124,
+            138,
+            140,
+            222,
+            256,
+            280,
+        ]
+
+        for user_id in default_delete_user_ids:
+            cur.execute("""
+                INSERT OR IGNORE INTO user_permissions(
+                    user_id,
+                    user_name,
+                    can_access_checklists,
+                    can_delete_files,
+                    source,
+                    updated_at
+                )
+                VALUES (?, ?, 1, 1, 'seed', datetime('now'))
+            """, (
+                str(user_id),
+                "",
+            ))
+
+
     conn.commit()
     conn.close()

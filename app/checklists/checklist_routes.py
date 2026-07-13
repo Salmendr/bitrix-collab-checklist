@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime
 from app.checklists.config import get_checklist_config
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
@@ -18,6 +19,8 @@ from app.checklists.storage import (
     save_checklist,
     get_checklist,
     get_item_yandex_folder,
+    get_project_storage_context,
+    save_project_storage_context,
 )
 
 from app.checklists.normalization import (
@@ -45,7 +48,10 @@ from app.checklists.yandex_mirror_queue import enqueue_yandex_mirror_job
 from app.checklists.yandex_folders import (
     can_create_custom_item_yandex_folder,
     ensure_yandex_folder_for_custom_item,
+    ensure_folder_and_get_public_url,
 )
+
+from app.checklists.yandex_context import resolve_checklist_yandex_root_path
 
 router = APIRouter()
 
@@ -103,6 +109,129 @@ def api_get_checklist(dialogId: str = "", checklistKey: str = "id"):
 
     data = get_checklist(dialog_id, checklist_key)
     return JSONResponse(data)
+
+
+
+@router.get("/api/checklist/stage-yandex-folder")
+def api_checklist_stage_yandex_folder(
+    dialogId: str = "",
+    checklistKey: str = "id",
+    prepare: int = 1,
+):
+    dialog_id = normalize_dialog_id(dialogId)
+    checklist_key = normalize_checklist_key(checklistKey)
+    config = get_checklist_config(checklist_key)
+
+    if not dialog_id:
+        return JSONResponse({"ok": False, "error": "dialogId is required"}, status_code=400)
+
+    context = get_project_storage_context(dialog_id)
+    if not context:
+        return JSONResponse({
+            "ok": False,
+            "error": "project storage context not found",
+            "dialogId": dialog_id,
+            "checklistKey": config.key,
+        }, status_code=404)
+
+    storage_mode = context.get("storageMode") or {}
+    mirror_targets = storage_mode.get("mirrorTargets") or []
+
+    if "yandex_disk" not in mirror_targets:
+        return JSONResponse({
+            "ok": True,
+            "yandexDisabled": True,
+            "reason": "yandex_disk is not in mirrorTargets",
+            "dialogId": dialog_id,
+            "checklistKey": config.key,
+            "alias": "",
+            "path": "",
+            "url": "",
+        })
+
+    yandex_disk = context.get("yandexDisk") or {}
+    folders = yandex_disk.get("folders") or {}
+
+    stage_alias = (
+        clean_cell_value(config.stage_yandex_folder_alias)
+        or clean_cell_value(config.yandex_root_alias)
+    )
+
+    folder = folders.get(stage_alias) if stage_alias else {}
+    folder = folder if isinstance(folder, dict) else {}
+
+    folder_path = (
+        clean_cell_value(folder.get("path"))
+        or clean_cell_value(resolve_checklist_yandex_root_path(context, config))
+    )
+
+    folder_url = clean_cell_value(folder.get("url") or folder.get("public_url"))
+    prepared_now = False
+
+    if int(prepare or 0) and folder_path and not folder_url:
+        try:
+            folder_meta = ensure_folder_and_get_public_url(folder_path)
+
+            folder_path = clean_cell_value(folder_meta.get("path")) or folder_path
+            folder_url = clean_cell_value(folder_meta.get("url")) or folder_url
+            folder_name = (
+                clean_cell_value(folder_meta.get("name"))
+                or clean_cell_value(folder.get("name"))
+                or folder_path.rstrip("/").rsplit("/", 1)[-1]
+            )
+
+            if stage_alias:
+                folders[stage_alias] = {
+                    **folder,
+                    "name": folder_name,
+                    "path": folder_path,
+                    "url": folder_url,
+                    "checklistKey": config.key,
+                    "isStageRoot": True,
+                    "preparedAt": datetime.now().isoformat(),
+                }
+
+                yandex_disk["folders"] = folders
+
+                save_project_storage_context(dialog_id, {
+                    "dialogId": dialog_id,
+                    "projectId": context.get("projectId") or "",
+                    "projectName": context.get("projectName") or "",
+                    "storageMode": context.get("storageMode") or {},
+                    "yandexDisk": yandex_disk,
+                    "itemMappings": context.get("itemMappings") or [],
+                })
+
+            prepared_now = True
+
+        except Exception as exc:
+            write_debug_log("stage_yandex_folder_prepare_failed", {
+                "dialogId": dialog_id,
+                "checklistKey": config.key,
+                "alias": stage_alias,
+                "path": folder_path,
+                "error": str(exc),
+            })
+
+            return JSONResponse({
+                "ok": False,
+                "error": str(exc),
+                "dialogId": dialog_id,
+                "checklistKey": config.key,
+                "alias": stage_alias,
+                "path": folder_path,
+                "url": folder_url,
+            }, status_code=500)
+
+    return JSONResponse({
+        "ok": True,
+        "dialogId": dialog_id,
+        "checklistKey": config.key,
+        "alias": stage_alias,
+        "path": folder_path,
+        "url": folder_url,
+        "preparedNow": prepared_now,
+    })
 
 
 @router.post("/api/checklist/update-meta")
@@ -210,7 +339,12 @@ async def api_checklist_add_item(request: Request):
                 item_id=new_item_id,
             )
 
-            folder_info = get_item_yandex_folder(dialog_id, config.key, name)
+            folder_info = get_item_yandex_folder(
+                dialog_id,
+                config.key,
+                name,
+                group_id=group_id,
+            )
             if folder_info:
                 folder = folder_info.get("folder") or {}
                 new_item["folderPath"] = clean_cell_value(folder.get("path"))

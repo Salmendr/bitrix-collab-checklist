@@ -41,6 +41,25 @@ P_GROUPS = [
         ],
     },
     {
+        "id": 90,
+        "title": "BIM-Модель",
+        "items": [
+            "BIM",
+            "ГП",
+            "БЛ",
+            "НИС",
+            "АР",
+            "АИ",
+            "ФР",
+            "КР",
+            "ОВ",
+            "ВК",
+            "ЭОМ",
+            "СС",
+            "ТХ",
+        ],
+    },
+    {
         "id": 4,
         "title": "Не требуется",
         "items": [],
@@ -49,104 +68,239 @@ P_GROUPS = [
 
 
 STANDARD_P_YANDEX_FOLDER_SPECS = {
-    "Состав проекта": {
+    "p_project_composition": {
+        "groupId": 1,
+        "itemName": "Состав проекта",
         "alias": "p_project_composition",
         "folderName": "01_Состав проекта",
         "relativePath": "01_Общие данные/01_Состав проекта",
     },
-    "Заполнение штампа": {
+    "p_stamp_filling": {
+        "groupId": 1,
+        "itemName": "Заполнение штампа",
         "alias": "p_stamp_filling",
         "folderName": "02_Заполнение штампа",
         "relativePath": "01_Общие данные/02_Заполнение штампа",
     },
 
-    "ПЗ": {
+    "p_pz": {
+        "groupId": 2,
+        "itemName": "ПЗ",
         "alias": "p_pz",
         "folderName": "01_ПЗ",
         "relativePath": "02_Стадия П/01_ПЗ",
     },
-    "ПЗУ": {
+    "p_pzu": {
+        "groupId": 2,
+        "itemName": "ПЗУ",
         "alias": "p_pzu",
         "folderName": "02_ПЗУ",
         "relativePath": "02_Стадия П/02_ПЗУ",
     },
-    "АР": {
+    "p_ar": {
+        "groupId": 2,
+        "itemName": "АР",
         "alias": "p_ar",
         "folderName": "03_АР",
         "relativePath": "02_Стадия П/03_АР",
     },
-    "КР": {
+    "p_kr": {
+        "groupId": 2,
+        "itemName": "КР",
         "alias": "p_kr",
         "folderName": "04_КР",
         "relativePath": "02_Стадия П/04_КР",
     },
-
-    "ИОС 1": {
+    "p_ios_1": {
+        "groupId": 2,
+        "itemName": "ИОС 1",
         "alias": "p_ios_1",
         "folderName": "ИОС_1",
         "relativePath": "02_Стадия П/05_ИОС/ИОС_1",
     },
-    "ИОС 2,3": {
+    "p_ios_23": {
+        "groupId": 2,
+        "itemName": "ИОС 2,3",
         "alias": "p_ios_23",
         "folderName": "ИОС_2,3",
         "relativePath": "02_Стадия П/05_ИОС/ИОС_2,3",
     },
-    "ИОС 4": {
+    "p_ios_4": {
+        "groupId": 2,
+        "itemName": "ИОС 4",
         "alias": "p_ios_4",
         "folderName": "ИОС_4",
         "relativePath": "02_Стадия П/05_ИОС/ИОС_4",
     },
-    "ИОС 5": {
+    "p_ios_5": {
+        "groupId": 2,
+        "itemName": "ИОС 5",
         "alias": "p_ios_5",
         "folderName": "ИОС_5",
         "relativePath": "02_Стадия П/05_ИОС/ИОС_5",
     },
-
-    "ТР": {
+    "p_tr": {
+        "groupId": 2,
+        "itemName": "ТР",
         "alias": "p_tr",
         "folderName": "06_ТР",
         "relativePath": "02_Стадия П/06_ТР",
     },
-    "ПОС": {
+    "p_pos": {
+        "groupId": 2,
+        "itemName": "ПОС",
         "alias": "p_pos",
         "folderName": "07_ПОС",
         "relativePath": "02_Стадия П/07_ПОС",
     },
-    "ООС": {
+    "p_oos": {
+        "groupId": 2,
+        "itemName": "ООС",
         "alias": "p_oos",
         "folderName": "08_ООС",
         "relativePath": "02_Стадия П/08_ООС",
     },
-    "ПБ": {
+    "p_pb": {
+        "groupId": 2,
+        "itemName": "ПБ",
         "alias": "p_pb",
         "folderName": "09_ПБ",
         "relativePath": "02_Стадия П/09_ПБ",
     },
-    "ТБЭ": {
+    "p_tbe": {
+        "groupId": 2,
+        "itemName": "ТБЭ",
         "alias": "p_tbe",
         "folderName": "10_ТБЭ",
         "relativePath": "02_Стадия П/10_ТБЭ",
     },
-    "ОДИ": {
+    "p_odi": {
+        "groupId": 2,
+        "itemName": "ОДИ",
         "alias": "p_odi",
         "folderName": "11_ОДИ",
         "relativePath": "02_Стадия П/11_ОДИ",
     },
 
-    "Замечания экспертизы": {
+    "p_expertise_comments": {
+        "groupId": 3,
+        "itemName": "Замечания экспертизы",
         "alias": "p_expertise_comments",
         "folderName": "01_Замечания экспертизы",
         "relativePath": "03_Экспертиза ПД/01_Замечания экспертизы",
     },
-    "Ответы на замечания": {
+    "p_expertise_answers": {
+        "groupId": 3,
+        "itemName": "Ответы на замечания",
         "alias": "p_expertise_answers",
         "folderName": "02_Ответы на замечания",
         "relativePath": "03_Экспертиза ПД/02_Ответы на замечания",
     },
-    "Заключение экспертизы": {
+    "p_expertise_conclusion": {
+        "groupId": 3,
+        "itemName": "Заключение экспертизы",
         "alias": "p_expertise_conclusion",
         "folderName": "03_Заключение экспертизы",
         "relativePath": "03_Экспертиза ПД/03_Заключение экспертизы",
+    },
+
+    "p_bim_root": {
+        "groupId": 90,
+        "itemName": "BIM-Модель",
+        "alias": "p_bim_root",
+        "folderName": "04_BIM-Модель",
+        "relativePath": "04_BIM-Модель",
+    },
+    "p_bim_bim": {
+        "groupId": 90,
+        "itemName": "BIM",
+        "alias": "p_bim_bim",
+        "folderName": "00_BIM",
+        "relativePath": "04_BIM-Модель/00_BIM",
+    },
+    "p_bim_gp": {
+        "groupId": 90,
+        "itemName": "ГП",
+        "alias": "p_bim_gp",
+        "folderName": "01_ГП",
+        "relativePath": "04_BIM-Модель/01_ГП",
+    },
+    "p_bim_bl": {
+        "groupId": 90,
+        "itemName": "БЛ",
+        "alias": "p_bim_bl",
+        "folderName": "02_БЛ",
+        "relativePath": "04_BIM-Модель/02_БЛ",
+    },
+    "p_bim_nis": {
+        "groupId": 90,
+        "itemName": "НИС",
+        "alias": "p_bim_nis",
+        "folderName": "03_НИС",
+        "relativePath": "04_BIM-Модель/03_НИС",
+    },
+    "p_bim_ar": {
+        "groupId": 90,
+        "itemName": "АР",
+        "alias": "p_bim_ar",
+        "folderName": "04_АР",
+        "relativePath": "04_BIM-Модель/04_АР",
+    },
+    "p_bim_ai": {
+        "groupId": 90,
+        "itemName": "АИ",
+        "alias": "p_bim_ai",
+        "folderName": "05_АИ",
+        "relativePath": "04_BIM-Модель/05_АИ",
+    },
+    "p_bim_fr": {
+        "groupId": 90,
+        "itemName": "ФР",
+        "alias": "p_bim_fr",
+        "folderName": "06_ФР",
+        "relativePath": "04_BIM-Модель/06_ФР",
+    },
+    "p_bim_kr": {
+        "groupId": 90,
+        "itemName": "КР",
+        "alias": "p_bim_kr",
+        "folderName": "07_КР",
+        "relativePath": "04_BIM-Модель/07_КР",
+    },
+    "p_bim_ov": {
+        "groupId": 90,
+        "itemName": "ОВ",
+        "alias": "p_bim_ov",
+        "folderName": "08_ОВ",
+        "relativePath": "04_BIM-Модель/08_ОВ",
+    },
+    "p_bim_vk": {
+        "groupId": 90,
+        "itemName": "ВК",
+        "alias": "p_bim_vk",
+        "folderName": "09_ВК",
+        "relativePath": "04_BIM-Модель/09_ВК",
+    },
+    "p_bim_eom": {
+        "groupId": 90,
+        "itemName": "ЭОМ",
+        "alias": "p_bim_eom",
+        "folderName": "10_ЭОМ",
+        "relativePath": "04_BIM-Модель/10_ЭОМ",
+    },
+    "p_bim_ss": {
+        "groupId": 90,
+        "itemName": "СС",
+        "alias": "p_bim_ss",
+        "folderName": "11_СС",
+        "relativePath": "04_BIM-Модель/11_СС",
+    },
+    "p_bim_tx": {
+        "groupId": 90,
+        "itemName": "ТХ",
+        "alias": "p_bim_tx",
+        "folderName": "12_ТХ",
+        "relativePath": "04_BIM-Модель/12_ТХ",
     },
 }
 
@@ -158,10 +312,14 @@ CHECKLIST_CONFIG = ChecklistConfig(
     not_required_group_id=4,
     default_group_id=2,
     allow_custom_item_group_ids=(1, 2, 3),
-    order=30,
+    order=40,
     yandex_root_relative_path="02_Выдача документации/03_Стадия П",
     yandex_root_alias="p_stage_root",
     yandex_root_folder_name="03_Стадия П",
     reset_status_on_last_document_removed=True,
     standard_yandex_folder_specs=STANDARD_P_YANDEX_FOLDER_SPECS,
+    stage_yandex_folder_alias="p_stage_root",
+    layout_mode="stage_with_bim",
+    bim_group_id=90,
+    bim_placement="below_first_group",
 )

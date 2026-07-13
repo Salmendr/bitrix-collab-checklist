@@ -27,6 +27,11 @@ class ChecklistConfig:
     reset_status_on_last_document_removed: bool = True
     standard_yandex_folder_specs: Mapping[str, Mapping[str, str]] = field(default_factory=dict)
 
+    stage_yandex_folder_alias: str = ""
+    layout_mode: str = "generic"
+    bim_group_id: int = 0
+    bim_placement: str = ""
+
     def group_ids(self) -> tuple[int, ...]:
         return tuple(group.id for group in self.groups)
 
