@@ -3285,8 +3285,26 @@ def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
                             yandexMirrorQueued: !!result.yandexMirrorQueued
                         }});
 
-                        updateUploadProgress(fileName, 80, 'Файл сохранён. Запускаем синхронизацию...');
-                        pollUploadJobStatus(result.uploadJobId || '', fileName);
+                        stopUploadJobPolling();
+
+                        debugLog('upload_frontend_mirror_background_queued', {{
+                            uploadId,
+                            dialogId,
+                            checklistKey: currentChecklistKey,
+                            itemId,
+                            itemGroup,
+                            fileName,
+                            fileSize,
+                            uploadJobId: result.uploadJobId || '',
+                            yandexMirrorQueued: !!result.yandexMirrorQueued
+                        }});
+
+                        completeUploadProgress(
+                            fileName,
+                            result.yandexMirrorQueued
+                                ? 'Файл сохранён. Синхронизация с Яндекс.Диском идёт в фоне.'
+                                : 'Файл сохранён'
+                        );
 
                         setSaveState('', 'Сохранено');
                         resolve(result);
