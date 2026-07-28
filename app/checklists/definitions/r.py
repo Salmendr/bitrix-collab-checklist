@@ -37,6 +37,11 @@ R_GROUPS = [
         ],
     },
     {
+        "id": 5,
+        "title": "Задания смежным специалистам",
+        "items": [],
+    },
+    {
         "id": 90,
         "title": "BIM-Модель",
         "items": [
@@ -279,7 +284,7 @@ CHECKLIST_CONFIG = ChecklistConfig(
     groups=groups_from_list(R_GROUPS),
     not_required_group_id=4,
     default_group_id=2,
-    allow_custom_item_group_ids=(1, 2, 3),
+    allow_custom_item_group_ids=(1, 2, 3, 5),
     order=50,
     yandex_root_relative_path="02_Выдача документации/04_Стадия Р",
     yandex_root_alias="r_stage_root",

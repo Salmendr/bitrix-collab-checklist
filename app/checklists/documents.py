@@ -61,6 +61,21 @@ def normalize_document_record(doc: dict) -> dict:
         except Exception:
             name = ""
 
+    uploaded_at = (
+        clean_cell_value(doc.get("uploadedAt"))
+        or clean_cell_value(doc.get("modifiedAt"))
+    )
+    uploaded_by_id = clean_cell_value(
+        doc.get("uploadedById")
+        or doc.get("uploadedUserId")
+        or doc.get("createdById")
+    )
+    uploaded_by_name = clean_cell_value(
+        doc.get("uploadedByName")
+        or doc.get("uploadedBy")
+        or doc.get("createdByName")
+    )
+
     return {
         "id": clean_cell_value(doc.get("id")) or uuid.uuid4().hex,
         "name": name,
@@ -68,7 +83,10 @@ def normalize_document_record(doc: dict) -> dict:
         "fileUrl": file_url,
         "previewUrl": preview_url,
         "size": int(doc.get("size") or 0),
-        "modifiedAt": clean_cell_value(doc.get("modifiedAt")),
+        "modifiedAt": clean_cell_value(doc.get("modifiedAt")) or uploaded_at,
+        "uploadedAt": uploaded_at,
+        "uploadedById": uploaded_by_id,
+        "uploadedByName": uploaded_by_name,
         "source": clean_cell_value(doc.get("source")) or "local",
 
         "mirrorStatus": clean_cell_value(doc.get("mirrorStatus")) or "",

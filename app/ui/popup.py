@@ -3180,12 +3180,20 @@ def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
                 setSaveState('saving', 'Загружаем файл...');
                 updateUploadProgress(fileName, 0, 'Начинаем загрузку...');
 
+                if (typeof fetchCurrentUserIfPossible === 'function') {{
+                    await fetchCurrentUserIfPossible();
+                }}
+
+                const actor = getFileDeleteActor();
+
                 const formData = new FormData();
                 formData.append('dialogId', dialogId);
                 formData.append('itemId', itemId);
                 formData.append('file', file);
                 formData.append('checklistKey', currentChecklistKey);
                 formData.append('itemGroup', itemGroup);
+                formData.append('actingUserId', actor.id);
+                formData.append('actingUserName', actor.name);
 
                 return await new Promise(function (resolve, reject) {{
                     const xhr = new XMLHttpRequest();
@@ -3579,11 +3587,11 @@ def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
 
                     const firstGroup = activeGroups[0] ? [activeGroups[0]] : [];
                     const secondGroup = activeGroups[1] ? [activeGroups[1]] : [];
-                    const thirdGroup = activeGroups[2] ? [activeGroups[2]] : [];
+                    const rightGroups = activeGroups.length > 2 ? activeGroups.slice(2) : [];
 
                     leftTableEl.innerHTML = renderGenericPanel(firstGroup.concat([bimGroup]), false);
                     middleTableEl.innerHTML = renderGenericPanel(secondGroup, false);
-                    rightTableEl.innerHTML = renderGenericPanel(thirdGroup, true);
+                    rightTableEl.innerHTML = renderGenericPanel(rightGroups, true);
                     return;
                 }}
 

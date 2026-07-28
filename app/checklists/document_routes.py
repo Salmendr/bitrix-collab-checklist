@@ -139,13 +139,30 @@ async def save_upload_file_stream(
         })
         raise
 
+
+def format_document_uploaded_at(value: str) -> str:
+    value = clean_cell_value(value)
+
+    if not value:
+        return "—"
+
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).strftime("%d.%m.%Y %H:%M")
+    except Exception:
+        if "T" in value:
+            return value.replace("T", " ")[:16]
+        return value
+
+
 @router.post("/api/checklist/upload-document")
 async def api_checklist_upload_document(
     dialogId: str = Form(...),
     itemId: str = Form(...),
     file: UploadFile = File(...),
     checklistKey: str = Form("id"),
-    itemGroup: str = Form("")
+    itemGroup: str = Form(""),
+    actingUserId: str = Form(""),
+    actingUserName: str = Form("")
 ):
     upload_id = uuid.uuid4().hex
     started_at = time.monotonic()
@@ -154,6 +171,9 @@ async def api_checklist_upload_document(
     checklist_key = normalize_checklist_key(checklistKey)
     item_id = str(itemId or "").strip()
     uploaded_name = Path(file.filename or "file.bin").name
+    uploaded_at = datetime.now().isoformat(timespec="seconds")
+    acting_user_id = clean_cell_value(actingUserId)
+    acting_user_name = clean_cell_value(actingUserName) or "Пользователь"
 
     log_base = {
         "uploadId": upload_id,
@@ -163,6 +183,8 @@ async def api_checklist_upload_document(
         "itemGroup": str(itemGroup or ""),
         "fileName": uploaded_name,
         "contentType": clean_cell_value(file.content_type),
+        "uploadedById": acting_user_id,
+        "uploadedByName": acting_user_name,
     }
 
     write_debug_log("upload_document_endpoint_entered", log_base)
@@ -288,7 +310,10 @@ async def api_checklist_upload_document(
             "fileUrl": file_url,
             "previewUrl": document_view_url,
             "size": file_size,
-            "modifiedAt": datetime.now().isoformat(timespec="seconds"),
+            "modifiedAt": uploaded_at,
+            "uploadedAt": uploaded_at,
+            "uploadedById": acting_user_id,
+            "uploadedByName": acting_user_name,
             "source": "local",
 
             "mirrorStatus": "queued",
@@ -643,6 +668,12 @@ def api_checklist_folder(dialogId: str = "", itemId: str = "", checklistKey: str
         doc_id = str(doc.get("id") or "")
         doc_name = html.escape(str(doc.get("name") or "Файл"))
         doc_size = html.escape(format_file_size(doc.get("size") or 0))
+        uploaded_at_text = html.escape(format_document_uploaded_at(
+            doc.get("uploadedAt") or doc.get("modifiedAt")
+        ))
+        uploaded_by_text = html.escape(
+            clean_cell_value(doc.get("uploadedByName")) or "—"
+        )
         open_url = build_document_view_url(dialog_id, checklist_key, item_id, doc_id)
         download_url = open_url + "&download=1"
 
@@ -650,6 +681,8 @@ def api_checklist_folder(dialogId: str = "", itemId: str = "", checklistKey: str
             <tr>
                 <td style="padding:10px 12px;border-bottom:1px solid #edf0f2;">{doc_name}</td>
                 <td style="padding:10px 12px;border-bottom:1px solid #edf0f2;white-space:nowrap;">{doc_size}</td>
+                <td style="padding:10px 12px;border-bottom:1px solid #edf0f2;white-space:nowrap;">{uploaded_at_text}</td>
+                <td style="padding:10px 12px;border-bottom:1px solid #edf0f2;white-space:nowrap;">{uploaded_by_text}</td>
                 <td style="padding:10px 12px;border-bottom:1px solid #edf0f2;white-space:nowrap;">
                     <a href="{html.escape(open_url)}" target="_blank">Открыть</a>
                     &nbsp;|&nbsp;
@@ -674,7 +707,7 @@ def api_checklist_folder(dialogId: str = "", itemId: str = "", checklistKey: str
 
     table_html = "".join(rows) if rows else """
         <tr>
-            <td colspan="3" style="padding:14px 12px;color:#667085;">В папке пока нет файлов</td>
+            <td colspan="5" style="padding:14px 12px;color:#667085;">В папке пока нет файлов</td>
         </tr>
     """
 
@@ -725,7 +758,7 @@ def api_checklist_folder(dialogId: str = "", itemId: str = "", checklistKey: str
         <title>{title}</title>
     </head>
     <body style="font-family:Arial,sans-serif;background:#f8fafc;margin:0;padding:24px;color:#1f2328;">
-        <div style="max-width:960px;margin:0 auto;background:#fff;border:1px solid #e5e7eb;border-radius:14px;overflow:hidden;">
+        <div style="max-width:1160px;margin:0 auto;background:#fff;border:1px solid #e5e7eb;border-radius:14px;overflow:hidden;">
             <div style="padding:16px 18px;border-bottom:1px solid #edf0f2;background:#fafbfc;">
                 <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap;">
                     <div>
@@ -742,6 +775,8 @@ def api_checklist_folder(dialogId: str = "", itemId: str = "", checklistKey: str
                         <tr>
                             <th style="text-align:left;padding:10px 12px;background:#f8fafc;border-bottom:1px solid #e5e7eb;">Файл</th>
                             <th style="text-align:left;padding:10px 12px;background:#f8fafc;border-bottom:1px solid #e5e7eb;">Размер</th>
+                            <th style="text-align:left;padding:10px 12px;background:#f8fafc;border-bottom:1px solid #e5e7eb;">Дата загрузки</th>
+                            <th style="text-align:left;padding:10px 12px;background:#f8fafc;border-bottom:1px solid #e5e7eb;">Загрузил</th>
                             <th style="text-align:left;padding:10px 12px;background:#f8fafc;border-bottom:1px solid #e5e7eb;">Действия</th>
                         </tr>
                     </thead>
@@ -858,6 +893,7 @@ def api_checklist_folder(dialogId: str = "", itemId: str = "", checklistKey: str
                     }}
 
                     folderUploadBtn.disabled = true;
+                    const actor = getFolderDeleteActor();
 
                     try {{
                         for (const file of files) {{
@@ -867,6 +903,8 @@ def api_checklist_folder(dialogId: str = "", itemId: str = "", checklistKey: str
                             formData.append('file', file);
                             formData.append('checklistKey', folderChecklistKey);
                             formData.append('itemGroup', folderItemGroup);
+                            formData.append('actingUserId', actor.id);
+                            formData.append('actingUserName', actor.name);
 
                             const response = await fetch(folderUploadApiUrl, {{
                                 method: 'POST',
