@@ -102,6 +102,7 @@ STANDARD_OPR_YANDEX_FOLDER_SPECS = {
         "alias": "opr_bim_root",
         "folderName": "04_BIM-Модель",
         "relativePath": "04_BIM-Модель",
+        "customItemsRoot": True,
     },
     "opr_bim_bim": {
         "groupId": 90,
@@ -203,7 +204,7 @@ CHECKLIST_CONFIG = ChecklistConfig(
     groups=groups_from_list(OPR_GROUPS),
     not_required_group_id=2,
     default_group_id=1,
-    allow_custom_item_group_ids=(1,),
+    allow_custom_item_group_ids=(1, 90),
     order=30,
     yandex_root_relative_path="02_Выдача документации/02_ОПР",
     yandex_root_alias="opr_stage_root",

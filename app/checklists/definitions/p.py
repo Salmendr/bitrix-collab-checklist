@@ -223,6 +223,7 @@ STANDARD_P_YANDEX_FOLDER_SPECS = {
         "alias": "p_bim_root",
         "folderName": "04_BIM-Модель",
         "relativePath": "04_BIM-Модель",
+        "customItemsRoot": True,
     },
     "p_bim_bim": {
         "groupId": 90,
@@ -324,7 +325,7 @@ CHECKLIST_CONFIG = ChecklistConfig(
     groups=groups_from_list(P_GROUPS),
     not_required_group_id=4,
     default_group_id=2,
-    allow_custom_item_group_ids=(1, 2, 3, 5),
+    allow_custom_item_group_ids=(1, 2, 3, 5, 90),
     order=40,
     yandex_root_relative_path="02_Выдача документации/03_Стадия П",
     yandex_root_alias="p_stage_root",

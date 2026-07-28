@@ -47,6 +47,7 @@ STANDARD_CONCEPT_YANDEX_FOLDER_SPECS = {
         "alias": "concept_bim_root",
         "folderName": "02_BIM-Модель",
         "relativePath": "02_BIM-Модель",
+        "customItemsRoot": True,
     },
     "concept_bim_bim": {
         "groupId": 90,
@@ -99,7 +100,7 @@ CHECKLIST_CONFIG = ChecklistConfig(
     groups=groups_from_list(CONCEPT_GROUPS),
     not_required_group_id=10,
     default_group_id=1,
-    allow_custom_item_group_ids=(1,),
+    allow_custom_item_group_ids=(1, 90),
     order=20,
     yandex_root_relative_path="02_Выдача документации/01_Концепция",
     yandex_root_alias="concept_stage_root",

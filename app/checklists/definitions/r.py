@@ -191,6 +191,7 @@ STANDARD_R_YANDEX_FOLDER_SPECS = {
         "alias": "r_bim_root",
         "folderName": "04_BIM-Модель",
         "relativePath": "04_BIM-Модель",
+        "customItemsRoot": True,
     },
     "r_bim_bim": {
         "groupId": 90,
@@ -292,7 +293,7 @@ CHECKLIST_CONFIG = ChecklistConfig(
     groups=groups_from_list(R_GROUPS),
     not_required_group_id=4,
     default_group_id=2,
-    allow_custom_item_group_ids=(1, 2, 3, 5),
+    allow_custom_item_group_ids=(1, 2, 3, 5, 90),
     order=50,
     yandex_root_relative_path="02_Выдача документации/04_Стадия Р",
     yandex_root_alias="r_stage_root",

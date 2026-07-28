@@ -213,7 +213,10 @@ def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
             }
 
             function currentAllowsCustomItemsForGroup(groupId) {
-                const meta = getChecklistMeta(currentChecklistKey);
+                const meta = typeof getProjectChecklistMetaForKey === 'function'
+                    ? getProjectChecklistMetaForKey(currentChecklistKey)
+                    : getChecklistMeta(currentChecklistKey);
+
                 const allowed = Array.isArray(meta && meta.allowCustomItemGroupIds)
                     ? meta.allowCustomItemGroupIds.map(Number)
                     : [];
@@ -224,6 +227,70 @@ def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
             function isCurrentNotRequiredGroup(groupId) {
                 const notRequiredGroupId = getCurrentNotRequiredGroupId();
                 return !!notRequiredGroupId && Number(groupId) === notRequiredGroupId;
+            }
+
+            function resolveRequiredGroupForItem(item, previousGroupId = 0) {
+                const meta = typeof getProjectChecklistMetaForKey === 'function'
+                    ? getProjectChecklistMetaForKey(currentChecklistKey)
+                    : getChecklistMeta(currentChecklistKey);
+
+                const notRequiredGroupId = Number(meta && meta.notRequiredGroupId || 0);
+                const defaultGroupId = Number(meta && meta.defaultGroupId || 0);
+                const itemId = String(item && item.id || '');
+                const key = String(currentChecklistKey || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+                const match = itemId.match(new RegExp('^' + key + '_g(\\d+)_'));
+
+                if (match) {
+                    const groupId = Number(match[1]);
+                    if (groupId && groupId !== notRequiredGroupId) {
+                        return groupId;
+                    }
+                }
+
+                if (previousGroupId && previousGroupId !== notRequiredGroupId) {
+                    return previousGroupId;
+                }
+
+                const itemName = String(item && item.name || '').trim();
+
+                const matchedGroup = (Array.isArray(groups) ? groups : []).find(group => {
+                    const groupId = Number(group && group.id || 0);
+
+                    if (!groupId || groupId === notRequiredGroupId) {
+                        return false;
+                    }
+
+                    return (Array.isArray(items) ? items : []).some(existing =>
+                        existing !== item &&
+                        Number(existing && existing.group || 0) === groupId &&
+                        String(existing && existing.name || '').trim() === itemName
+                    );
+                });
+
+                return matchedGroup
+                    ? Number(matchedGroup.id || 0)
+                    : defaultGroupId || previousGroupId || 1;
+            }
+
+            function applyGenericStatusGroupMove(item, newStatus, oldItem = null) {
+                const notRequiredGroupId = getCurrentNotRequiredGroupId();
+
+                if (!item || !notRequiredGroupId) {
+                    return;
+                }
+
+                if (newStatus === 'Не требуется') {
+                    item.group = notRequiredGroupId;
+                    return;
+                }
+
+                if (Number(item.group || 0) === Number(notRequiredGroupId)) {
+                    item.group = resolveRequiredGroupForItem(
+                        item,
+                        Number(oldItem && oldItem.group || 0)
+                    );
+                }
             }
 
             function getChecklistState(key) {
@@ -1383,8 +1450,13 @@ def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
 
                 const notRequiredBlock = appendNotRequired && notRequiredGroup && hasItemsInGroup(notRequiredGroupId)
                     ? `
-                        <div>
-                            ${renderGenericGroup(notRequiredGroup, false)}
+                        <div class="generic-subtable">
+                            <div class="thead">
+                                ${buildGenericTableHeader(notRequiredGroup, false)}
+                            </div>
+                            <div>
+                                ${renderGenericGroup(notRequiredGroup, false)}
+                            </div>
                         </div>
                     `
                     : '';
@@ -3372,8 +3444,26 @@ def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
                 }});
             }}
             function getItemsByGroup(groupId) {{
+                const targetGroupId = Number(groupId);
+                const notRequiredGroupId = typeof getCurrentNotRequiredGroupId === 'function'
+                    ? Number(getCurrentNotRequiredGroupId() || 0)
+                    : 0;
+
                 return items
-                    .filter(item => Number(item.group) === Number(groupId))
+                    .filter(item => {{
+                        const itemGroupId = Number(item && item.group || 0);
+                        const itemIsNotRequired = normalizeStatus(item && item.status) === 'Не требуется';
+
+                        if (notRequiredGroupId && targetGroupId === notRequiredGroupId) {{
+                            return itemGroupId === targetGroupId || itemIsNotRequired;
+                        }}
+
+                        if (notRequiredGroupId && itemIsNotRequired) {{
+                            return false;
+                        }}
+
+                        return itemGroupId === targetGroupId;
+                    }})
                     .sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
             }}
             function hasItemsInGroup(groupId) {{
@@ -4566,6 +4656,7 @@ def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
                         }});
 
                         item.status = newValue;
+                        applyGenericStatusGroupMove(item, newValue, oldItem);
                         renderAll();
                     }});
                 }});
