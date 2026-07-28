@@ -3,7 +3,7 @@ import json
 from logging import config
 import mimetypes
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 import time
 import traceback
 from pathlib import Path
@@ -154,6 +154,30 @@ def format_document_uploaded_at(value: str) -> str:
         return value
 
 
+def format_document_uploaded_at(value: str) -> str:
+    value = clean_cell_value(value)
+
+    if not value:
+        return "—"
+
+    utc_plus_10 = timezone(timedelta(hours=10))
+
+    try:
+        raw_value = value.replace("Z", "+00:00")
+        parsed = datetime.fromisoformat(raw_value)
+
+        # Старые значения могли быть сохранены без timezone.
+        # Для единого отображения считаем такие значения UTC и переводим в UTC+10.
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+
+        return parsed.astimezone(utc_plus_10).strftime("%d.%m.%Y %H:%M")
+    except Exception:
+        if "T" in value:
+            return value.replace("T", " ")[:16]
+        return value
+
+
 @router.post("/api/checklist/upload-document")
 async def api_checklist_upload_document(
     dialogId: str = Form(...),
@@ -171,7 +195,7 @@ async def api_checklist_upload_document(
     checklist_key = normalize_checklist_key(checklistKey)
     item_id = str(itemId or "").strip()
     uploaded_name = Path(file.filename or "file.bin").name
-    uploaded_at = datetime.now().isoformat(timespec="seconds")
+    uploaded_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
     acting_user_id = clean_cell_value(actingUserId)
     acting_user_name = clean_cell_value(actingUserName) or "Пользователь"
 
