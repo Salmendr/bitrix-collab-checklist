@@ -237,12 +237,14 @@ def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
                 const notRequiredGroupId = Number(meta && meta.notRequiredGroupId || 0);
                 const defaultGroupId = Number(meta && meta.defaultGroupId || 0);
                 const itemId = String(item && item.id || '');
-                const key = String(currentChecklistKey || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                const key = String(currentChecklistKey || '').trim();
+                const prefix = key ? key + '_g' : '';
 
-                const match = itemId.match(new RegExp('^' + key + '_g(\\d+)_'));
+                if (prefix && itemId.startsWith(prefix)) {
+                    const rest = itemId.slice(prefix.length);
+                    const rawGroupId = String(rest || '').split('_')[0];
+                    const groupId = Number(rawGroupId);
 
-                if (match) {
-                    const groupId = Number(match[1]);
                     if (groupId && groupId !== notRequiredGroupId) {
                         return groupId;
                     }
