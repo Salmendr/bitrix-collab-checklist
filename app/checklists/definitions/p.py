@@ -209,6 +209,14 @@ STANDARD_P_YANDEX_FOLDER_SPECS = {
         "relativePath": "03_Экспертиза ПД/03_Заключение экспертизы",
     },
 
+    "p_adjacent_tasks_root": {
+        "groupId": 5,
+        "itemName": "Задания смежным специалистам",
+        "alias": "p_adjacent_tasks_root",
+        "folderName": "05_Задания смежникам",
+        "relativePath": "05_Задания смежникам",
+        "customItemsRoot": True,
+    },
     "p_bim_root": {
         "groupId": 90,
         "itemName": "BIM-Модель",

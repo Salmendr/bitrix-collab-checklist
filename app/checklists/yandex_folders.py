@@ -781,6 +781,51 @@ def upsert_item_yandex_mapping(
 
 
 
+
+def resolve_custom_item_parent_yandex_path(
+    dialog_id: str,
+    checklist_key: str,
+    group_id: int,
+) -> str:
+    checklist_key = normalize_checklist_key(checklist_key)
+    root_path = get_root_path_from_context(dialog_id, checklist_key)
+
+    if not root_path:
+        return ""
+
+    try:
+        group_id = int(group_id or 0)
+    except (TypeError, ValueError):
+        group_id = 0
+
+    specs = get_folder_specs_for_checklist(checklist_key)
+
+    for raw_spec in (specs or {}).values():
+        spec = raw_spec or {}
+
+        if not spec.get("customItemsRoot"):
+            continue
+
+        try:
+            spec_group_id = int(spec.get("groupId") or 0)
+        except (TypeError, ValueError):
+            spec_group_id = 0
+
+        if spec_group_id != group_id:
+            continue
+
+        relative_path = (
+            clean_cell_value(spec.get("relativePath"))
+            or clean_cell_value(spec.get("folderName"))
+        )
+
+        if relative_path:
+            return normalize_yandex_disk_path(
+                f"{root_path.rstrip('/')}/{relative_path.strip('/')}"
+            )
+
+    return root_path
+
 def ensure_yandex_folder_for_custom_item(
     dialog_id: str,
     checklist_key: str,
@@ -789,14 +834,18 @@ def ensure_yandex_folder_for_custom_item(
     item_id: str,
 ) -> dict:
     checklist_key = normalize_checklist_key(checklist_key)
-    root_path = get_root_path_from_context(dialog_id, checklist_key)
+    parent_path = resolve_custom_item_parent_yandex_path(
+        dialog_id=dialog_id,
+        checklist_key=checklist_key,
+        group_id=group_id,
+    )
 
-    if not root_path:
+    if not parent_path:
         raise RuntimeError("Yandex root path not found in project storage context")
 
     folder_name = sanitize_yandex_folder_name(item_name)
     folder_alias = f"{checklist_key}_{slugify_folder_part(item_id or item_name)}"
-    folder_path = normalize_yandex_disk_path(f"{root_path.rstrip('/')}/{folder_name}")
+    folder_path = normalize_yandex_disk_path(f"{parent_path.rstrip('/')}/{folder_name}")
 
     folder_meta = ensure_folder_and_get_public_url(folder_path)
 

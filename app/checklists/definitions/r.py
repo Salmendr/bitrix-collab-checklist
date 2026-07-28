@@ -177,6 +177,14 @@ STANDARD_R_YANDEX_FOLDER_SPECS = {
         "relativePath": "03_Экспертиза РД/Заключение экспертизы",
     },
 
+    "r_adjacent_tasks_root": {
+        "groupId": 5,
+        "itemName": "Задания смежным специалистам",
+        "alias": "r_adjacent_tasks_root",
+        "folderName": "05_Задания смежникам",
+        "relativePath": "05_Задания смежникам",
+        "customItemsRoot": True,
+    },
     "r_bim_root": {
         "groupId": 90,
         "itemName": "BIM-Модель",
