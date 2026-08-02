@@ -10,6 +10,10 @@ from app.checklists.storage import (
     get_project_storage_context,
     save_project_storage_context,
 )
+from app.checklists.project_curator import (
+    DEFAULT_OBJECT_ENTITY_TYPE_ID,
+    normalize_project_bitrix_context,
+)
 from app.logging_utils import write_debug_log
 
 from app.checklists.yandex_warmup_queue import (
@@ -86,6 +90,16 @@ def api_save_project_storage_context(
     if not isinstance(item_mappings, list):
         item_mappings = []
 
+    previous_context = get_project_storage_context(dialog_id) or {}
+    previous_bitrix = previous_context.get("bitrix") or {}
+    incoming_bitrix = payload.get("bitrix") or {}
+    if not isinstance(incoming_bitrix, dict):
+        incoming_bitrix = {}
+    merged_bitrix = dict(previous_bitrix if isinstance(previous_bitrix, dict) else {})
+    merged_bitrix.update(incoming_bitrix)
+    merged_bitrix.setdefault("objectEntityTypeId", DEFAULT_OBJECT_ENTITY_TYPE_ID)
+    normalized_bitrix = normalize_project_bitrix_context(merged_bitrix)
+
     normalized_payload = {
         "dialogId": dialog_id,
         "projectId": project_id,
@@ -93,6 +107,7 @@ def api_save_project_storage_context(
         "storageMode": storage_mode,
         "yandexDisk": yandex_disk,
         "itemMappings": item_mappings,
+        "bitrix": normalized_bitrix,
     }
 
     save_project_storage_context(dialog_id, normalized_payload)
@@ -118,6 +133,7 @@ def api_save_project_storage_context(
         "yandexWarmupQueue": queue_result,
         "foldersCount": len((context.get("yandexDisk") or {}).get("folders") or {}) if context else 0,
         "itemMappingsCount": len(context.get("itemMappings") or []) if context else 0,
+        "bitrix": (context or {}).get("bitrix") or {},
     }
 
 

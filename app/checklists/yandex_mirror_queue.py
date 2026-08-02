@@ -35,6 +35,16 @@ from app.checklists.upload_jobs import (
     finish_upload_job,
     fail_upload_job,
     is_job_cancelled,
+    requeue_interrupted_yandex_jobs,
+)
+
+from app.checklists.replacement_sync import (
+    handle_document_replacement_after_job,
+)
+
+from app.checklists.document_replacements import (
+    list_pending_document_replacements,
+    mark_document_replacement_failed,
 )
 
 from app.checklists.yandex_folders import mirror_document_file_to_yandex
@@ -260,6 +270,285 @@ def enqueue_pending_yandex_mirror_jobs(source: str = "startup") -> dict:
     }
 
 
+def recover_pending_document_replacements(
+    source: str = "startup",
+    limit: int = 500,
+) -> dict:
+    replacements = (
+        list_pending_document_replacements(
+            limit=limit
+        )
+    )
+
+    queued = 0
+    running = 0
+    handled = 0
+    failed = 0
+    skipped = 0
+    missing_jobs = 0
+
+    results = []
+
+    terminal_job_statuses = {
+        "synced",
+        "deleted",
+        "error",
+        "cancelled",
+        "skipped",
+    }
+
+    for replacement in replacements:
+        operation_id = clean_cell_value(
+            replacement.get("operation_id")
+        )
+
+        delete_job_id = clean_cell_value(
+            replacement.get("delete_job_id")
+        )
+
+        upload_job_id = clean_cell_value(
+            replacement.get("new_upload_job_id")
+        )
+
+        job_id = (
+            delete_job_id
+            or upload_job_id
+        )
+
+        if not job_id:
+            error = (
+                "У незавершённой транзакции "
+                "отсутствует связанный jobId"
+            )
+
+            mark_document_replacement_failed(
+                operation_id=operation_id,
+                error=error,
+                stage=(
+                    "startup_recovery_job_id_missing"
+                ),
+            )
+
+            failed += 1
+
+            results.append({
+                "operationId": operation_id,
+                "ok": False,
+                "error": error,
+            })
+
+            continue
+
+        job = get_upload_job(job_id)
+
+        if not job:
+            error = (
+                "Связанный upload/delete job "
+                f"не найден: {job_id}"
+            )
+
+            mark_document_replacement_failed(
+                operation_id=operation_id,
+                error=error,
+                stage=(
+                    "startup_recovery_job_missing"
+                ),
+            )
+
+            missing_jobs += 1
+            failed += 1
+
+            results.append({
+                "operationId": operation_id,
+                "jobId": job_id,
+                "ok": False,
+                "error": error,
+            })
+
+            continue
+
+        job_status = clean_cell_value(
+            job.get("status")
+        ).lower()
+
+        if job_status == "queued":
+            enqueue_result = (
+                enqueue_yandex_mirror_job(
+                    job_id,
+                    source=(
+                        f"{source}_replacement_recovery"
+                    ),
+                )
+            )
+
+            if (
+                enqueue_result.get("queued")
+                or enqueue_result.get(
+                    "alreadyQueued"
+                )
+                or enqueue_result.get(
+                    "alreadyRunning"
+                )
+            ):
+                queued += 1
+            else:
+                skipped += 1
+
+            results.append({
+                "operationId": operation_id,
+                "jobId": job_id,
+                "jobStatus": job_status,
+                "enqueueResult": enqueue_result,
+            })
+
+            continue
+
+        if job_status == "running":
+            running += 1
+
+            results.append({
+                "operationId": operation_id,
+                "jobId": job_id,
+                "jobStatus": job_status,
+                "action": "already_running",
+            })
+
+            continue
+
+        if job_status in terminal_job_statuses:
+            callback_result = (
+                handle_document_replacement_after_job(
+                    job_id
+                )
+            )
+
+            if callback_result.get("handled"):
+                handled += 1
+            else:
+                skipped += 1
+
+            callback_delete_job_id = (
+                clean_cell_value(
+                    callback_result.get(
+                        "deleteJobId"
+                    )
+                )
+            )
+
+            delete_enqueue_result = {}
+
+            if (
+                callback_delete_job_id
+                and callback_delete_job_id
+                != job_id
+            ):
+                delete_enqueue_result = (
+                    enqueue_yandex_mirror_job(
+                        callback_delete_job_id,
+                        source=(
+                            f"{source}_replacement_delete"
+                        ),
+                    )
+                )
+
+                if (
+                    delete_enqueue_result.get(
+                        "queued"
+                    )
+                    or delete_enqueue_result.get(
+                        "alreadyQueued"
+                    )
+                    or delete_enqueue_result.get(
+                        "alreadyRunning"
+                    )
+                ):
+                    queued += 1
+
+            results.append({
+                "operationId": operation_id,
+                "jobId": job_id,
+                "jobStatus": job_status,
+                "callbackResult": callback_result,
+                "deleteEnqueueResult": (
+                    delete_enqueue_result
+                ),
+            })
+
+            continue
+
+        skipped += 1
+
+        results.append({
+            "operationId": operation_id,
+            "jobId": job_id,
+            "jobStatus": job_status,
+            "action": "unsupported_job_status",
+        })
+
+    result = {
+        "ok": failed == 0,
+        "source": source,
+        "total": len(replacements),
+        "queued": queued,
+        "running": running,
+        "handled": handled,
+        "failed": failed,
+        "missingJobs": missing_jobs,
+        "skipped": skipped,
+        "resultsSample": results[:50],
+    }
+
+    write_debug_log(
+        "replacement_startup_recovery_finished",
+        result,
+    )
+
+    return result
+
+
+def recover_yandex_mirror_state_on_startup(
+    source: str = "startup",
+) -> dict:
+    interrupted_jobs = (
+        requeue_interrupted_yandex_jobs()
+    )
+
+    pending_jobs_result = (
+        enqueue_pending_yandex_mirror_jobs(
+            source=source
+        )
+    )
+
+    replacements_result = (
+        recover_pending_document_replacements(
+            source=source,
+            limit=500,
+        )
+    )
+
+    result = {
+        "ok": bool(
+            pending_jobs_result.get("ok", True)
+        )
+        and bool(
+            replacements_result.get("ok", True)
+        ),
+        "source": source,
+        "interruptedJobsRequeued": (
+            interrupted_jobs
+        ),
+        "pendingJobs": pending_jobs_result,
+        "replacements": replacements_result,
+    }
+
+    write_debug_log(
+        "yandex_mirror_startup_recovery_finished",
+        result,
+    )
+
+    return result
+
+
 def process_upload_job(job: dict):
     job_id = clean_cell_value(job.get("job_id"))
     dialog_id = normalize_dialog_id(job.get("dialog_id"))
@@ -439,10 +728,65 @@ def process_yandex_mirror_job(job_id: str):
 
     if job_type == "upload":
         process_upload_job(job)
+
+        replacement_result = (
+            handle_document_replacement_after_job(
+                job_id
+            )
+        )
+
+        delete_job_id = clean_cell_value(
+            replacement_result.get(
+                "deleteJobId"
+            )
+        )
+
+        delete_enqueue_result = {}
+
+        if delete_job_id:
+            delete_enqueue_result = (
+                enqueue_yandex_mirror_job(
+                    delete_job_id,
+                    source=(
+                        "replacement_old_yandex_delete"
+                    ),
+                )
+            )
+
+        write_debug_log(
+            "replacement_upload_job_handled",
+            {
+                "jobId": job_id,
+                "replacementResult": (
+                    replacement_result
+                ),
+                "deleteEnqueueResult": (
+                    delete_enqueue_result
+                ),
+            },
+        )
+
         return
 
     if job_type == "delete":
         process_delete_job(job)
+
+        replacement_result = (
+            handle_document_replacement_after_job(
+                job_id
+            )
+        )
+
+        write_debug_log(
+            "replacement_delete_job_handled",
+            {
+                "jobId": job_id,
+                "replacementResult": (
+                    replacement_result
+                ),
+            },
+        )
+
         return
 
     fail_upload_job(
@@ -491,7 +835,17 @@ def yandex_mirror_worker(worker_index: int):
             })
 
         except Exception as exc:
-            fail_upload_job(job_id, str(exc), stage="exception")
+            fail_upload_job(
+                job_id,
+                str(exc),
+                stage="exception",
+            )
+
+            replacement_result = (
+                handle_document_replacement_after_job(
+                    job_id
+                )
+            )
 
             write_debug_log("yandex_mirror_job_failed", {
                 "jobId": job_id,
@@ -499,6 +853,7 @@ def yandex_mirror_worker(worker_index: int):
                 "startedAt": started_at,
                 "failedAt": datetime.now().isoformat(timespec="seconds"),
                 "error": str(exc),
+                "replacementResult": replacement_result,
             })
 
         finally:

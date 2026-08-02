@@ -33,6 +33,7 @@ from app.yandex_disk.client import (
     yandex_disk_ensure_folder,
     yandex_disk_publish_path,
     yandex_disk_get_resource_meta,
+    yandex_disk_move_path,
 )
 
 
@@ -826,6 +827,50 @@ def resolve_custom_item_parent_yandex_path(
 
     return root_path
 
+def build_custom_item_yandex_folder_spec(
+    dialog_id: str,
+    checklist_key: str,
+    group_id: int,
+    item_name: str,
+    item_id: str,
+) -> dict:
+    checklist_key = normalize_checklist_key(checklist_key)
+    folder_name = sanitize_yandex_folder_name(item_name)
+    folder_alias = f"{checklist_key}_{slugify_folder_part(item_id or item_name)}"
+    parent_path = resolve_custom_item_parent_yandex_path(
+        dialog_id=dialog_id,
+        checklist_key=checklist_key,
+        group_id=group_id,
+    )
+    folder_path = (
+        normalize_yandex_disk_path(
+            f"{parent_path.rstrip('/')}/{folder_name}"
+        )
+        if parent_path
+        else ""
+    )
+
+    enabled = can_create_custom_item_yandex_folder(
+        dialog_id,
+        checklist_key,
+    )
+    reason = "" if enabled else "custom item Yandex folder is disabled for this project"
+
+    return {
+        "enabled": bool(enabled),
+        "reason": reason,
+        "dialogId": clean_cell_value(dialog_id),
+        "checklistKey": checklist_key,
+        "groupId": int(group_id or 0),
+        "itemId": clean_cell_value(item_id),
+        "itemName": clean_cell_value(item_name),
+        "folderAlias": folder_alias,
+        "folderName": folder_name,
+        "parentPath": parent_path,
+        "targetPath": folder_path,
+    }
+
+
 def ensure_yandex_folder_for_custom_item(
     dialog_id: str,
     checklist_key: str,
@@ -867,6 +912,469 @@ def ensure_yandex_folder_for_custom_item(
         "folderPath": folder_meta["path"],
         "folderUrl": folder_meta["url"],
     }
+
+
+def _split_yandex_parent_and_name(path: str) -> tuple[str, str]:
+    normalized = normalize_yandex_disk_path(path)
+    if not normalized or "/" not in normalized[len("disk:/"):]:
+        return normalized.rsplit("/", 1)[0], normalized.rsplit("/", 1)[-1]
+    parent, name = normalized.rsplit("/", 1)
+    return parent, name
+
+
+def _preserve_standard_folder_prefix(source_name: str, target_name: str) -> str:
+    source_name = clean_cell_value(source_name)
+    target_name = sanitize_yandex_folder_name(target_name)
+    match = re.match(r"^(\d{1,3}[_\-\s]+)", source_name)
+    return f"{match.group(1) if match else ''}{target_name}"
+
+
+
+def resolve_item_group_parent_yandex_path(
+    *,
+    dialog_id: str,
+    checklist_key: str,
+    group_id: int,
+) -> str:
+    checklist_key = normalize_checklist_key(checklist_key)
+    root_path = get_root_path_from_context(dialog_id, checklist_key)
+    if not root_path:
+        return ""
+
+    config = get_checklist_config(checklist_key)
+    try:
+        normalized_group_id = int(group_id or 0)
+    except (TypeError, ValueError):
+        normalized_group_id = int(config.default_group_id)
+
+    specs = get_folder_specs_for_checklist(checklist_key) or {}
+    relative_candidates: list[str] = []
+
+    for raw_spec in specs.values():
+        spec = raw_spec or {}
+        try:
+            spec_group_id = int(spec.get("groupId") or 0)
+        except (TypeError, ValueError):
+            spec_group_id = 0
+        if spec_group_id != normalized_group_id:
+            continue
+
+        relative_path = (
+            clean_cell_value(spec.get("relativePath"))
+            or clean_cell_value(spec.get("folderName"))
+        ).replace("\\", "/").strip("/")
+        if not relative_path:
+            continue
+
+        if spec.get("customItemsRoot"):
+            return normalize_yandex_disk_path(
+                f"{root_path.rstrip('/')}/{relative_path}"
+            )
+
+        parent_relative = (
+            relative_path.rsplit("/", 1)[0]
+            if "/" in relative_path
+            else ""
+        )
+        if parent_relative:
+            relative_candidates.append(parent_relative)
+
+    if relative_candidates:
+        relative_candidates.sort(
+            key=lambda value: (
+                len([part for part in value.split("/") if part]),
+                len(value),
+                value,
+            )
+        )
+        return normalize_yandex_disk_path(
+            f"{root_path.rstrip('/')}/{relative_candidates[0]}"
+        )
+
+    group_title = clean_cell_value(config.get_group_title(normalized_group_id))
+    if not group_title:
+        return root_path
+
+    return normalize_yandex_disk_path(
+        f"{root_path.rstrip('/')}/{sanitize_yandex_folder_name(group_title)}"
+    )
+
+
+def build_item_yandex_relocation_spec(
+    *,
+    dialog_id: str,
+    checklist_key: str,
+    item: dict,
+    source_group_id: int,
+    target_group_id: int,
+    old_name: str = "",
+    new_name: str = "",
+    source_path_override: str = "",
+) -> dict:
+    checklist_key = normalize_checklist_key(checklist_key)
+    item = dict(item or {})
+    item_id = clean_cell_value(item.get("id"))
+    current_name = clean_cell_value(item.get("name"))
+    source_name = clean_cell_value(old_name) or current_name
+    target_name = clean_cell_value(new_name) or current_name or source_name
+    is_custom = bool(item.get("isCustom", False))
+    folder_alias = clean_cell_value(item.get("yandexFolderAlias"))
+    source_path = clean_cell_value(
+        source_path_override
+        or item.get("yandexFolderPath")
+        or item.get("yandexFolderTargetPath")
+    )
+    source_url = clean_cell_value(item.get("yandexFolderUrl"))
+
+    if not source_path:
+        folder_info = get_item_yandex_folder(
+            dialog_id,
+            checklist_key,
+            source_name,
+            group_id=int(source_group_id or 0),
+        ) or {}
+        folder = (
+            (folder_info.get("folder") or {})
+            if isinstance(folder_info, dict)
+            else {}
+        )
+        mapping = (
+            (folder_info.get("mapping") or {})
+            if isinstance(folder_info, dict)
+            else {}
+        )
+        source_path = clean_cell_value(folder.get("path"))
+        source_url = source_url or clean_cell_value(folder.get("url"))
+        folder_alias = folder_alias or clean_cell_value(
+            mapping.get("folderAlias")
+        )
+
+    if not folder_alias:
+        folder_alias = (
+            f"{checklist_key}_{slugify_folder_part(item_id or source_name)}"
+        )
+
+    target_parent = resolve_item_group_parent_yandex_path(
+        dialog_id=dialog_id,
+        checklist_key=checklist_key,
+        group_id=int(target_group_id or 0),
+    )
+    source_folder_name = (
+        normalize_yandex_disk_path(source_path)
+        .rstrip("/")
+        .rsplit("/", 1)[-1]
+        if source_path
+        else sanitize_yandex_folder_name(source_name or target_name)
+    )
+    target_folder_name = (
+        sanitize_yandex_folder_name(target_name)
+        if is_custom
+        else _preserve_standard_folder_prefix(
+            source_folder_name,
+            target_name,
+        )
+    )
+    target_path = (
+        normalize_yandex_disk_path(
+            f"{target_parent.rstrip('/')}/{target_folder_name}"
+        )
+        if target_parent and target_folder_name
+        else ""
+    )
+    normalized_source_path = (
+        normalize_yandex_disk_path(source_path)
+        if source_path
+        else ""
+    )
+    enabled = bool(
+        is_yandex_disk_enabled()
+        and normalized_source_path
+        and target_path
+        and normalized_source_path != target_path
+    )
+
+    return {
+        "enabled": enabled,
+        "dialogId": clean_cell_value(dialog_id),
+        "checklistKey": checklist_key,
+        "itemId": item_id,
+        "itemName": target_name,
+        "oldName": source_name,
+        "newName": target_name,
+        "isCustom": is_custom,
+        "folderAlias": folder_alias,
+        "sourceGroupId": int(source_group_id or 0),
+        "targetGroupId": int(target_group_id or 0),
+        "sourcePath": normalized_source_path,
+        "sourceUrl": source_url,
+        "targetParentPath": target_parent,
+        "targetFolderName": target_folder_name,
+        "targetPath": target_path,
+        "reason": (
+            ""
+            if enabled
+            else (
+                "yandex disk is disabled, source path is unavailable "
+                "or target path is unchanged"
+            )
+        ),
+    }
+
+
+def build_item_yandex_move_spec(
+    *,
+    dialog_id: str,
+    checklist_key: str,
+    item: dict,
+    source_group_id: int,
+    target_group_id: int,
+) -> dict:
+    item_name = clean_cell_value((item or {}).get("name"))
+    return build_item_yandex_relocation_spec(
+        dialog_id=dialog_id,
+        checklist_key=checklist_key,
+        item=item,
+        source_group_id=source_group_id,
+        target_group_id=target_group_id,
+        old_name=item_name,
+        new_name=item_name,
+    )
+
+
+def build_item_yandex_rename_spec(
+    *,
+    dialog_id: str,
+    checklist_key: str,
+    item: dict,
+    old_name: str,
+    new_name: str,
+) -> dict:
+    checklist_key = normalize_checklist_key(checklist_key)
+    item = dict(item or {})
+    item_id = clean_cell_value(item.get("id"))
+    group_id = int(item.get("group") or 0)
+    is_custom = bool(item.get("isCustom", False))
+
+    source_path = clean_cell_value(
+        item.get("yandexFolderPath")
+        or item.get("yandexFolderTargetPath")
+    )
+    source_url = clean_cell_value(item.get("yandexFolderUrl"))
+    folder_alias = clean_cell_value(item.get("yandexFolderAlias"))
+
+    if not source_path:
+        folder_info = get_item_yandex_folder(
+            dialog_id,
+            checklist_key,
+            old_name,
+            group_id=group_id,
+        ) or {}
+        folder = (folder_info.get("folder") or {}) if isinstance(folder_info, dict) else {}
+        mapping = (folder_info.get("mapping") or {}) if isinstance(folder_info, dict) else {}
+        source_path = clean_cell_value(folder.get("path"))
+        source_url = source_url or clean_cell_value(folder.get("url"))
+        folder_alias = folder_alias or clean_cell_value(mapping.get("folderAlias"))
+
+    if not folder_alias:
+        folder_alias = f"{checklist_key}_{slugify_folder_part(item_id or old_name)}"
+
+    if source_path:
+        parent_path, source_folder_name = _split_yandex_parent_and_name(source_path)
+        target_folder_name = (
+            sanitize_yandex_folder_name(new_name)
+            if is_custom
+            else _preserve_standard_folder_prefix(source_folder_name, new_name)
+        )
+        target_path = normalize_yandex_disk_path(
+            f"{parent_path.rstrip('/')}/{target_folder_name}"
+        )
+    else:
+        custom_spec = build_custom_item_yandex_folder_spec(
+            dialog_id=dialog_id,
+            checklist_key=checklist_key,
+            group_id=group_id,
+            item_name=new_name,
+            item_id=item_id,
+        )
+        target_folder_name = clean_cell_value(custom_spec.get("folderName"))
+        target_path = clean_cell_value(custom_spec.get("targetPath"))
+
+    return {
+        "enabled": bool(is_yandex_disk_enabled() and target_path),
+        "dialogId": clean_cell_value(dialog_id),
+        "checklistKey": checklist_key,
+        "itemId": item_id,
+        "groupId": group_id,
+        "isCustom": is_custom,
+        "oldName": clean_cell_value(old_name),
+        "newName": clean_cell_value(new_name),
+        "folderAlias": folder_alias,
+        "sourcePath": normalize_yandex_disk_path(source_path) if source_path else "",
+        "sourceUrl": source_url,
+        "targetPath": normalize_yandex_disk_path(target_path) if target_path else "",
+        "targetFolderName": target_folder_name,
+        "reason": "" if (is_yandex_disk_enabled() and target_path) else "yandex disk is disabled or target path is unavailable",
+    }
+
+
+def rename_item_yandex_mapping(
+    *,
+    dialog_id: str,
+    checklist_key: str,
+    group_id: int,
+    old_name: str,
+    old_group_id: int | None = None,
+    new_name: str,
+    folder_alias: str,
+    folder_name: str,
+    folder_path: str,
+    folder_url: str,
+) -> None:
+    context = get_project_storage_context(dialog_id)
+    if not context:
+        return
+
+    checklist_key = normalize_checklist_key(checklist_key)
+    old_key = clean_cell_value(old_name).casefold()
+    source_group_id = (
+        int(group_id or 0)
+        if old_group_id is None
+        else int(old_group_id or 0)
+    )
+    alias = clean_cell_value(folder_alias)
+    yandex_disk = context.get("yandexDisk") or {}
+    folders = dict(yandex_disk.get("folders") or {})
+    mappings = []
+
+    for mapping in context.get("itemMappings") or []:
+        if not isinstance(mapping, dict):
+            continue
+        mapping_key = normalize_checklist_key(mapping.get("checklistKey"))
+        mapping_name = clean_cell_value(mapping.get("itemName")).casefold()
+        mapping_alias = clean_cell_value(mapping.get("folderAlias"))
+        try:
+            mapping_group = int(mapping.get("groupId") or 0)
+        except (TypeError, ValueError):
+            mapping_group = 0
+        is_old = (
+            mapping_key == checklist_key
+            and mapping_group == source_group_id
+            and (mapping_name == old_key or (alias and mapping_alias == alias))
+        )
+        if not is_old:
+            mappings.append(mapping)
+
+    mappings.append({
+        "checklistKey": checklist_key,
+        "groupId": int(group_id or 0),
+        "itemName": clean_cell_value(new_name),
+        "folderAlias": alias,
+    })
+    folders[alias] = {
+        **(folders.get(alias) or {}),
+        "name": clean_cell_value(folder_name),
+        "path": clean_cell_value(folder_path),
+        "url": clean_cell_value(folder_url),
+        "checklistKey": checklist_key,
+        "groupId": int(group_id or 0),
+        "itemName": clean_cell_value(new_name),
+    }
+    yandex_disk["folders"] = folders
+    save_project_storage_context(dialog_id, {
+        "dialogId": clean_cell_value(dialog_id),
+        "projectId": context.get("projectId") or "",
+        "projectName": context.get("projectName") or "",
+        "storageMode": context.get("storageMode") or {},
+        "yandexDisk": yandex_disk,
+        "itemMappings": mappings,
+    })
+
+
+def rename_yandex_folder_for_item(
+    *,
+    dialog_id: str,
+    checklist_key: str,
+    group_id: int,
+    item_id: str,
+    old_group_id: int | None = None,
+    old_name: str,
+    new_name: str,
+    source_path: str,
+    target_path: str,
+    folder_alias: str,
+) -> dict:
+    source_path = normalize_yandex_disk_path(source_path)
+    target_path = normalize_yandex_disk_path(target_path)
+    if not source_path:
+        raise RuntimeError("Yandex source folder path is unavailable")
+    if not target_path:
+        raise RuntimeError("Yandex target folder path is unavailable")
+
+    target_parent = target_path.rsplit("/", 1)[0]
+    if target_parent:
+        ensure_yandex_folder_chain(target_parent)
+
+    move_result = yandex_disk_move_path(
+        source_path,
+        target_path,
+        overwrite=False,
+    )
+    yandex_disk_publish_path(target_path)
+    meta = yandex_disk_get_resource_meta(target_path)
+    folder_name = clean_cell_value(meta.get("name")) or target_path.rsplit("/", 1)[-1]
+    folder_url = clean_cell_value(meta.get("public_url"))
+    final_path = clean_cell_value(meta.get("path")) or target_path
+
+    rename_item_yandex_mapping(
+        dialog_id=dialog_id,
+        checklist_key=checklist_key,
+        group_id=group_id,
+        old_group_id=old_group_id,
+        old_name=old_name,
+        new_name=new_name,
+        folder_alias=folder_alias,
+        folder_name=folder_name,
+        folder_path=final_path,
+        folder_url=folder_url,
+    )
+    return {
+        "ok": True,
+        "itemId": clean_cell_value(item_id),
+        "folderAlias": clean_cell_value(folder_alias),
+        "folderName": folder_name,
+        "folderPath": final_path,
+        "folderUrl": folder_url,
+        "sourcePath": source_path,
+        "targetPath": target_path,
+        "move": move_result,
+    }
+
+
+
+def move_yandex_folder_for_item(
+    *,
+    dialog_id: str,
+    checklist_key: str,
+    source_group_id: int,
+    target_group_id: int,
+    item_id: str,
+    item_name: str,
+    source_path: str,
+    target_path: str,
+    folder_alias: str,
+) -> dict:
+    return rename_yandex_folder_for_item(
+        dialog_id=dialog_id,
+        checklist_key=checklist_key,
+        group_id=int(target_group_id or 0),
+        old_group_id=int(source_group_id or 0),
+        item_id=item_id,
+        old_name=item_name,
+        new_name=item_name,
+        source_path=source_path,
+        target_path=target_path,
+        folder_alias=folder_alias,
+    )
 
 
 def ensure_yandex_folder_for_custom_opr_item(

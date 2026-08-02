@@ -1,0 +1,231 @@
+.doc-file-block {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.assignment-history-shell {
+    min-width: 0;
+    margin: 1px 0 4px;
+}
+
+.assignment-history-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    max-width: 100%;
+    padding: 2px 0;
+    border: 0;
+    background: transparent;
+    color: #475467;
+    font: inherit;
+    font-size: 10px;
+    line-height: 1.35;
+    cursor: pointer;
+    text-align: left;
+}
+
+.assignment-history-toggle:hover,
+.assignment-history-toggle:focus-visible {
+    color: #175cd3;
+    text-decoration: underline;
+}
+
+.assignment-history-toggle:disabled {
+    opacity: .65;
+    cursor: wait;
+}
+
+.assignment-history-toggle-icon {
+    flex: 0 0 auto;
+    width: 10px;
+    color: #667085;
+    text-align: center;
+}
+
+.assignment-history-panel {
+    display: grid;
+    gap: 6px;
+    margin-top: 4px;
+}
+
+.assignment-history-panel[hidden] {
+    display: none !important;
+}
+
+.assignment-history-entry {
+    min-width: 0;
+    padding: 8px 9px;
+    border: 1px solid #d0d5dd;
+    border-radius: 8px;
+    background: #ffffff;
+    box-shadow: 0 1px 2px rgba(16, 24, 40, .04);
+}
+
+.assignment-history-entry-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 8px;
+    margin-bottom: 6px;
+    color: #475467;
+    font-size: 10px;
+    line-height: 1.35;
+}
+
+.assignment-history-version {
+    min-width: 0;
+    overflow-wrap: anywhere;
+    text-align: right;
+}
+
+.assignment-history-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 4px 10px;
+    color: #344054;
+    font-size: 11px;
+    line-height: 1.4;
+}
+
+.assignment-history-grid > div {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.assignment-history-task a {
+    color: #175cd3;
+    text-decoration: none;
+}
+
+.assignment-history-task a:hover,
+.assignment-history-task a:focus-visible {
+    text-decoration: underline;
+}
+
+.assignment-history-statuses {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-top: 7px;
+}
+
+.assignment-history-status {
+    padding: 2px 6px;
+    border-radius: 999px;
+    background: #f2f4f7;
+    color: #475467;
+    font-size: 9px;
+    line-height: 1.35;
+}
+
+.assignment-history-status--success {
+    background: #ecfdf3;
+    color: #027a48;
+}
+
+.assignment-history-status--error {
+    background: #fef3f2;
+    color: #b42318;
+}
+
+.assignment-history-status--pending {
+    background: #fffaeb;
+    color: #b54708;
+}
+
+.assignment-history-loading,
+.assignment-history-empty,
+.assignment-history-error {
+    padding: 8px 9px;
+    border-radius: 7px;
+    background: #f9fafb;
+    color: #667085;
+    font-size: 10px;
+    line-height: 1.4;
+}
+
+.assignment-history-error {
+    background: #fef3f2;
+    color: #b42318;
+}
+
+.folder-assignment-history-summary-row > td,
+.folder-assignment-history-panel-row > td {
+    padding-top: 0 !important;
+}
+
+.folder-assignment-history-summary-cell,
+.folder-assignment-history-panel-cell {
+    border-top: 0 !important;
+}
+
+.folder-assignment-history-summary-cell .assignment-history-toggle {
+    margin-left: 8px;
+    font-size: 11px;
+}
+
+.folder-assignment-history-panel-cell .assignment-history-panel {
+    margin: 0 8px 10px;
+}
+
+.folder-assignment-history-panel-cell .assignment-history-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+@media (max-width: 760px) {
+    .assignment-history-grid,
+    .folder-assignment-history-panel-cell .assignment-history-grid {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .assignment-history-entry-header {
+        flex-direction: column;
+    }
+
+    .assignment-history-version {
+        text-align: left;
+    }
+}
+
+.assignment-history-retry-row {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 7px;
+    margin-top: 7px;
+}
+
+.assignment-history-retry-button {
+    min-height: 26px;
+    padding: 4px 9px;
+    border: 1px solid #f04438;
+    border-radius: 7px;
+    background: #ffffff;
+    color: #b42318;
+    font: inherit;
+    font-size: 10px;
+    font-weight: 600;
+    line-height: 1.35;
+    cursor: pointer;
+}
+
+.assignment-history-retry-button:hover,
+.assignment-history-retry-button:focus-visible {
+    background: #fef3f2;
+    outline: none;
+}
+
+.assignment-history-retry-button:disabled,
+.assignment-history-retry-button[aria-busy="true"] {
+    opacity: .65;
+    cursor: wait;
+}
+
+.assignment-history-retry-result {
+    min-width: 0;
+    color: #667085;
+    font-size: 10px;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+}

@@ -43,7 +43,10 @@ def ensure_upload_jobs_table():
             created_at TEXT,
             updated_at TEXT,
             started_at TEXT,
-            finished_at TEXT
+            finished_at TEXT,
+            source_session_id TEXT,
+            source_operation_id TEXT,
+            source_action_key TEXT
         )
     """)
 
@@ -55,6 +58,35 @@ def ensure_upload_jobs_table():
     cur.execute("""
         CREATE INDEX IF NOT EXISTS idx_upload_jobs_document
         ON upload_jobs(dialog_id, checklist_key, item_id, document_id)
+    """)
+
+    upload_job_columns = {
+        row["name"]
+        for row in cur.execute(
+            "PRAGMA table_info(upload_jobs)"
+        ).fetchall()
+    }
+
+    for column_name in (
+        "source_session_id",
+        "source_operation_id",
+        "source_action_key",
+    ):
+        if column_name not in upload_job_columns:
+            cur.execute(
+                "ALTER TABLE upload_jobs "
+                f"ADD COLUMN {column_name} TEXT"
+            )
+
+    cur.execute("""
+        CREATE INDEX IF NOT EXISTS idx_upload_jobs_source_session
+        ON upload_jobs(source_session_id, status, created_at)
+    """)
+
+    cur.execute("""
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_upload_jobs_source_action
+        ON upload_jobs(source_action_key)
+        WHERE COALESCE(source_action_key, '') <> ''
     """)
 
     conn.commit()
@@ -471,6 +503,39 @@ def cancel_upload_jobs_for_document(
     return count
 
 
+def requeue_interrupted_yandex_jobs() -> int:
+    ensure_upload_jobs_table()
+
+    now = utc_now()
+
+    conn = get_conn()
+
+    cur = conn.execute("""
+        UPDATE upload_jobs
+        SET status = 'queued',
+            stage = 'recovered_after_restart',
+            progress_percent = 0,
+            uploaded_bytes = 0,
+            error = '',
+            updated_at = ?,
+            started_at = '',
+            finished_at = ''
+        WHERE status = 'running'
+    """, (
+        now,
+    ))
+
+    conn.commit()
+
+    recovered_count = int(
+        cur.rowcount or 0
+    )
+
+    conn.close()
+
+    return recovered_count
+
+
 def is_job_cancelled(job_id: str) -> bool:
     job = get_upload_job(job_id)
     return bool(job and job.get("status") == "cancelled")
@@ -505,3 +570,65 @@ def public_job_payload(job: dict | None) -> dict:
         "startedAt": job.get("started_at") or "",
         "finishedAt": job.get("finished_at") or "",
     }
+
+
+def resolve_document_mirror_status(document: dict | None) -> dict:
+    """Resolve stale document mirror fields against the actual job row.
+
+    A frontend snapshot can persist ``queued`` after the worker has already
+    finished the job as skipped/error/disabled. Replacement decisions must
+    use the job table as the source of truth, not that stale snapshot.
+    """
+    document = document if isinstance(document, dict) else {}
+    stored_status = clean_cell_value(
+        document.get("mirrorStatus")
+    ).lower()
+    stored_error = clean_cell_value(
+        document.get("mirrorError")
+    )
+    job_id = clean_cell_value(
+        document.get("mirrorJobId")
+    )
+    job = get_upload_job(job_id) if job_id else None
+
+    if not job:
+        return {
+            "status": stored_status,
+            "error": stored_error,
+            "job": None,
+            "reconciled": False,
+        }
+
+    job_status = clean_cell_value(job.get("status")).lower()
+    job_stage = clean_cell_value(job.get("stage")).lower()
+    job_error = clean_cell_value(job.get("error"))
+
+    if job_status in {"queued", "running"}:
+        effective_status = job_status
+    elif job_status == "synced":
+        effective_status = "synced"
+    elif job_status == "skipped" and job_stage == "yandex_disabled":
+        effective_status = "disabled"
+    elif job_status == "skipped":
+        effective_status = "disabled"
+    elif job_status in {"error", "failed"}:
+        effective_status = "error"
+    elif job_status in {"cancelled", "canceled"}:
+        effective_status = "cancelled"
+    else:
+        effective_status = stored_status
+
+    effective_error = job_error or stored_error
+    if effective_status == "disabled" and not effective_error:
+        effective_error = "yandex disk is disabled"
+
+    return {
+        "status": effective_status,
+        "error": effective_error,
+        "job": job,
+        "reconciled": (
+            effective_status != stored_status
+            or effective_error != stored_error
+        ),
+    }
+

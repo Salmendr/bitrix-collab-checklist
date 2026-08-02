@@ -1,0 +1,305 @@
+:root {
+    color-scheme: light;
+    font-family: Arial, sans-serif;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+.folder-page {
+    margin: 0;
+    padding: 24px;
+    background: #f8fafc;
+    color: #1f2328;
+    font-family: Arial, sans-serif;
+}
+
+.folder-shell {
+    max-width: 1160px;
+    margin: 0 auto;
+    overflow: hidden;
+    border: 1px solid #e5e7eb;
+    border-radius: 14px;
+    background: #ffffff;
+}
+
+.folder-header {
+    padding: 16px 18px;
+    border-bottom: 1px solid #edf0f2;
+    background: #fafbfc;
+}
+
+.folder-header-layout {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+}
+
+.folder-heading {
+    min-width: 0;
+}
+
+.folder-heading-block {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    min-width: 0;
+    flex: 1 1 320px;
+}
+
+.folder-back-button {
+    flex: 0 0 36px;
+}
+
+.folder-checklist-title {
+    margin-bottom: 4px;
+    color: #667085;
+    font-size: 13px;
+}
+
+.folder-title {
+    margin: 0;
+    font-size: 22px;
+    font-weight: 700;
+}
+
+.folder-yandex-path {
+    margin-top: 12px;
+    color: #667085;
+    font-size: 12px;
+    overflow-wrap: anywhere;
+}
+
+.folder-actions {
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: 34px;
+    align-items: center;
+    justify-content: end;
+    gap: 10px;
+}
+
+.folder-action-button,
+.folder-yandex-link {
+    justify-self: center;
+}
+
+.folder-hidden-input {
+    display: none;
+}
+
+.folder-content {
+    padding: 18px;
+}
+
+.folder-table-scroll {
+    width: 100%;
+    overflow-x: auto;
+}
+
+.folder-table {
+    --folder-col-file: 49%;
+    --folder-col-size: 9%;
+    --folder-col-date: 15%;
+    --folder-col-user: 13%;
+    --folder-col-actions: 14%;
+
+    width: 100%;
+    min-width: 980px;
+    table-layout: fixed;
+    border-collapse: collapse;
+}
+
+.folder-table-col-file {
+    width: var(--folder-col-file);
+}
+
+.folder-table-col-size {
+    width: var(--folder-col-size);
+}
+
+.folder-table-col-date {
+    width: var(--folder-col-date);
+}
+
+.folder-table-col-user {
+    width: var(--folder-col-user);
+}
+
+.folder-table-col-actions {
+    width: var(--folder-col-actions);
+}
+
+.folder-table th {
+    padding: 10px 12px;
+    border-bottom: 1px solid #e5e7eb;
+    background: #f8fafc;
+    text-align: left;
+    white-space: nowrap;
+}
+
+.folder-document-row td,
+.folder-empty-row td {
+    padding: 10px 12px;
+    border-bottom: 1px solid #edf0f2;
+}
+
+.folder-document-row td:not(:first-child),
+.folder-document-actions-cell {
+    white-space: nowrap;
+}
+
+.folder-empty-row td {
+    padding: 14px 12px;
+    color: #667085;
+}
+
+.folder-document-name-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) max-content 34px;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    min-width: 0;
+}
+
+.folder-document-name {
+    display: block;
+    min-width: 0;
+    color: #175cd3;
+    text-decoration: none;
+    cursor: pointer;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    line-height: 1.35;
+}
+
+.folder-document-name:hover {
+    text-decoration: underline;
+}
+
+.folder-document-name:focus-visible {
+    outline: 2px solid #84adff;
+    outline-offset: 2px;
+    border-radius: 3px;
+}
+
+.folder-mirror-status {
+    flex: 0 0 auto;
+    padding: 3px 7px;
+    border-radius: 999px;
+    font-size: 11px;
+    line-height: 1.2;
+    white-space: nowrap;
+}
+
+.folder-mirror-status--queued {
+    background: #fffbeb;
+    color: #92400e;
+}
+
+.folder-mirror-status--running {
+    background: #eff8ff;
+    color: #175cd3;
+}
+
+.folder-mirror-status--synced {
+    background: #ecfdf3;
+    color: #027a48;
+}
+
+.folder-mirror-status--disabled,
+.folder-mirror-status--cancelled,
+.folder-mirror-status--unknown {
+    background: #f2f4f7;
+    color: #475467;
+}
+
+.folder-mirror-status--error {
+    background: #fef3f2;
+    color: #b42318;
+}
+
+.folder-replace-upload-button {
+    justify-self: end;
+}
+
+.folder-document-actions {
+    display: inline-flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 6px;
+    vertical-align: middle;
+}
+
+.folder-remove-button {
+    vertical-align: middle;
+}
+
+@media (max-width: 760px) {
+    .folder-page {
+        padding: 12px;
+    }
+
+    .folder-header,
+    .folder-content {
+        padding: 14px;
+    }
+
+    .folder-actions {
+        justify-content: flex-start;
+    }
+}
+
+/* Stage 6.5.4: mirrored global upload cards in every folder window. */
+.folder-upload-progress-region {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    margin-top: 14px;
+    padding-top: 14px;
+    border-top: 1px solid #edf0f2;
+}
+
+.folder-upload-progress-region[hidden] {
+    display: none;
+}
+
+.folder-upload-progress-label {
+    flex: 0 0 auto;
+    padding-top: 4px;
+    color: #667085;
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.folder-upload-progress-cards {
+    flex: 1 1 auto;
+    justify-content: flex-end;
+    min-width: 0;
+}
+
+@media (max-width: 760px) {
+    .folder-upload-progress-region {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .folder-upload-progress-cards {
+        justify-content: flex-start;
+    }
+}
+
+
+/* Stage 7.1.4: shared SVG actions and final document-row spacing. */
+.folder-replace-upload-button.is-uploading {
+    cursor: wait;
+}
+
+/* Stage 8.5.1.1: file names are the only visible open controls. */

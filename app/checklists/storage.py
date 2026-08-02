@@ -16,6 +16,12 @@ from app.checklists.normalization import (
 
 from app.checklists.yandex_context import hydrate_project_storage_context_from_configs
 
+from app.checklists.item_order import (
+    apply_checklist_item_order,
+    synchronize_checklist_item_order,
+)
+
+
 def make_storage_dialog_id(dialog_id: str, checklist_key: str = "id") -> str:
     dialog_id = normalize_dialog_id(dialog_id)
     checklist_key = normalize_checklist_key(checklist_key)
@@ -42,6 +48,12 @@ def save_checklist(dialog_id: str, data: dict, checklist_key: str = "id"):
     conn.commit()
     conn.close()
 
+    order_version = synchronize_checklist_item_order(
+        dialog_id,
+        checklist_key,
+        data,
+    )
+    data["orderVersion"] = int(order_version or 0)
     return data
 
 
@@ -96,6 +108,11 @@ def get_checklist(dialog_id: str, checklist_key: str = "id"):
     if row:
         data = json.loads(row["data_json"])
         data = normalize_checklist_data(data, checklist_key)
+        data = apply_checklist_item_order(
+            normalized_id,
+            checklist_key,
+            data,
+        )
 
         data["resolvedDialogId"] = normalized_id
         data["lookupAliases"] = aliases
@@ -104,10 +121,15 @@ def get_checklist(dialog_id: str, checklist_key: str = "id"):
 
     data = build_default_checklist_template(normalized_id, checklist_key)
 
-    save_checklist(
+    data = save_checklist(
         normalized_id,
         data,
         checklist_key,
+    )
+    data = apply_checklist_item_order(
+        normalized_id,
+        checklist_key,
+        data,
     )
 
     data["resolvedDialogId"] = normalized_id
@@ -126,6 +148,9 @@ def save_project_storage_context(dialog_id: str, payload: dict):
     storage_mode = payload.get("storageMode") or {}
     yandex_disk = payload.get("yandexDisk") or {}
     item_mappings = payload.get("itemMappings") or []
+    bitrix_context = payload.get("bitrix") or {}
+    if not isinstance(bitrix_context, dict):
+        bitrix_context = {}
 
     conn = get_conn()
     conn.execute("""
@@ -137,9 +162,10 @@ def save_project_storage_context(dialog_id: str, payload: dict):
             storage_mode_json,
             yandex_json,
             item_mappings_json,
+            bitrix_json,
             updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(dialog_id) DO UPDATE SET
             project_id=excluded.project_id,
             project_name=excluded.project_name,
@@ -147,6 +173,7 @@ def save_project_storage_context(dialog_id: str, payload: dict):
             storage_mode_json=excluded.storage_mode_json,
             yandex_json=excluded.yandex_json,
             item_mappings_json=excluded.item_mappings_json,
+            bitrix_json=excluded.bitrix_json,
             updated_at=excluded.updated_at
     """, (
         dialog_id,
@@ -156,6 +183,7 @@ def save_project_storage_context(dialog_id: str, payload: dict):
         json.dumps(storage_mode, ensure_ascii=False),
         json.dumps(yandex_disk, ensure_ascii=False),
         json.dumps(item_mappings, ensure_ascii=False),
+        json.dumps(bitrix_context, ensure_ascii=False),
         datetime.now().isoformat(),
     ))
     conn.commit()
@@ -185,6 +213,7 @@ def get_project_storage_context(dialog_id: str):
         "storageMode": json.loads(row["storage_mode_json"] or "{}"),
         "yandexDisk": json.loads(row["yandex_json"] or "{}"),
         "itemMappings": json.loads(row["item_mappings_json"] or "[]"),
+        "bitrix": json.loads(row["bitrix_json"] or "{}"),
         "updatedAt": row["updated_at"],
     }
 

@@ -1,4 +1,5 @@
 import requests
+import time
 from pathlib import Path
 from app.settings import (
     YANDEX_DISK_OAUTH_TOKEN,
@@ -205,6 +206,82 @@ def yandex_disk_publish_path(target_path: str) -> dict:
     return {
         "ok": True,
         "path": normalized_path,
+    }
+
+
+def yandex_disk_move_path(
+    source_path: str,
+    target_path: str,
+    overwrite: bool = False,
+    wait_timeout: int = 45,
+) -> dict:
+    normalized_source = normalize_yandex_disk_path(source_path)
+    normalized_target = normalize_yandex_disk_path(target_path)
+
+    if not normalized_source or not normalized_target:
+        raise RuntimeError("Yandex Disk source and target paths are required")
+
+    if normalized_source == normalized_target:
+        return {
+            "ok": True,
+            "sourcePath": normalized_source,
+            "targetPath": normalized_target,
+            "unchanged": True,
+        }
+
+    response = requests.post(
+        f"{YANDEX_DISK_API_BASE}/resources/move",
+        headers=get_yandex_disk_headers(),
+        params={
+            "from": normalized_source,
+            "path": normalized_target,
+            "overwrite": "true" if overwrite else "false",
+            "force_async": "false",
+        },
+        timeout=30,
+    )
+
+    if response.status_code not in (201, 202):
+        try:
+            payload = response.json()
+        except Exception:
+            payload = {"text": response.text}
+        raise RuntimeError(f"Yandex Disk move failed: {payload}")
+
+    operation_href = ""
+    if response.status_code == 202:
+        try:
+            operation_href = clean_disk_value((response.json() or {}).get("href"))
+        except Exception:
+            operation_href = ""
+
+    if operation_href:
+        deadline = time.monotonic() + max(1, int(wait_timeout or 45))
+        while time.monotonic() < deadline:
+            operation_response = requests.get(
+                operation_href,
+                headers=get_yandex_disk_headers(),
+                timeout=30,
+            )
+            operation_response.raise_for_status()
+            operation = operation_response.json() or {}
+            status = clean_disk_value(operation.get("status")).lower()
+            if status == "success":
+                break
+            if status == "failed":
+                raise RuntimeError(
+                    f"Yandex Disk move operation failed: {operation}"
+                )
+            time.sleep(0.5)
+        else:
+            raise RuntimeError("Yandex Disk move operation timed out")
+
+    return {
+        "ok": True,
+        "sourcePath": normalized_source,
+        "targetPath": normalized_target,
+        "unchanged": False,
+        "async": bool(operation_href),
     }
 
 

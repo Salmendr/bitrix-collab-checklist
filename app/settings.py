@@ -24,12 +24,21 @@ YANDEX_DISK_API_BASE = "https://cloud-api.yandex.net/v1/disk"
 
 UPLOAD_ROOT = VOLUME_DIR / "uploads"
 CHECKLIST_UPLOAD_ROOT = UPLOAD_ROOT / "checklists"
+EDIT_SESSION_FILE_ROOT = VOLUME_DIR / "edit_sessions"
 
 DEBUG_DIR = BASE_DIR / "debug"
 DEBUG_LOG_PATH = DEBUG_DIR / "close_popup.log"
 
 EDIT_LOCK_TTL_SECONDS = 45
 EDIT_LOCK_HEARTBEAT_SECONDS = 15
+
+# Глобальная транзакционная сессия popup.
+# Пять минут без heartbeat означают abandoned-сессию.
+# Такая сессия автоматически сохраняется через commit; rollback разрешён
+# только после явного подтверждённого нажатия кнопки «Отменить».
+EDIT_SESSION_TTL_SECONDS = 300
+EDIT_SESSION_HEARTBEAT_SECONDS = 20
+EDIT_SESSION_SWEEP_SECONDS = 15
 
 def ensure_runtime_directories():
     """
@@ -44,4 +53,5 @@ def ensure_runtime_directories():
     DB_DIR.mkdir(parents=True, exist_ok=True)
     UPLOAD_ROOT.mkdir(parents=True, exist_ok=True)
     CHECKLIST_UPLOAD_ROOT.mkdir(parents=True, exist_ok=True)
+    EDIT_SESSION_FILE_ROOT.mkdir(parents=True, exist_ok=True)
     DEBUG_DIR.mkdir(parents=True, exist_ok=True)

@@ -32,6 +32,7 @@ from app.checklists.utils import (
 from app.checklists.permissions import (
     can_user_delete_files,
     get_file_delete_allowed_user_ids,
+    get_archive_permanent_delete_admin_user_ids,
 )
 
 from app.checklists.storage import (
@@ -54,6 +55,9 @@ from app.checklists.documents import (
     normalize_documents_list,
     migrate_legacy_document_fields,
     remove_item_document_file,
+    archive_current_document_local_file,
+    build_detached_archive_series,
+    merge_detached_archive_series,
 )
 
 from app.checklists.upload_jobs import (
@@ -63,6 +67,19 @@ from app.checklists.upload_jobs import (
     get_upload_job,
     get_latest_document_job,
     public_job_payload,
+    resolve_document_mirror_status,
+)
+
+from app.checklists.document_replacements import (
+    create_document_replacement,
+    get_document_replacement,
+    mark_document_replacement_failed,
+    public_document_replacement_payload,
+)
+
+from app.checklists.archive_ui import (
+    build_archive_series_rows_html,
+    build_detached_archive_rows_html,
 )
 
 from app.checklists.yandex_mirror_queue import (
@@ -70,7 +87,19 @@ from app.checklists.yandex_mirror_queue import (
     get_yandex_mirror_queue_state,
 )
 
+from app.checklists.edit_session_documents import (
+    transactional_remove_document,
+    transactional_replace_document,
+    transactional_upload_document,
+)
+from app.checklists.edit_sessions import (
+    EditSessionConflictError,
+    EditSessionNotFoundError,
+    EditSessionPermissionError,
+)
+
 from app.ui.shell import normalize_base_path
+from app.ui.template_engine import render_ui_template
 
 from app.yandex_disk.client import (
     is_yandex_disk_enabled,
@@ -78,7 +107,105 @@ from app.yandex_disk.client import (
 )
 
 
+from app.checklists.document_assignment_history import (
+    get_assignment_history_count_map,
+)
+
 router = APIRouter()
+
+
+def document_edit_session_error_response(exc: Exception) -> JSONResponse:
+    if isinstance(exc, EditSessionNotFoundError):
+        status_code = 404
+    elif isinstance(exc, EditSessionPermissionError):
+        status_code = 403
+    elif isinstance(exc, EditSessionConflictError):
+        status_code = 409
+    elif isinstance(exc, KeyError):
+        status_code = 404
+    elif isinstance(exc, (ValueError, FileNotFoundError)):
+        status_code = 400
+    else:
+        status_code = 500
+
+    return JSONResponse(
+        {
+            "ok": False,
+            "error": str(exc).strip("'"),
+            "editSessionError": True,
+        },
+        status_code=status_code,
+    )
+
+
+def parse_bool_form_value(value) -> bool:
+    return str(value or "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "y",
+        "да",
+    }
+
+
+def enforce_required_edit_session(
+    session_id: str,
+    require_edit_session,
+) -> str:
+    normalized_session_id = clean_cell_value(session_id)
+
+    if (
+        parse_bool_form_value(require_edit_session)
+        and not normalized_session_id
+    ):
+        raise EditSessionConflictError(
+            "Активная сессия редактирования не готова"
+        )
+
+    return normalized_session_id
+
+
+def get_document_replacement_guard(
+    document: dict,
+    force_replace: bool = False,
+) -> dict:
+    mirror_resolution = resolve_document_mirror_status(
+        document
+    )
+    mirror_status = clean_cell_value(
+        mirror_resolution.get("status")
+    ).lower()
+
+    if mirror_status in {"queued", "running"}:
+        return {
+            "blocked": True,
+            "requiresForceReplace": False,
+            "mirrorStatus": mirror_status,
+            "error": (
+                "Файл ещё синхронизируется с Яндекс.Диском. "
+                "Дождитесь завершения синхронизации."
+            ),
+        }
+
+    if mirror_status == "error" and not force_replace:
+        return {
+            "blocked": True,
+            "requiresForceReplace": True,
+            "mirrorStatus": mirror_status,
+            "error": (
+                "У текущего файла есть ошибка синхронизации. "
+                "Для замены требуется подтверждение."
+            ),
+        }
+
+    return {
+        "blocked": False,
+        "requiresForceReplace": False,
+        "mirrorStatus": mirror_status,
+        "error": "",
+    }
+
+
 
 async def save_upload_file_stream(
     file: UploadFile,
@@ -186,7 +313,9 @@ async def api_checklist_upload_document(
     checklistKey: str = Form("id"),
     itemGroup: str = Form(""),
     actingUserId: str = Form(""),
-    actingUserName: str = Form("")
+    actingUserName: str = Form(""),
+    sessionId: str = Form(""),
+    requireEditSession: str = Form(""),
 ):
     upload_id = uuid.uuid4().hex
     started_at = time.monotonic()
@@ -199,6 +328,14 @@ async def api_checklist_upload_document(
     acting_user_id = clean_cell_value(actingUserId)
     acting_user_name = clean_cell_value(actingUserName) or "Пользователь"
 
+    try:
+        session_id = enforce_required_edit_session(
+            sessionId,
+            requireEditSession,
+        )
+    except Exception as exc:
+        return document_edit_session_error_response(exc)
+
     log_base = {
         "uploadId": upload_id,
         "dialogId": dialog_id,
@@ -209,9 +346,31 @@ async def api_checklist_upload_document(
         "contentType": clean_cell_value(file.content_type),
         "uploadedById": acting_user_id,
         "uploadedByName": acting_user_name,
+        "sessionId": session_id,
     }
 
     write_debug_log("upload_document_endpoint_entered", log_base)
+
+    if session_id:
+        try:
+            result = await transactional_upload_document(
+                session_id=session_id,
+                dialog_id=dialog_id,
+                checklist_key=checklist_key,
+                item_id=item_id,
+                item_group=int(str(itemGroup or "0").strip() or 0),
+                file=file,
+                acting_user_id=acting_user_id,
+                acting_user_name=acting_user_name,
+            )
+            return JSONResponse(result)
+        except Exception as exc:
+            write_debug_log("transactional_upload_document_failed", {
+                **log_base,
+                "error": str(exc),
+                "traceback": traceback.format_exc()[-6000:],
+            })
+            return document_edit_session_error_response(exc)
 
     try:
         config = get_checklist_config(checklist_key)
@@ -455,6 +614,664 @@ async def api_checklist_upload_document(
             "uploadId": upload_id,
         }, status_code=500)
 
+
+@router.post("/api/checklist/replace-document")
+async def api_checklist_replace_document(
+    dialogId: str = Form(...),
+    itemId: str = Form(...),
+    documentId: str = Form(...),
+    file: UploadFile = File(...),
+    checklistKey: str = Form("id"),
+    actingUserId: str = Form(""),
+    actingUserName: str = Form(""),
+    forceReplace: str = Form(""),
+    sessionId: str = Form(""),
+    requireEditSession: str = Form(""),
+):
+    operation_id = uuid.uuid4().hex
+    started_at = time.monotonic()
+
+    dialog_id = normalize_dialog_id(dialogId)
+    checklist_key = normalize_checklist_key(checklistKey)
+    item_id = clean_cell_value(itemId)
+    document_id = clean_cell_value(documentId)
+
+    acting_user_id = clean_cell_value(actingUserId)
+    acting_user_name = (
+        clean_cell_value(actingUserName)
+        or "Пользователь"
+    )
+
+    force_replace = parse_bool_form_value(forceReplace)
+
+    try:
+        session_id = enforce_required_edit_session(
+            sessionId,
+            requireEditSession,
+        )
+    except Exception as exc:
+        return document_edit_session_error_response(exc)
+
+    uploaded_name = Path(
+        file.filename or "file.bin"
+    ).name
+
+    log_base = {
+        "operationId": operation_id,
+        "dialogId": dialog_id,
+        "checklistKey": checklist_key,
+        "itemId": item_id,
+        "oldDocumentId": document_id,
+        "newFileName": uploaded_name,
+        "actingUserId": acting_user_id,
+        "actingUserName": acting_user_name,
+        "forceReplace": force_replace,
+        "sessionId": session_id,
+    }
+
+    write_debug_log(
+        "replace_document_endpoint_entered",
+        log_base,
+    )
+
+    if not dialog_id:
+        return JSONResponse(
+            {"ok": False, "error": "dialogId is required"},
+            status_code=400,
+        )
+
+    if not item_id:
+        return JSONResponse(
+            {"ok": False, "error": "itemId is required"},
+            status_code=400,
+        )
+
+    if not document_id:
+        return JSONResponse(
+            {"ok": False, "error": "documentId is required"},
+            status_code=400,
+        )
+
+    if not uploaded_name:
+        return JSONResponse(
+            {"ok": False, "error": "file name is required"},
+            status_code=400,
+        )
+
+    if session_id:
+        try:
+            result = await transactional_replace_document(
+                session_id=session_id,
+                dialog_id=dialog_id,
+                checklist_key=checklist_key,
+                item_id=item_id,
+                document_id=document_id,
+                file=file,
+                acting_user_id=acting_user_id,
+                acting_user_name=acting_user_name,
+                force_replace=force_replace,
+            )
+            return JSONResponse(result)
+        except Exception as exc:
+            write_debug_log("transactional_replace_document_failed", {
+                **log_base,
+                "error": str(exc),
+                "traceback": traceback.format_exc()[-6000:],
+            })
+            return document_edit_session_error_response(exc)
+
+    config = get_checklist_config(checklist_key)
+    data = get_checklist(dialog_id, config.key)
+    items = data.get("items", []) or []
+
+    target_item = None
+    target_item_index = -1
+
+    for index, raw_item in enumerate(items):
+        if str(raw_item.get("id") or "") != item_id:
+            continue
+
+        target_item = migrate_legacy_document_fields(
+            raw_item
+        )
+        target_item_index = index
+        items[index] = target_item
+        break
+
+    if not target_item:
+        return JSONResponse(
+            {"ok": False, "error": "item not found"},
+            status_code=404,
+        )
+
+    documents = normalize_documents_list(
+        target_item.get("documents")
+    )
+    assignment_history_counts = get_assignment_history_count_map(
+        dialog_id=dialog_id,
+        checklist_key=checklist_key,
+        item_id=item_id,
+    )
+    for document in documents:
+        series_id = (
+            clean_cell_value(document.get("seriesId"))
+            or clean_cell_value(document.get("id"))
+        )
+        document["assignmentHistoryCount"] = int(
+            assignment_history_counts.get(series_id, 0)
+        )
+
+    old_document = None
+    old_document_index = -1
+
+    for index, document in enumerate(documents):
+        if str(document.get("id") or "") == document_id:
+            old_document = normalize_document_record(
+                document
+            )
+            old_document_index = index
+            break
+
+    if not old_document:
+        return JSONResponse(
+            {"ok": False, "error": "document not found"},
+            status_code=404,
+        )
+
+    guard = get_document_replacement_guard(
+        old_document,
+        force_replace=force_replace,
+    )
+
+    if guard.get("blocked"):
+        return JSONResponse({
+            "ok": False,
+            "error": guard.get("error"),
+            "replacementBlocked": True,
+            "requiresForceReplace": bool(
+                guard.get("requiresForceReplace")
+            ),
+            "mirrorStatus": guard.get("mirrorStatus"),
+            "documentId": document_id,
+        }, status_code=409)
+
+    old_file_url = (
+        clean_cell_value(old_document.get("fileUrl"))
+        or clean_cell_value(old_document.get("path"))
+    )
+
+    old_local_path = get_upload_file_path_from_url(
+        old_file_url
+    )
+
+    if not old_local_path:
+        return JSONResponse({
+            "ok": False,
+            "error": (
+                "Текущий файл не расположен "
+                "в локальном хранилище"
+            ),
+        }, status_code=409)
+
+    if not old_local_path.exists():
+        return JSONResponse({
+            "ok": False,
+            "error": "Текущий локальный файл не найден",
+            "localPath": str(old_local_path),
+        }, status_code=404)
+
+    new_rel_path = build_upload_rel_path(
+        dialog_id,
+        item_id,
+        uploaded_name,
+    )
+
+    new_abs_path = UPLOAD_ROOT / new_rel_path
+
+    temp_abs_path = new_abs_path.with_name(
+        f".{new_abs_path.name}."
+        f"{operation_id}.replace_tmp"
+    )
+
+    new_abs_path.parent.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    try:
+        file_size = await save_upload_file_stream(
+            file=file,
+            abs_path=temp_abs_path,
+            upload_id=operation_id,
+            log_payload={
+                **log_base,
+                "replaceTemporaryPath": str(
+                    temp_abs_path
+                ),
+            },
+        )
+    except Exception as exc:
+        if temp_abs_path.exists():
+            temp_abs_path.unlink()
+
+        write_debug_log(
+            "replace_document_new_file_write_failed",
+            {
+                **log_base,
+                "error": str(exc),
+                "traceback": traceback.format_exc()[-4000:],
+            },
+        )
+
+        return JSONResponse({
+            "ok": False,
+            "error": "Не удалось сохранить новый файл",
+            "details": str(exc),
+        }, status_code=500)
+
+    if file_size <= 0:
+        if temp_abs_path.exists():
+            temp_abs_path.unlink()
+
+        return JSONResponse({
+            "ok": False,
+            "error": "Загружен пустой файл",
+        }, status_code=400)
+
+    replacement_at = datetime.now(
+        timezone.utc
+    ).isoformat(timespec="seconds")
+
+    new_document_id = uuid.uuid4().hex
+    series_id = (
+        clean_cell_value(old_document.get("seriesId"))
+        or clean_cell_value(old_document.get("id"))
+        or uuid.uuid4().hex
+    )
+
+    archived_version = None
+    new_upload_job_id = ""
+    checklist_saved = False
+    replacement_registered = False
+
+    try:
+        # 1. Старый локальный файл уходит в архив.
+        archived_version = (
+            archive_current_document_local_file(
+                dialog_id=dialog_id,
+                item_id=item_id,
+                document=old_document,
+                archived_by_id=acting_user_id,
+                archived_by_name=acting_user_name,
+                archived_at=replacement_at,
+            )
+        )
+
+        # 2. Новый временный файл становится текущим.
+        temp_abs_path.replace(new_abs_path)
+
+        new_file_url = (
+            "/uploads/"
+            + new_rel_path.replace("\\", "/")
+        )
+
+        new_document_view_url = build_document_view_url(
+            dialog_id,
+            config.key,
+            item_id,
+            new_document_id,
+        )
+
+        # 3. Создаём upload-job новой версии.
+        upload_job = create_yandex_upload_job(
+            dialog_id=dialog_id,
+            checklist_key=config.key,
+            item_id=item_id,
+            document_id=new_document_id,
+            local_path=str(new_abs_path),
+            file_name=uploaded_name,
+            file_size=file_size,
+        )
+
+        new_upload_job_id = clean_cell_value(
+            upload_job.get("job_id")
+            or upload_job.get("jobId")
+        )
+
+        if not new_upload_job_id:
+            raise RuntimeError(
+                "Не удалось создать upload-job "
+                "для новой версии"
+            )
+
+        create_document_replacement(
+            operation_id=operation_id,
+            dialog_id=dialog_id,
+            checklist_key=config.key,
+            item_id=item_id,
+            series_id=series_id,
+            archive_version_id=clean_cell_value(
+                archived_version.get("id")
+            ),
+            old_document_id=document_id,
+            new_document_id=new_document_id,
+            new_upload_job_id=new_upload_job_id,
+            old_file_name=clean_cell_value(
+                old_document.get("name")
+            ),
+            new_file_name=uploaded_name,
+            old_yandex_path=clean_cell_value(
+                old_document.get("yandexPath")
+            ),
+        )
+
+        replacement_registered = True
+
+        previous_archive_versions = list(
+            old_document.get("archiveVersions")
+            or []
+        )
+
+        new_document = normalize_document_record({
+            "id": new_document_id,
+            "seriesId": series_id,
+            "name": uploaded_name,
+            "path": new_file_url,
+            "fileUrl": new_file_url,
+            "previewUrl": new_document_view_url,
+            "size": file_size,
+            "modifiedAt": replacement_at,
+            "uploadedAt": replacement_at,
+            "uploadedById": acting_user_id,
+            "uploadedByName": acting_user_name,
+            "source": "local",
+
+            "archiveVersions": (
+                previous_archive_versions
+                + [archived_version]
+            ),
+
+            "lastReplacedAt": replacement_at,
+            "lastReplacedById": acting_user_id,
+            "lastReplacedByName": acting_user_name,
+            "replacementOperationId": operation_id,
+
+            "mirrorStatus": "queued",
+            "mirrorError": "",
+            "mirrorJobId": new_upload_job_id,
+            "yandexPath": "",
+            "yandexFileUrl": "",
+            "yandexFolderAlias": clean_cell_value(
+                old_document.get(
+                    "yandexFolderAlias"
+                )
+            ),
+        })
+
+        next_documents = list(documents)
+        next_documents[old_document_index] = (
+            new_document
+        )
+
+        normalized_documents = (
+            normalize_documents_list(next_documents)
+        )
+
+        target_item["documents"] = (
+            normalized_documents
+        )
+
+        target_item["folderPath"] = (
+            "/" + str(
+                new_abs_path.parent.relative_to(
+                    BASE_DIR
+                )
+            ).replace("\\", "/")
+        )
+
+        target_item["folderUrl"] = (
+            build_folder_view_url(
+                dialog_id,
+                config.key,
+                item_id,
+            )
+        )
+
+        first_document = (
+            normalized_documents[0]
+            if normalized_documents
+            else {}
+        )
+
+        target_item["documentUrl"] = (
+            clean_cell_value(
+                first_document.get("fileUrl")
+            )
+        )
+
+        target_item["documentName"] = (
+            clean_cell_value(
+                first_document.get("name")
+            )
+        )
+
+        if config.is_active_group(
+            target_item.get("group")
+        ):
+            target_item["status"] = "Есть"
+            target_item["priority"] = (
+                derive_indicator_from_status("Есть")
+            )
+
+        items[target_item_index] = target_item
+        data["items"] = items
+
+        data = normalize_checklist_data(
+            data,
+            config.key,
+        )
+
+        save_checklist(
+            dialog_id,
+            data,
+            config.key,
+        )
+
+        checklist_saved = True
+
+    except Exception as exc:
+        # Rollback выполняем только пока новое состояние
+        # не сохранено в checklist JSON.
+        if not checklist_saved:
+            if new_upload_job_id:
+                cancel_upload_jobs_for_document(
+                    dialog_id=dialog_id,
+                    checklist_key=config.key,
+                    item_id=item_id,
+                    document_id=new_document_id,
+                )
+
+            if new_abs_path.exists():
+                try:
+                    new_abs_path.unlink()
+                except Exception:
+                    pass
+
+            if archived_version:
+                archived_file_path = (
+                    get_upload_file_path_from_url(
+                        archived_version.get(
+                            "fileUrl"
+                        )
+                    )
+                )
+
+                if (
+                    archived_file_path
+                    and archived_file_path.exists()
+                    and not old_local_path.exists()
+                ):
+                    old_local_path.parent.mkdir(
+                        parents=True,
+                        exist_ok=True,
+                    )
+
+                    archived_file_path.replace(
+                        old_local_path
+                    )
+
+        if temp_abs_path.exists():
+            try:
+                temp_abs_path.unlink()
+            except Exception:
+                pass
+
+        if replacement_registered:
+            try:
+                mark_document_replacement_failed(
+                    operation_id=operation_id,
+                    error=str(exc),
+                    stage=(
+                        "replace_route_failed_after_save"
+                        if checklist_saved
+                        else "replace_route_rollback"
+                    ),
+                )
+            except Exception as replacement_exc:
+                write_debug_log(
+                    "replace_document_transaction_status_failed",
+                    {
+                        **log_base,
+                        "error": str(
+                            replacement_exc
+                        ),
+                    },
+                )
+
+        write_debug_log(
+            "replace_document_transaction_failed",
+            {
+                **log_base,
+                "newDocumentId": new_document_id,
+                "newUploadJobId": new_upload_job_id,
+                "checklistSaved": checklist_saved,
+                "error": str(exc),
+                "traceback": traceback.format_exc()[-6000:],
+            },
+        )
+
+        return JSONResponse({
+            "ok": False,
+            "error": "Замена файла не выполнена",
+            "details": str(exc),
+            "operationId": operation_id,
+        }, status_code=500)
+
+    finally:
+        if temp_abs_path.exists():
+            try:
+                temp_abs_path.unlink()
+            except Exception:
+                pass
+
+    # После сохранения ставим новую версию
+    # в существующую очередь.
+    enqueue_result = enqueue_yandex_mirror_job(
+        new_upload_job_id,
+        source="replace_document",
+    )
+
+    updated_item = None
+    updated_document = None
+
+    for item in data.get("items", []):
+        if str(item.get("id") or "") != item_id:
+            continue
+
+        updated_item = item
+
+        for document in normalize_documents_list(
+            item.get("documents")
+        ):
+            if str(document.get("id") or "") == (
+                new_document_id
+            ):
+                updated_document = document
+                break
+
+        break
+
+    write_debug_log(
+        "replace_document_completed",
+        {
+            **log_base,
+            "newDocumentId": new_document_id,
+            "seriesId": series_id,
+            "archiveVersionId": clean_cell_value(
+                archived_version.get("id")
+                if archived_version
+                else ""
+            ),
+            "archiveVersion": int(
+                archived_version.get("version")
+                if archived_version
+                else 0
+            ),
+            "newUploadJobId": new_upload_job_id,
+            "yandexMirrorQueued": bool(
+                enqueue_result.get("queued")
+            ),
+            "durationMs": int(
+                (time.monotonic() - started_at)
+                * 1000
+            ),
+        },
+    )
+
+    return JSONResponse({
+        "ok": True,
+        "dialogId": dialog_id,
+        "checklistKey": config.key,
+        "item": updated_item,
+        "document": updated_document,
+        "replacement": {
+            "operationId": operation_id,
+            "seriesId": series_id,
+            "oldDocumentId": document_id,
+            "newDocumentId": new_document_id,
+            "oldFileName": clean_cell_value(
+                old_document.get("name")
+            ),
+            "newFileName": uploaded_name,
+            "archiveVersion": archived_version,
+        },
+        "uploadJobId": new_upload_job_id,
+        "uploadJob": public_job_payload(
+            get_upload_job(new_upload_job_id)
+        ),
+        "yandexMirrorQueued": bool(
+            enqueue_result.get("queued")
+        ),
+        "yandexMirrorQueue": enqueue_result,
+        "oldYandexDeleteDeferred": bool(
+            clean_cell_value(
+                old_document.get("yandexPath")
+            )
+        ),
+        "replacementTransaction": (
+            public_document_replacement_payload(
+                get_document_replacement(
+                    operation_id
+                )
+            )
+        ),
+        "progressPercent": data.get(
+            "progressPercent",
+            0,
+        ),
+    })
+
+
 @router.post("/api/checklist/remove-document")
 async def api_checklist_remove_document(request: Request):
     payload = await request.json()
@@ -470,6 +1287,14 @@ async def api_checklist_remove_document(request: Request):
     acting_user_id = clean_cell_value(payload.get("actingUserId"))
     acting_user_name = clean_cell_value(payload.get("actingUserName")) or "Пользователь"
 
+    try:
+        session_id = enforce_required_edit_session(
+            payload.get("sessionId"),
+            payload.get("requireEditSession"),
+        )
+    except Exception as exc:
+        return document_edit_session_error_response(exc)
+
     if not dialog_id:
         return JSONResponse({"ok": False, "error": "dialogId is required"}, status_code=400)
 
@@ -481,6 +1306,32 @@ async def api_checklist_remove_document(request: Request):
             "ok": False,
             "error": "У вас недостаточно прав на удаление файлов"
         }, status_code=403)
+
+    if session_id:
+        try:
+            result = transactional_remove_document(
+                session_id=session_id,
+                dialog_id=dialog_id,
+                checklist_key=config.key,
+                item_id=item_id,
+                document_id=document_id,
+                document_url=document_url,
+                preserve_status=preserve_status,
+                acting_user_id=acting_user_id,
+                acting_user_name=acting_user_name,
+            )
+            return JSONResponse(result)
+        except Exception as exc:
+            write_debug_log("transactional_remove_document_failed", {
+                "sessionId": session_id,
+                "dialogId": dialog_id,
+                "checklistKey": config.key,
+                "itemId": item_id,
+                "documentId": document_id,
+                "error": str(exc),
+                "traceback": traceback.format_exc()[-6000:],
+            })
+            return document_edit_session_error_response(exc)
 
     data = get_checklist(dialog_id, config.key)
     items = data.get("items", []) or []
@@ -529,6 +1380,22 @@ async def api_checklist_remove_document(request: Request):
             item_id=item_id,
             document_id=removed_document_id,
         )
+
+        detached_series = build_detached_archive_series(
+            doc_to_remove,
+            removed_by_id=acting_user_id,
+            removed_by_name=acting_user_name,
+        )
+
+        if detached_series:
+            target_item["archivedDocumentSeries"] = (
+                merge_detached_archive_series(
+                    target_item.get(
+                        "archivedDocumentSeries"
+                    ),
+                    [detached_series],
+                )
+            )
 
         local_document_url = (
             clean_cell_value(doc_to_remove.get("fileUrl"))
@@ -628,6 +1495,116 @@ async def api_checklist_remove_document(request: Request):
         "progressPercent": data.get("progressPercent", 0),
     })
 
+@router.get("/api/checklist/item-yandex-folder")
+def api_checklist_item_yandex_folder(
+    dialogId: str = "",
+    checklistKey: str = "id",
+    itemId: str = "",
+):
+    dialog_id = normalize_dialog_id(dialogId)
+    checklist_key = normalize_checklist_key(
+        checklistKey
+    )
+    item_id = clean_cell_value(itemId)
+
+    if not dialog_id:
+        return JSONResponse(
+            {"ok": False, "error": "dialogId is required"},
+            status_code=400,
+        )
+
+    if not item_id:
+        return JSONResponse(
+            {"ok": False, "error": "itemId is required"},
+            status_code=400,
+        )
+
+    data = get_checklist(dialog_id, checklist_key)
+    target_item = None
+
+    for item in data.get("items", []) or []:
+        if clean_cell_value(item.get("id")) == item_id:
+            target_item = item
+            break
+
+    if not target_item:
+        return JSONResponse(
+            {"ok": False, "error": "item not found"},
+            status_code=404,
+        )
+
+    stored_yandex_url = clean_cell_value(
+        target_item.get("yandexFolderUrl")
+    )
+    stored_yandex_path = clean_cell_value(
+        target_item.get("yandexFolderPath")
+    )
+    stored_yandex_status = clean_cell_value(
+        target_item.get("yandexFolderStatus")
+    )
+
+    if stored_yandex_url or stored_yandex_path:
+        return JSONResponse({
+            "ok": True,
+            "dialogId": dialog_id,
+            "checklistKey": checklist_key,
+            "itemId": item_id,
+            "available": True,
+            "url": stored_yandex_url,
+            "path": stored_yandex_path,
+            "status": stored_yandex_status or "ready",
+            "yandexEnabled": bool(is_yandex_disk_enabled()),
+        })
+
+    try:
+        folder_data = get_item_yandex_folder(
+            dialog_id,
+            checklist_key,
+            clean_cell_value(target_item.get("name")),
+            group_id=int(target_item.get("group") or 0),
+        )
+        folder = (folder_data or {}).get("folder") or {}
+        folder_url = clean_cell_value(folder.get("url"))
+        folder_path = clean_cell_value(folder.get("path"))
+
+        return JSONResponse({
+            "ok": True,
+            "dialogId": dialog_id,
+            "checklistKey": checklist_key,
+            "itemId": item_id,
+            "available": bool(folder_url or folder_path),
+            "url": folder_url,
+            "path": folder_path,
+            "yandexEnabled": bool(is_yandex_disk_enabled()),
+        })
+
+    except Exception as exc:
+        write_debug_log(
+            "item_yandex_folder_lookup_failed",
+            {
+                "dialogId": dialog_id,
+                "checklistKey": checklist_key,
+                "itemId": item_id,
+                "itemName": clean_cell_value(
+                    target_item.get("name")
+                ),
+                "error": str(exc),
+            },
+        )
+
+        return JSONResponse({
+            "ok": True,
+            "dialogId": dialog_id,
+            "checklistKey": checklist_key,
+            "itemId": item_id,
+            "available": False,
+            "url": "",
+            "path": "",
+            "yandexEnabled": bool(is_yandex_disk_enabled()),
+            "warning": str(exc),
+        })
+
+
 @router.get("/api/checklist/upload-job-status")
 def api_checklist_upload_job_status(jobId: str = ""):
     job = get_upload_job(jobId)
@@ -655,307 +1632,646 @@ def api_checklist_document_mirror_status(
 def api_checklist_yandex_mirror_queue_state():
     return JSONResponse(get_yandex_mirror_queue_state())
 
-@router.get("/api/checklist/folder", response_class=HTMLResponse)
-def api_checklist_folder(dialogId: str = "", itemId: str = "", checklistKey: str = "id"):
+def _folder_mirror_status_presentation(
+    mirror_status: str,
+) -> tuple[str, str, str]:
+    normalized_status = clean_cell_value(
+        mirror_status
+    ).lower()
+
+    presentations = {
+        "queued": (
+            "Ожидает Яндекс",
+            "Файл ожидает синхронизации с Яндекс.Диском",
+            "queued",
+        ),
+        "running": (
+            "Загрузка на Яндекс",
+            "Файл загружается на Яндекс.Диск",
+            "running",
+        ),
+        "synced": (
+            "Синхронизирован",
+            "Файл синхронизирован с Яндекс.Диском",
+            "synced",
+        ),
+        "disabled": (
+            "",
+            "",
+            "disabled",
+        ),
+        "error": (
+            "Ошибка Яндекса",
+            (
+                "При синхронизации произошла ошибка. "
+                "Замена доступна после подтверждения"
+            ),
+            "error",
+        ),
+        "cancelled": (
+            "Синхронизация отменена",
+            "Задача синхронизации отменена",
+            "cancelled",
+        ),
+    }
+
+    return presentations.get(
+        normalized_status,
+        (
+            "",
+            "",
+            "unknown",
+        ),
+    )
+
+
+def _build_folder_document_rows_html(
+    *,
+    documents: list[dict],
+    dialog_id: str,
+    checklist_key: str,
+    item_id: str,
+    target_item: dict,
+) -> str:
+    rows: list[str] = []
+
+    for doc in documents:
+        doc_id = str(doc.get("id") or "")
+        escaped_doc_id = html.escape(doc_id)
+        doc_name = html.escape(
+            str(doc.get("name") or "Файл")
+        )
+        doc_size = html.escape(
+            format_file_size(doc.get("size") or 0)
+        )
+        uploaded_at_text = html.escape(
+            format_document_uploaded_at(
+                doc.get("uploadedAt")
+                or doc.get("modifiedAt")
+            )
+        )
+        uploaded_by_text = html.escape(
+            clean_cell_value(doc.get("uploadedByName"))
+            or "—"
+        )
+        open_url = build_document_view_url(
+            dialog_id,
+            checklist_key,
+            item_id,
+            doc_id,
+        )
+        download_url = open_url + "&download=1"
+
+        mirror_resolution = resolve_document_mirror_status(
+            doc
+        )
+        mirror_status = clean_cell_value(
+            mirror_resolution.get("status")
+        ).lower()
+        replacement_blocked = mirror_status in {
+            "queued",
+            "running",
+        }
+        replacement_disabled_attr = (
+            "disabled"
+            if replacement_blocked
+            else ""
+        )
+        replacement_title = (
+            "Дождитесь завершения синхронизации "
+            "с Яндекс.Диском"
+            if replacement_blocked
+            else "Загрузить новую версию файла"
+        )
+        (
+            mirror_status_text,
+            mirror_status_title,
+            mirror_status_class,
+        ) = _folder_mirror_status_presentation(
+            mirror_status
+        )
+        mirror_status_html = ""
+        if mirror_status_text:
+            mirror_status_html = f"""
+                        <span
+                            class="folder-mirror-status folder-mirror-status--{mirror_status_class}"
+                            data-role="folder-mirror-status"
+                            data-document-id="{escaped_doc_id}"
+                            data-mirror-status="{html.escape(mirror_status)}"
+                            title="{html.escape(mirror_status_title)}"
+                        >
+                            {html.escape(mirror_status_text)}
+                        </span>
+            """
+
+        assignment_history_count = int(
+            doc.get("assignmentHistoryCount") or 0
+        )
+        current_series_id = (
+            clean_cell_value(doc.get("seriesId"))
+            or doc_id
+        )
+        assignment_history_panel_id = (
+            "assignment-history-panel-"
+            + uuid.uuid5(
+                uuid.NAMESPACE_URL,
+                (
+                    f"{dialog_id}|{checklist_key}|{item_id}|"
+                    f"{current_series_id}|assignment-history"
+                ),
+            ).hex
+        )
+
+        rows.append(
+            f'''
+            <tr
+                class="folder-document-row"
+                data-document-row-id="{escaped_doc_id}"
+            >
+                <td>
+                    <div class="folder-document-name-layout">
+
+                        <a
+                            class="folder-document-name"
+                            href="{html.escape(open_url)}"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            title="Открыть файл: {doc_name}"
+                            aria-label="Открыть файл {doc_name}"
+                        >
+                            {doc_name}
+                        </a>
+
+                        {mirror_status_html}
+
+                        <button
+                            class="folder-replace-upload-button checklist-action-button checklist-action-button-replace"
+                            type="button"
+                            data-role="folder-replace-upload"
+                            data-document-id="{escaped_doc_id}"
+                            data-document-name="{doc_name}"
+                            data-mirror-status="{html.escape(mirror_status)}"
+                            {replacement_disabled_attr}
+                            title="{html.escape(replacement_title)}"
+                            aria-label="Заменить файл"
+                        >
+                            <span data-checklist-icon="replace"></span>
+                        </button>
+                    </div>
+                </td>
+                <td>{doc_size}</td>
+                <td>{uploaded_at_text}</td>
+                <td>{uploaded_by_text}</td>
+                <td class="folder-document-actions-cell">
+                    <div class="folder-document-actions">
+                        <button
+                            class="folder-remove-button checklist-action-button checklist-action-button-remove"
+                            type="button"
+                            data-role="folder-remove-file"
+                            data-dialog-id="{html.escape(dialog_id)}"
+                            data-checklist-key="{html.escape(checklist_key)}"
+                            data-item-id="{html.escape(item_id)}"
+                            data-document-id="{escaped_doc_id}"
+                            data-document-name="{doc_name}"
+                            title="Удалить файл"
+                            aria-label="Удалить файл"
+                        >
+                            <span data-checklist-icon="remove"></span>
+                        </button>
+                    </div>
+                </td>
+            </tr>
+            '''
+        )
+
+        if assignment_history_count > 0:
+            rows.append(f"""
+                <tr class="folder-assignment-history-summary-row">
+                    <td
+                        class="folder-assignment-history-summary-cell"
+                        colspan="5"
+                    >
+                        <button
+                            type="button"
+                            class="assignment-history-toggle"
+                            data-role="document-assignment-history-toggle"
+                            data-panel-id="{html.escape(assignment_history_panel_id)}"
+                            data-dialog-id="{html.escape(dialog_id)}"
+                            data-checklist-key="{html.escape(checklist_key)}"
+                            data-item-id="{html.escape(item_id)}"
+                            data-series-id="{html.escape(current_series_id)}"
+                            aria-expanded="false"
+                        >
+                            <span
+                                class="assignment-history-toggle-icon"
+                                data-role="assignment-history-toggle-icon"
+                                aria-hidden="true"
+                            >▸</span>
+                            <span>История заданий: {assignment_history_count}</span>
+                        </button>
+                    </td>
+                </tr>
+                <tr
+                    id="{html.escape(assignment_history_panel_id)}"
+                    class="folder-assignment-history-panel-row"
+                    hidden
+                >
+                    <td
+                        class="folder-assignment-history-panel-cell"
+                        colspan="5"
+                    >
+                        <div
+                            class="assignment-history-panel"
+                            aria-live="polite"
+                        ></div>
+                    </td>
+                </tr>
+            """)
+
+        current_archive_rows_html = (
+            build_archive_series_rows_html(
+                dialog_id=dialog_id,
+                checklist_key=checklist_key,
+                item_id=item_id,
+                series_id=current_series_id,
+                archive_versions=doc.get(
+                    "archiveVersions"
+                ),
+                panel_title="Архив версий",
+                panel_id=(
+                    "archive-panel-"
+                    + uuid.uuid5(
+                        uuid.NAMESPACE_URL,
+                        (
+                            f"{dialog_id}|"
+                            f"{checklist_key}|"
+                            f"{item_id}|"
+                            f"{current_series_id}"
+                        ),
+                    ).hex
+                ),
+                format_datetime=(
+                    format_document_uploaded_at
+                ),
+                detached=False,
+            )
+        )
+
+        if current_archive_rows_html:
+            rows.append(
+                current_archive_rows_html
+            )
+
+    detached_archive_rows_html = (
+        build_detached_archive_rows_html(
+            dialog_id=dialog_id,
+            checklist_key=checklist_key,
+            item_id=item_id,
+            archived_document_series=(
+                target_item.get(
+                    "archivedDocumentSeries"
+                )
+            ),
+            format_datetime=(
+                format_document_uploaded_at
+            ),
+        )
+    )
+
+    if detached_archive_rows_html:
+        rows.append(
+            detached_archive_rows_html
+        )
+
+    if rows:
+        return "".join(rows)
+
+    return '''
+        <tr class="folder-empty-row">
+            <td colspan="5">В папке пока нет файлов</td>
+        </tr>
+    '''
+
+
+def _build_folder_actions_html(
+    *,
+    documents: list[dict],
+    yandex_folder_url: str,
+    yandex_available: bool,
+) -> str:
+    replace_controls_html = ""
+
+    if documents:
+        replace_controls_html = '''
+            <input
+                class="folder-hidden-input"
+                type="file"
+                id="folderReplaceInput"
+                aria-label="Выбрать новую версию файла"
+            >
+        '''
+
+    yandex_link_html = ""
+
+    if documents and yandex_folder_url and yandex_available:
+        yandex_link_html = f'''
+            <a
+                class="folder-yandex-link checklist-action-button checklist-action-button-yandex"
+                href="{html.escape(yandex_folder_url)}"
+                target="_blank"
+                title="Открыть папку пункта на Яндекс.Диске"
+                aria-label="Открыть папку пункта на Яндекс.Диске"
+            >
+                <span data-checklist-icon="yandex"></span>
+            </a>
+        '''
+    elif documents:
+        yandex_link_html = '''
+            <button
+                class="folder-yandex-link checklist-action-button checklist-action-button-yandex"
+                type="button"
+                title="Открыть папку пункта на Яндекс.Диске"
+                aria-label="Открыть папку пункта на Яндекс.Диске"
+                aria-disabled="true"
+                disabled
+            >
+                <span data-checklist-icon="yandex"></span>
+            </button>
+        '''
+
+    return f'''
+        <div class="folder-actions" role="toolbar" aria-label="Действия с документами пункта">
+            {replace_controls_html}
+            <button
+                class="folder-action-button checklist-action-button checklist-action-button-upload"
+                type="button"
+                id="folderUploadBtn"
+                title="Загрузить файлы в папку пункта"
+                aria-label="Загрузить файлы в папку пункта"
+            >
+                <span data-checklist-icon="upload"></span>
+            </button>
+            <input
+                class="folder-hidden-input"
+                type="file"
+                id="folderUploadInput"
+                multiple
+            >
+            <button
+                class="folder-action-button checklist-action-button checklist-action-button-bell"
+                type="button"
+                id="folderNotificationBtn"
+                data-role="notify-documents"
+                data-draft-count="0"
+                title="Создать или изменить черновик оповещения"
+                aria-label="Создать или изменить черновик оповещения"
+                {"" if documents else "disabled"}
+            >
+                <span data-checklist-icon="bell"></span>
+            </button>
+            {yandex_link_html}
+        </div>
+    '''
+
+
+def _safe_json_for_inline_script(value) -> str:
+    return (
+        json.dumps(
+            value,
+            ensure_ascii=False,
+        )
+        .replace("</", "<\\/")
+        .replace("\u2028", "\\u2028")
+        .replace("\u2029", "\\u2029")
+    )
+
+
+@router.get(
+    "/api/checklist/folder",
+    response_class=HTMLResponse,
+)
+def api_checklist_folder(
+    dialogId: str = "",
+    itemId: str = "",
+    checklistKey: str = "id",
+    sessionId: str = "",
+    userId: str = "",
+    userName: str = "",
+):
     dialog_id = normalize_dialog_id(dialogId)
-    checklist_key = normalize_checklist_key(checklistKey)
+    checklist_key = normalize_checklist_key(
+        checklistKey
+    )
     item_id = str(itemId or "").strip()
 
     if not dialog_id or not item_id:
-        return HTMLResponse("<h3>Не переданы dialogId или itemId</h3>", status_code=400)
+        return HTMLResponse(
+            "<h3>Не переданы dialogId или itemId</h3>",
+            status_code=400,
+        )
 
     data = get_checklist(dialog_id, checklist_key)
     items = data.get("items", []) or []
-
     target_item = None
 
     for index, item in enumerate(items):
         if str(item.get("id") or "") == item_id:
-            target_item = migrate_legacy_document_fields(item)
+            target_item = migrate_legacy_document_fields(
+                item
+            )
             items[index] = target_item
             break
 
     if not target_item:
-        return JSONResponse({"ok": False, "error": "item not found"}, status_code=404)
-    documents = normalize_documents_list(target_item.get("documents"))
+        return JSONResponse(
+            {
+                "ok": False,
+                "error": "item not found",
+            },
+            status_code=404,
+        )
+
+    documents = normalize_documents_list(
+        target_item.get("documents")
+    )
     yandex_folder_data = get_item_yandex_folder(
         dialog_id,
         checklist_key,
         clean_cell_value(target_item.get("name")),
         group_id=int(target_item.get("group") or 0),
     )
-    yandex_folder = (yandex_folder_data or {}).get("folder") or {}
-    yandex_folder_url = clean_cell_value(yandex_folder.get("url"))
-    yandex_folder_path = clean_cell_value(yandex_folder.get("path"))
-    rows = []
-    for doc in documents:
-        doc_id = str(doc.get("id") or "")
-        doc_name = html.escape(str(doc.get("name") or "Файл"))
-        doc_size = html.escape(format_file_size(doc.get("size") or 0))
-        uploaded_at_text = html.escape(format_document_uploaded_at(
-            doc.get("uploadedAt") or doc.get("modifiedAt")
-        ))
-        uploaded_by_text = html.escape(
-            clean_cell_value(doc.get("uploadedByName")) or "—"
-        )
-        open_url = build_document_view_url(dialog_id, checklist_key, item_id, doc_id)
-        download_url = open_url + "&download=1"
-
-        rows.append(f"""
-            <tr>
-                <td style="padding:10px 12px;border-bottom:1px solid #edf0f2;">{doc_name}</td>
-                <td style="padding:10px 12px;border-bottom:1px solid #edf0f2;white-space:nowrap;">{doc_size}</td>
-                <td style="padding:10px 12px;border-bottom:1px solid #edf0f2;white-space:nowrap;">{uploaded_at_text}</td>
-                <td style="padding:10px 12px;border-bottom:1px solid #edf0f2;white-space:nowrap;">{uploaded_by_text}</td>
-                <td style="padding:10px 12px;border-bottom:1px solid #edf0f2;white-space:nowrap;">
-                    <a href="{html.escape(open_url)}" target="_blank">Открыть</a>
-                    &nbsp;|&nbsp;
-                    <a href="{html.escape(download_url)}" target="_blank">Скачать</a>
-                    &nbsp;|&nbsp;
-                    <button
-                        type="button"
-                        data-role="folder-remove-file"
-                        data-dialog-id="{html.escape(dialog_id)}"
-                        data-checklist-key="{html.escape(checklist_key)}"
-                        data-item-id="{html.escape(item_id)}"
-                        data-document-id="{html.escape(doc_id)}"
-                        data-document-name="{doc_name}"
-                        style="border:none;background:transparent;color:#b42318;cursor:pointer;font-size:16px;line-height:1;padding:0 2px;"
-                        title="Удалить файл"
-                    >
-                        ×
-                    </button>
-                </td>
-            </tr>
-        """)
-
-    table_html = "".join(rows) if rows else """
-        <tr>
-            <td colspan="5" style="padding:14px 12px;color:#667085;">В папке пока нет файлов</td>
-        </tr>
-    """
-
-    title = html.escape(str(target_item.get("name") or "Папка"))
-    checklist_title = html.escape(str(data.get("title") or "Чек-лист"))
-    remove_api_url = html.escape(f"{normalize_base_path(APP_BASE_PATH)}/api/checklist/remove-document")
-    upload_api_url = html.escape(f"{normalize_base_path(APP_BASE_PATH)}/api/checklist/upload-document")
-    folder_item_group = html.escape(str(target_item.get("group") or ""))
-
-    yandex_folder_path_html = ""
-    if yandex_folder_path and not yandex_folder_url:
-        yandex_folder_path_html = f'''
-            <div style="margin-top:12px;font-size:12px;color:#667085;">
-                Папка Яндекс Диска: {html.escape(yandex_folder_path)}
-            </div>
-        '''
-
-    folder_actions_html = f'''
-        <div style="display:flex;gap:10px;align-items:center;justify-content:flex-end;flex-wrap:wrap;">
-            <button
-                type="button"
-                id="folderUploadBtn"
-                style="display:inline-block;padding:8px 12px;border:1px solid #d0d7de;border-radius:8px;background:#f8fafc;color:#1f2328;text-decoration:none;cursor:pointer;"
-            >
-                Загрузить файлы в папку пункта
-            </button>
-            <input type="file" id="folderUploadInput" style="display:none;" multiple>
-            {f'''
-                <a
-                    href="{html.escape(yandex_folder_url)}"
-                    target="_blank"
-                    style="display:inline-block;padding:8px 12px;border:1px solid #d0d7de;border-radius:8px;background:#f8fafc;color:#1f2328;text-decoration:none;"
-                >
-                    Открыть папку на Яндекс Диске
-                </a>
-            ''' if yandex_folder_url else ''}
-        </div>
-    '''
-    folder_delete_allowed_user_ids_json = json.dumps(
-        sorted(get_file_delete_allowed_user_ids()),
-        ensure_ascii=False
+    yandex_folder = (
+        yandex_folder_data or {}
+    ).get("folder") or {}
+    yandex_folder_url = clean_cell_value(
+        yandex_folder.get("url")
+    )
+    yandex_folder_path = clean_cell_value(
+        yandex_folder.get("path")
+    )
+    yandex_context = (
+        yandex_folder_data or {}
+    ).get("context") or {}
+    yandex_mirror_targets = (
+        yandex_context.get("storageMode") or {}
+    ).get("mirrorTargets") or []
+    yandex_available = (
+        bool(yandex_context)
+        and "yandex_disk" in yandex_mirror_targets
+        and is_yandex_disk_enabled()
     )
 
-    return f"""
-    <html>
-    <head>
-        <meta charset="utf-8">
-        <title>{title}</title>
-    </head>
-    <body style="font-family:Arial,sans-serif;background:#f8fafc;margin:0;padding:24px;color:#1f2328;">
-        <div style="max-width:1160px;margin:0 auto;background:#fff;border:1px solid #e5e7eb;border-radius:14px;overflow:hidden;">
-            <div style="padding:16px 18px;border-bottom:1px solid #edf0f2;background:#fafbfc;">
-                <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap;">
-                    <div>
-                        <div style="font-size:13px;color:#667085;margin-bottom:4px;">{checklist_title}</div>
-                        <div style="font-size:22px;font-weight:700;">{title}</div>
-                        {yandex_folder_path_html}
-                    </div>
-                    {folder_actions_html}
-                </div>
-            </div>
-            <div style="padding:18px;">
-                <table style="width:100%;border-collapse:collapse;">
-                    <thead>
-                        <tr>
-                            <th style="text-align:left;padding:10px 12px;background:#f8fafc;border-bottom:1px solid #e5e7eb;">Файл</th>
-                            <th style="text-align:left;padding:10px 12px;background:#f8fafc;border-bottom:1px solid #e5e7eb;">Размер</th>
-                            <th style="text-align:left;padding:10px 12px;background:#f8fafc;border-bottom:1px solid #e5e7eb;">Дата загрузки</th>
-                            <th style="text-align:left;padding:10px 12px;background:#f8fafc;border-bottom:1px solid #e5e7eb;">Загрузил</th>
-                            <th style="text-align:left;padding:10px 12px;background:#f8fafc;border-bottom:1px solid #e5e7eb;">Действия</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {table_html}
-                    </tbody>
-                </table>
-            </div>
-        </div>
-        <script>
-            const folderRemoveApiUrl = "{remove_api_url}";
-            const folderUploadApiUrl = "{upload_api_url}";
-            const folderDialogId = "{html.escape(dialog_id)}";
-            const folderChecklistKey = "{html.escape(checklist_key)}";
-            const folderItemId = "{html.escape(item_id)}";
-            const folderItemGroup = "{folder_item_group}";
+    table_html = _build_folder_document_rows_html(
+        documents=documents,
+        dialog_id=dialog_id,
+        checklist_key=checklist_key,
+        item_id=item_id,
+        target_item=target_item,
+    )
+    folder_actions_html = _build_folder_actions_html(
+        documents=documents,
+        yandex_folder_url=yandex_folder_url,
+        yandex_available=yandex_available,
+    )
 
-            const folderDeleteAllowedUserIds = new Set({folder_delete_allowed_user_ids_json});
+    yandex_folder_path_html = ""
 
-            function getFolderDeleteActor() {{
-                try {{
-                    const openerEditor = window.opener && window.opener.currentEditor
-                        ? window.opener.currentEditor
-                        : null;
+    app_base_path = normalize_base_path(
+        APP_BASE_PATH
+    )
+    ui_static_base_url = (
+        f"{app_base_path}/ui-static"
+    )
+    ui_asset_version = "8.15"
+    popup_url = (
+        f"{app_base_path}/popup"
+        f"?dialogId={quote(dialog_id, safe='')}"
+        f"&checklistKey={quote(checklist_key, safe='')}"
+    )
 
-                    return {{
-                        id: String(openerEditor && openerEditor.id || '').trim(),
-                        name: String(openerEditor && openerEditor.name || '').trim() || 'Пользователь'
-                    }};
-                }} catch (e) {{
-                    return {{
-                        id: '',
-                        name: 'Пользователь'
-                    }};
-                }}
-            }}
+    bootstrap_payload = {
+        "removeApiUrl": (
+            f"{app_base_path}"
+            "/api/checklist/remove-document"
+        ),
+        "uploadApiUrl": (
+            f"{app_base_path}"
+            "/api/checklist/upload-document"
+        ),
+        "replaceApiUrl": (
+            f"{app_base_path}"
+            "/api/checklist/replace-document"
+        ),
+        "documentMirrorStatusApiUrl": (
+            f"{app_base_path}"
+            "/api/checklist/document-mirror-status"
+        ),
+        "archiveDeleteApiUrl": (
+            f"{app_base_path}"
+            "/api/checklist/delete-archive-version"
+        ),
+        "notificationDraftsApiUrl": (
+            f"{app_base_path}"
+            "/api/checklist/notification-drafts"
+        ),
+        "dialogId": dialog_id,
+        "checklistKey": checklist_key,
+        "itemId": item_id,
+        "itemGroup": str(
+            target_item.get("group") or ""
+        ),
+        "itemName": (
+            clean_cell_value(target_item.get("name"))
+            or "Пункт"
+        ),
+        "sessionId": clean_cell_value(sessionId),
+        "userId": clean_cell_value(userId),
+        "userName": clean_cell_value(userName),
+        "popupUrl": popup_url,
+        "deleteAllowedUserIds": sorted(
+            get_file_delete_allowed_user_ids()
+        ),
+        "archiveDeleteAdminUserIds": sorted(
+            get_archive_permanent_delete_admin_user_ids()
+        ),
+    }
 
-            function notifyParentChecklistDocumentChanged(messageType = 'checklist-document-changed', extraPayload = {{}}) {{
-                try {{
-                    if (window.opener && typeof window.opener.postMessage === 'function') {{
-                        window.opener.postMessage({{
-                            type: messageType,
-                            dialogId: folderDialogId,
-                            checklistKey: folderChecklistKey,
-                            itemId: folderItemId,
-                            ...extraPayload
-                        }}, '*');
-                    }}
-                }} catch (e) {{
-                    console.log('opener sync error:', e);
-                }}
-            }}
+    return render_ui_template(
+        "folder.html",
+        {
+            "FOLDER_TITLE": html.escape(
+                str(target_item.get("name") or "Папка")
+            ),
+            "FOLDER_CHECKLIST_TITLE": html.escape(
+                str(data.get("title") or "Чек-лист")
+            ),
+            "FOLDER_YANDEX_PATH_HTML": (
+                yandex_folder_path_html
+            ),
+            "FOLDER_ACTIONS_HTML": folder_actions_html,
+            "FOLDER_TABLE_HTML": table_html,
+            "FOLDER_BOOTSTRAP_JSON": (
+                _safe_json_for_inline_script(
+                    bootstrap_payload
+                )
+            ),
+            "FOLDER_CSS_URL": html.escape(
+                f"{ui_static_base_url}/css/folder.css?v={ui_asset_version}"
+            ),
+            "FOLDER_UPLOADS_CSS_URL": html.escape(
+                f"{ui_static_base_url}/css/uploads.css?v={ui_asset_version}"
+            ),
+            "FOLDER_ACTIONS_CSS_URL": html.escape(
+                f"{ui_static_base_url}/css/action-controls.css?v={ui_asset_version}"
+            ),
+            "FOLDER_ARCHIVE_CSS_URL": html.escape(
+                f"{ui_static_base_url}/css/archive.css?v={ui_asset_version}"
+            ),
+            "FOLDER_NOTIFICATIONS_CSS_URL": html.escape(
+                f"{ui_static_base_url}/css/notifications.css?v={ui_asset_version}"
+            ),
+            "FOLDER_ASSIGNMENT_HISTORY_CSS_URL": html.escape(
+                f"{ui_static_base_url}/css/assignment-history.css?v={ui_asset_version}"
+            ),
+            "FOLDER_WINDOW_CHANNEL_JS_URL": html.escape(
+                f"{ui_static_base_url}/js/checklist-window-channel.js?v={ui_asset_version}"
+            ),
+            "FOLDER_ACTION_ICONS_JS_URL": html.escape(
+                f"{ui_static_base_url}/js/checklist-action-icons.js?v={ui_asset_version}"
+            ),
+            "FOLDER_CORE_JS_URL": html.escape(
+                f"{ui_static_base_url}/js/folder-core.js?v={ui_asset_version}"
+            ),
+            "FOLDER_BITRIX_USER_PICKER_JS_URL": html.escape(
+                f"{ui_static_base_url}/js/bitrix-user-picker.js?v={ui_asset_version}"
+            ),
+            "FOLDER_BITRIX_COMPANY_PICKER_JS_URL": html.escape(
+                f"{ui_static_base_url}/js/bitrix-company-picker.js?v={ui_asset_version}"
+            ),
+            "FOLDER_NOTIFICATION_UI_JS_URL": html.escape(
+                f"{ui_static_base_url}/js/notification-draft-ui.js?v={ui_asset_version}"
+            ),
+            "FOLDER_NOTIFICATION_DRAFTS_JS_URL": html.escape(
+                f"{ui_static_base_url}/js/folder-notification-drafts.js?v={ui_asset_version}"
+            ),
+            "FOLDER_ASSIGNMENT_HISTORY_JS_URL": html.escape(
+                f"{ui_static_base_url}/js/document-assignment-history.js?v={ui_asset_version}"
+            ),
+            "FOLDER_UPLOAD_PROGRESS_JS_URL": html.escape(
+                f"{ui_static_base_url}/js/folder-upload-progress.js?v={ui_asset_version}"
+            ),
+            "FOLDER_UPLOADS_JS_URL": html.escape(
+                f"{ui_static_base_url}/js/folder-uploads.js?v={ui_asset_version}"
+            ),
+            "FOLDER_REPLACEMENT_JS_URL": html.escape(
+                f"{ui_static_base_url}/js/folder-replacement.js?v={ui_asset_version}"
+            ),
+            "FOLDER_ARCHIVE_JS_URL": html.escape(
+                f"{ui_static_base_url}/js/folder-archive-ui.js?v={ui_asset_version}"
+            ),
+        },
+    )
 
-            document.querySelectorAll('[data-role="folder-remove-file"]').forEach(btn => {{
-                btn.addEventListener('click', async function () {{
-                    const documentName = this.dataset.documentName || 'файл';
-                    const actor = getFolderDeleteActor();
-
-                    if (!folderDeleteAllowedUserIds.has(String(actor.id || '').trim())) {{
-                        alert('У вас недостаточно прав на удаление файлов');
-                        return;
-                    }}
-
-                    if (!window.confirm('Удалить файл "' + documentName + '"?')) {{
-                        return;
-                    }}
-
-                    this.disabled = true;
-
-                    try {{
-                        const response = await fetch(folderRemoveApiUrl, {{
-                            method: 'POST',
-                            headers: {{ 'Content-Type': 'application/json' }},
-                            body: JSON.stringify({{
-                                dialogId: this.dataset.dialogId,
-                                checklistKey: this.dataset.checklistKey,
-                                itemId: this.dataset.itemId,
-                                documentId: this.dataset.documentId,
-                                actingUserId: actor.id,
-                                actingUserName: actor.name
-                            }})
-                        }});
-
-                        const result = await response.json();
-                        if (!response.ok || !result.ok) {{
-                            throw new Error(result.error || 'remove document failed');
-                        }}
-
-                        notifyParentChecklistDocumentChanged('checklist-document-removed', {{
-                            documentName: documentName
-                        }});
-                        window.location.reload();
-                    }} catch (e) {{
-                        console.log('folder remove error:', e);
-                        alert(e && e.message ? e.message : 'Ошибка удаления файла');
-                    }} finally {{
-                        this.disabled = false;
-                    }}
-                }});
-            }});
-
-            const folderUploadBtn = document.getElementById('folderUploadBtn');
-            const folderUploadInput = document.getElementById('folderUploadInput');
-
-            if (folderUploadBtn && folderUploadInput) {{
-                folderUploadBtn.addEventListener('click', function () {{
-                    folderUploadInput.click();
-                }});
-
-                folderUploadInput.addEventListener('change', async function () {{
-                    const files = Array.from(this.files || []);
-                    if (!files.length) {{
-                        return;
-                    }}
-
-                    folderUploadBtn.disabled = true;
-                    const actor = getFolderDeleteActor();
-
-                    try {{
-                        for (const file of files) {{
-                            const formData = new FormData();
-                            formData.append('dialogId', folderDialogId);
-                            formData.append('itemId', folderItemId);
-                            formData.append('file', file);
-                            formData.append('checklistKey', folderChecklistKey);
-                            formData.append('itemGroup', folderItemGroup);
-                            formData.append('actingUserId', actor.id);
-                            formData.append('actingUserName', actor.name);
-
-                            const response = await fetch(folderUploadApiUrl, {{
-                                method: 'POST',
-                                body: formData
-                            }});
-
-                            const result = await response.json();
-                            if (!response.ok || !result.ok) {{
-                                throw new Error(result.error || 'upload document failed');
-                            }}
-                        }}
-
-                        notifyParentChecklistDocumentChanged('checklist-document-uploaded');
-                        window.location.reload();
-                    }} catch (e) {{
-                        console.log('folder upload error:', e);
-                        alert('Ошибка загрузки файлов');
-                    }} finally {{
-                        this.value = '';
-                        folderUploadBtn.disabled = false;
-                    }}
-                }});
-            }}
-        </script>
-    </body>
-    </html>
-    """
 @router.get("/api/checklist/file")
 def api_checklist_file(
     dialogId: str = "",

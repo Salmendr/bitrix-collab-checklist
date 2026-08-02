@@ -1,0 +1,128 @@
+:root {
+    /* Stage 8.4.3: transfer 33% of the previous 280px item-name width to documents. */
+    --checklist-item-column-width: 187.6px;
+    --checklist-document-column-width: 292.4px;
+}
+
+.content { padding:14px 16px 16px; max-height:82vh; overflow:auto; }
+.layout { display:flex; flex-direction:column; gap:12px; align-items:stretch; }
+.stage-folder-box {
+    display:flex;
+    justify-content:flex-end;
+    align-items:flex-start;
+    min-height:34px;
+    flex:0 0 320px;
+    margin-left:auto;
+}
+.stage-folder-box .doc-btn {
+    width:auto;
+    min-width:300px;
+    max-width:320px;
+    height:34px;
+    padding:6px 14px;
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+}
+.tables-grid { display:grid; grid-template-columns:1fr 1fr; gap:14px; align-items:start; }
+.table-panel { min-width:0; display:flex; }
+.table-panel .table { flex:1 1 auto; }
+.side-panel { order:-1; border:1px solid #e5e7eb; border-radius:12px; background:#fff; overflow:hidden; position:static; }
+.side-panel-title { padding:12px 14px; background:#fafbfc; border-bottom:1px solid #e5e7eb; font-size:13px; font-weight:700; color:#344054; }
+.side-panel-toolbar {
+    padding:10px;
+    display:flex;
+    align-items:flex-start;
+    gap:10px;
+    width:100%;
+}
+.side-panel-list {
+    padding:0;
+    display:flex;
+    flex-wrap:wrap;
+    gap:8px;
+    flex:1 1 auto;
+    min-width:0;
+    align-content:flex-start;
+}
+.side-link { display:inline-flex; width:auto; text-align:left; border:1px solid #d0d7de; border-radius:8px; background:#fff; padding:9px 12px; font-size:13px; cursor:pointer; align-items:center; }
+.side-link.active { background:#eef2ff; border-color:#c7d2fe; font-weight:700; }
+.table { width:100%; border:1px solid #e5e7eb; border-radius:12px; overflow:hidden; background:#fff; }
+.generic-split-table {
+    border: none !important;
+    border-radius: 0 !important;
+    overflow: visible !important;
+    background: transparent !important;
+}
+
+.generic-split-table .generic-subtable {
+    border: 1px solid #e5e7eb;
+    border-radius: 12px;
+    overflow: hidden;
+    background: #fff;
+}
+
+.generic-split-table .generic-subtable + .generic-subtable {
+    margin-top: 14px;
+    padding-top: 0 !important;
+    border-top: 1px solid #e5e7eb !important;
+}
+
+.generic-split-table .thead {
+    position: static;
+}
+
+.generic-split-table .group-title-generic-head {
+    border-top: none;
+}
+
+.thead { position:sticky; top:0; z-index:10; background:#f8fafc; border-bottom:1px solid #e5e7eb; }
+.thead-top,.thead-bottom { min-height:38px; }
+.thead-top,.thead-bottom,.row { display:grid; grid-template-columns:var(--checklist-item-column-width) var(--checklist-document-column-width) 136px 136px; gap:0; align-items:stretch; justify-content:start; }
+.th,.td { padding:8px 9px; border-right:1px solid #edf0f2; }
+.th:last-child,.td:last-child { border-right:none; }
+.th { font-size:12px; font-weight:700; color:#475467; min-height:38px; display:flex; align-items:center; }
+.thead-top .th,.thead-bottom .th { min-height:38px; }
+.th.center { text-align:center; justify-content:center; }
+.generic-subtable { background:#fff; }
+.generic-subtable + .generic-subtable {
+    margin-top:14px;
+    padding-top:14px;
+    border-top:10px solid #ffffff;
+}
+.group-block { border-top:none; }
+.group-title { padding:9px 12px; min-height:40px; background:#fafbfc; border-top:1px solid #e5e7eb; border-bottom:1px solid #e5e7eb; font-size:13px; font-weight:700; color:#344054; display:flex; align-items:center; }
+.group-title-generic-head { border-top:none; }
+.row { border-top:1px solid #edf0f2; background:#fff; }
+.row.not-required { background:#fafafa; }
+.row.not-required .item-name { text-decoration:line-through; color:#98a2b3; }
+.cell-name { display:flex; align-items:center; gap:8px; min-width:0; }
+.status-indicator {
+    appearance:none;
+    width:28px;
+    min-width:28px;
+    height:28px;
+    padding:0;
+    border-radius:999px;
+    border:2px solid #c8d2df;
+    flex:0 0 28px;
+    background:#fff;
+    box-shadow:0 1px 3px rgba(15,23,42,.10);
+    cursor:pointer;
+    transition:transform .12s ease, box-shadow .12s ease, background .12s ease, border-color .12s ease;
+}
+.status-indicator:hover:not(:disabled) { transform:scale(1.06); box-shadow:0 0 0 4px rgba(59,130,246,.11); }
+.status-indicator:focus-visible { outline:2px solid rgba(59,130,246,.5); outline-offset:2px; }
+.status-indicator:disabled { cursor:default; opacity:.55; }
+.status-indicator.green { background:#22c55e; border-color:#16a34a; }
+.status-indicator.gray { background:#9ca3af; border-color:#7f8794; }
+.item-name { font-size:13px; font-weight:700; color:#1f2328; line-height:1.15; min-width:0; word-break:break-word; max-width:none; }
+.status-select,.date-input { width:100%; border:1px solid #d0d7de; border-radius:8px; padding:6px 8px; font-size:12px; background:#fff; }
+.concept-extra-textarea { width:100%; height:32px; min-height:32px; border:1px solid #d0d7de; border-radius:8px; padding:6px 8px; font-size:12px; background:#fff; resize:vertical; overflow:hidden; line-height:1.35; }
+.concept-inline-display { min-height:32px; padding:6px 8px; border:1px solid transparent; border-radius:8px; font-size:12px; line-height:1.35; white-space:pre-wrap; word-break:break-word; cursor:text; }
+.concept-inline-display:hover { background:#f8fafc; border-color:#e5e7eb; }
+.concept-inline-display.empty { color:#98a2b3; }
+.concept-inline-display.disabled { cursor:default; background:#f8fafc; border-color:transparent; }
+.concept-inline-input { width:100%; min-height:32px; height:32px; border:1px solid #d0d7de; border-radius:8px; padding:6px 8px; font-size:12px; background:#fff; resize:vertical; overflow:hidden; line-height:1.35; }
+.doc-btn,.upload-btn,.add-item-btn { display:inline-block; width:100%; text-align:center; padding:6px 8px; border:1px solid #d0d7de; border-radius:8px; background:#f8fafc; color:#1f2328; font-size:12px; text-decoration:none; cursor:pointer; }
+.doc-btn:hover,.upload-btn:hover,.side-link:hover,.add-item-btn:hover { background:#f1f5f9; }

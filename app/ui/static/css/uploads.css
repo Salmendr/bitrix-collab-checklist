@@ -1,0 +1,111 @@
+.upload-progress-cards {
+    display: flex;
+    justify-content: flex-end;
+    align-items: stretch;
+    gap: 8px;
+    width: min(704px, 62vw);
+    min-height: 0;
+}
+
+.upload-progress-cards:empty {
+    display: none;
+}
+
+.upload-progress-card {
+    flex: 0 0 224px;
+    width: 224px;
+    min-width: 0;
+    padding: 8px 9px;
+    border: 1px solid #fed7aa;
+    border-radius: 11px;
+    background: #fff7ed;
+    color: #9a3412;
+    box-shadow: 0 5px 16px rgba(154,52,18,.09);
+}
+
+.upload-progress-card.is-completed {
+    border-color: #bbf7d0;
+    background: #f0fdf4;
+    color: #166534;
+}
+
+.upload-progress-card.is-failed,
+.upload-progress-card.is-cancelled {
+    border-color: #fecaca;
+    background: #fef2f2;
+    color: #b42318;
+}
+
+.upload-progress-card-file {
+    font-size: 11px;
+    line-height: 1.25;
+    font-weight: 800;
+    color: #1f2328;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-bottom: 5px;
+}
+
+.upload-progress-card-track {
+    width: 100%;
+    height: 7px;
+    border-radius: 999px;
+    background: #ffedd5;
+    overflow: hidden;
+}
+
+.upload-progress-card.is-completed .upload-progress-card-track {
+    background: #dcfce7;
+}
+
+.upload-progress-card.is-failed .upload-progress-card-track,
+.upload-progress-card.is-cancelled .upload-progress-card-track {
+    background: #fee2e2;
+}
+
+.upload-progress-card-bar {
+    height: 100%;
+    width: 0%;
+    border-radius: 999px;
+    background: #f97316;
+    transition: width .16s ease;
+}
+
+.upload-progress-card.is-completed .upload-progress-card-bar {
+    background: #22c55e;
+}
+
+.upload-progress-card.is-failed .upload-progress-card-bar,
+.upload-progress-card.is-cancelled .upload-progress-card-bar {
+    background: #ef4444;
+}
+
+.upload-progress-card-status {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 7px;
+    min-width: 0;
+    margin-top: 5px;
+    font-size: 10px;
+    line-height: 1.2;
+}
+
+.upload-progress-card-status span {
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.upload-progress-card-status b {
+    flex: 0 0 auto;
+    font-size: 11px;
+}
+
+@media (max-width: 980px) {
+    .header { flex-wrap: wrap; }
+    .header-right { width: 100%; justify-content: flex-end; }
+    .upload-progress-cards { width: min(704px, calc(100vw - 150px)); }
+}

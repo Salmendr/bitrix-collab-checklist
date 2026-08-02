@@ -23,6 +23,11 @@ DEFAULT_FILE_DELETE_ALLOWED_USER_IDS = {
 # Новая рабочая логика ниже читает права из БД.
 FILE_DELETE_ALLOWED_USER_IDS = set(DEFAULT_FILE_DELETE_ALLOWED_USER_IDS)
 
+ARCHIVE_PERMANENT_DELETE_ADMIN_USER_IDS = {
+    "18",
+    "138",
+}
+
 
 def normalize_user_id(value) -> str:
     return str(value or "").strip()
@@ -257,3 +262,19 @@ def can_user_delete_files(user_id: str) -> bool:
 
 def can_user_access_checklists(user_id: str) -> bool:
     return normalize_user_id(user_id) in get_checklist_access_allowed_user_ids()
+
+
+def get_archive_permanent_delete_admin_user_ids() -> set[str]:
+    return set(
+        ARCHIVE_PERMANENT_DELETE_ADMIN_USER_IDS
+    )
+
+
+def can_user_permanently_delete_archive(
+    user_id: str,
+) -> bool:
+    return (
+        normalize_user_id(user_id)
+        in ARCHIVE_PERMANENT_DELETE_ADMIN_USER_IDS
+    )
+

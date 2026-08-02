@@ -44,9 +44,14 @@ MESSAGE_SECTION_LABELS = {
     "date": "Даты",
     "extraInfo": "Доп информация",
     "source": "Нормативы",
-    "name": "Пункты",
+    "name": "Переименованы пункты",
+    "order": "Изменён порядок пунктов",
     "document": "Документы",
-    "add-item": "Пункты",
+    "document-add": "Добавлены документы",
+    "document-remove": "Удалены документы",
+    "document-replacement": "Заменены версии файлов",
+    "archive-delete": "Удалены архивные версии",
+    "add-item": "Добавлены пункты",
 }
 
 
@@ -79,7 +84,12 @@ def split_changes(changes: list) -> dict:
         "extraInfo": [],
         "source": [],
         "name": [],
+        "order": [],
         "document": [],
+        "document-add": [],
+        "document-remove": [],
+        "document-replacement": [],
+        "archive-delete": [],
         "add-item": [],
     }
 
@@ -95,8 +105,20 @@ def split_changes(changes: list) -> dict:
             groups["source"].append(change)
         elif field == "name":
             groups["name"].append(change)
+        elif field == "order":
+            groups["order"].append(change)
         elif field == "document":
             groups["document"].append(change)
+        elif field == "document-add":
+            groups["document-add"].append(change)
+        elif field == "document-remove":
+            groups["document-remove"].append(change)
+        elif field == "document-replacement":
+            groups["document-replacement"].append(
+                change
+            )
+        elif field == "archive-delete":
+            groups["archive-delete"].append(change)
         elif field == "add-item":
             groups["add-item"].append(change)
 
@@ -188,8 +210,18 @@ def build_change_left_label(field: str, checklist_key: str) -> str:
         return "Нормативы"
     if field == "name":
         return "Пункт"
-    if field == "document":
+    if field == "order":
+        return "Положение"
+    if field in {
+        "document",
+        "document-add",
+        "document-remove",
+    }:
         return "Документ"
+    if field == "document-replacement":
+        return "Файл"
+    if field == "archive-delete":
+        return "Архив"
     if field == "add-item":
         return "Пункт"
     return field
@@ -206,8 +238,19 @@ def build_change_emoji(field: str, new_value: str, checklist_key: str) -> str:
         return "📚"
     if field == "name":
         return "✏️"
-    if field == "document":
+    if field == "order":
+        return "↕️"
+    if field in {
+        "document",
+        "document-add",
+        "document-replacement",
+    }:
         return "📎"
+    if field in {
+        "document-remove",
+        "archive-delete",
+    }:
+        return "🗑️"
     if field == "add-item":
         return "➕"
     return "✏️"
@@ -217,12 +260,115 @@ def should_show_empty_old_value(field: str) -> bool:
     return field in {"extraInfo", "source", "name"}
 
 
+def build_message_value_link(value: str, url: str) -> str:
+    label = clean_cell_value(value) or "—"
+    target_url = clean_cell_value(url)
+    parsed = urlparse(target_url)
+
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not parsed.netloc
+        or "]" in target_url
+    ):
+        return label
+
+    return f"[URL={target_url}]{label}[/URL]"
+
+
 def build_change_entry(change: dict, field: str, checklist_key: str) -> dict:
     item_name = clean_cell_value(change.get("itemName")) or "Без названия"
     old_value = normalize_message_value(field, change.get("oldValue"), checklist_key)
     new_value = normalize_message_value(field, change.get("newValue"), checklist_key) or "—"
     label = build_change_left_label(field, checklist_key)
     prefix = build_change_emoji(field, new_value, checklist_key)
+
+    if field == "document-replacement":
+        archive_version_number = 0
+
+        try:
+            archive_version_number = int(
+                change.get("archiveVersion") or 0
+            )
+        except (TypeError, ValueError):
+            archive_version_number = 0
+
+        archive_version_label = clean_cell_value(
+            change.get("archiveVersionLabel")
+        )
+
+        if (
+            not archive_version_label
+            and archive_version_number > 0
+        ):
+            archive_version_label = (
+                f"v{archive_version_number}"
+            )
+
+        left = (
+            f"{prefix}{item_name} / "
+            f"{old_value or 'Файл'} →"
+        )
+
+        right = build_message_value_link(
+            new_value,
+            change.get("newUrl") or "",
+        )
+
+        replacement_count = 0
+        try:
+            replacement_count = int(
+                change.get("replacementCount") or 0
+            )
+        except (TypeError, ValueError):
+            replacement_count = 0
+
+        if replacement_count > 1:
+            right += " (промежуточные версии сохранены в архиве)"
+        elif archive_version_label:
+            right += (
+                f" (старая версия — архив "
+                f"{archive_version_label})"
+            )
+        else:
+            right += " (старая версия в архиве)"
+
+        return {
+            "field": field,
+            "itemName": item_name,
+            "oldValue": old_value,
+            "newValue": new_value,
+            "leftText": left,
+            "rightText": right,
+        }
+
+    if field == "document-add":
+        left = f"{prefix}{item_name} / {label}: →"
+        right = build_message_value_link(
+            new_value,
+            change.get("newUrl") or "",
+        )
+        return {
+            "field": field,
+            "itemName": item_name,
+            "oldValue": old_value,
+            "newValue": new_value,
+            "leftText": left,
+            "rightText": right,
+        }
+
+    if field in {"document-remove", "archive-delete"}:
+        left = (
+            f"{prefix}{item_name} / {label}: "
+            f"{old_value or 'Файл'} →"
+        )
+        return {
+            "field": field,
+            "itemName": item_name,
+            "oldValue": old_value,
+            "newValue": new_value,
+            "leftText": left,
+            "rightText": new_value,
+        }
 
     if field == "add-item":
         left = f"{prefix}{item_name} / {label}: →"
@@ -287,9 +433,14 @@ def build_recent_changes_sections(changes: list, checklist_key: str) -> list[dic
     section_order = [
         "status",
         "date",
+        "document-replacement",
+        "document-add",
+        "document-remove",
+        "archive-delete",
         "document",
         "add-item",
         "name",
+        "order",
         "source",
         "extraInfo",
     ]

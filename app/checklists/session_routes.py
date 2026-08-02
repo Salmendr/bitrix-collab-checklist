@@ -24,6 +24,17 @@ from app.checklists.messages import (
     build_checklist_chat_message,
 )
 
+from app.checklists.edit_sessions import (
+    EditSessionConflictError,
+    EditSessionNotFoundError,
+    EditSessionPermissionError,
+)
+from app.checklists.session_finalization import (
+    SessionFinalizationInProgressError,
+    SessionFinalizationPayloadConflictError,
+    finalize_edit_session_payload,
+)
+
 
 router = APIRouter()
 
@@ -239,3 +250,65 @@ async def api_checklist_close_session(request: Request):
         "checklistKey": checklist_key,
         "result": result,
     })
+
+@router.post("/api/checklist/session/finalize")
+async def api_checklist_finalize_session(request: Request):
+    try:
+        payload = await request.json()
+    except Exception:
+        raw = await request.body()
+        try:
+            payload = json.loads(raw.decode("utf-8") or "{}")
+        except Exception:
+            payload = {}
+
+    try:
+        result = finalize_edit_session_payload(payload)
+        return JSONResponse(result)
+
+    except ValueError as exc:
+        write_debug_log("edit_session_finalize_invalid", {
+            "error": str(exc),
+            "payload": payload,
+        })
+        return JSONResponse(
+            {"ok": False, "error": str(exc)},
+            status_code=400,
+        )
+
+    except EditSessionNotFoundError as exc:
+        return JSONResponse(
+            {"ok": False, "error": str(exc)},
+            status_code=404,
+        )
+
+    except EditSessionPermissionError as exc:
+        return JSONResponse(
+            {"ok": False, "error": str(exc)},
+            status_code=403,
+        )
+
+    except (
+        EditSessionConflictError,
+        SessionFinalizationInProgressError,
+        SessionFinalizationPayloadConflictError,
+    ) as exc:
+        return JSONResponse(
+            {"ok": False, "error": str(exc)},
+            status_code=409,
+        )
+
+    except Exception as exc:
+        write_debug_log("edit_session_finalize_exception", {
+            "sessionId": payload.get("sessionId") or "",
+            "dialogId": payload.get("dialogId") or "",
+            "error": str(exc),
+        })
+        return JSONResponse(
+            {
+                "ok": False,
+                "error": str(exc),
+            },
+            status_code=500,
+        )
+
