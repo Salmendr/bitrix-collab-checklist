@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import threading
 import uuid
 from typing import Any
 
@@ -39,8 +40,18 @@ FINALIZATION_ACTIVE_STATUSES = frozenset({
     "preparing",
     "local_saved",
     "committing",
-    "delivering",
 })
+
+FINALIZATION_EXTRA_COLUMNS = {
+    "payload_json": "TEXT",
+    "delivery_status": "TEXT NOT NULL DEFAULT 'pending'",
+    "notification_status": "TEXT NOT NULL DEFAULT 'pending'",
+    "delivery_error": "TEXT",
+    "delivery_claimed_at": "TEXT",
+}
+
+_FINALIZATION_DELIVERY_GUARD = threading.Lock()
+_FINALIZATION_DELIVERY_RUNNING: set[str] = set()
 
 
 class SessionFinalizationError(RuntimeError):
@@ -92,6 +103,11 @@ def ensure_session_finalization_schema() -> None:
                 message_error TEXT,
                 message_result_json TEXT,
                 response_json TEXT,
+                payload_json TEXT,
+                delivery_status TEXT NOT NULL DEFAULT 'pending',
+                notification_status TEXT NOT NULL DEFAULT 'pending',
+                delivery_error TEXT,
+                delivery_claimed_at TEXT,
                 error TEXT,
                 started_at TEXT,
                 local_saved_at TEXT,
@@ -112,6 +128,44 @@ def ensure_session_finalization_schema() -> None:
                 idx_edit_session_finalizations_message
             ON edit_session_finalizations(message_status, updated_at)
         """)
+
+        columns = {
+            str(row["name"])
+            for row in conn.execute(
+                "PRAGMA table_info(edit_session_finalizations)"
+            ).fetchall()
+        }
+        for column_name, declaration in FINALIZATION_EXTRA_COLUMNS.items():
+            if column_name in columns:
+                continue
+            conn.execute(
+                "ALTER TABLE edit_session_finalizations "
+                f"ADD COLUMN {column_name} {declaration}"
+            )
+
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS
+                idx_edit_session_finalizations_delivery
+            ON edit_session_finalizations(delivery_status, updated_at)
+        """)
+
+        # Rows created before hotfix 8.15.1 have no durable payload for
+        # background delivery.  Mark them as historical instead of treating
+        # them as newly queued work; otherwise startup could resend old chat
+        # messages and tasks.
+        conn.execute("""
+            UPDATE edit_session_finalizations
+            SET delivery_status = 'legacy_completed',
+                notification_status = CASE
+                    WHEN COALESCE(notification_status, '') IN ('', 'pending')
+                    THEN 'legacy'
+                    ELSE notification_status
+                END,
+                updated_at = COALESCE(NULLIF(updated_at, ''), ?)
+            WHERE COALESCE(payload_json, '') = ''
+              AND status = 'completed'
+              AND delivery_status IN ('pending', 'queued')
+        """, (utc_now_iso(),))
         conn.commit()
     finally:
         conn.close()
@@ -207,6 +261,7 @@ def _reserve_finalization(
     dialog_id: str,
     user_id: str,
     payload_hash: str,
+    payload: dict,
 ) -> tuple[str, dict | None]:
     ensure_session_finalization_schema()
     attempt_id = uuid.uuid4().hex
@@ -251,12 +306,18 @@ def _reserve_finalization(
                 UPDATE edit_session_finalizations
                 SET status = 'preparing',
                     attempt_id = ?,
+                    payload_json = ?,
+                    delivery_status = 'pending',
+                    notification_status = 'pending',
+                    delivery_error = '',
+                    delivery_claimed_at = '',
                     error = '',
                     started_at = ?,
                     updated_at = ?
                 WHERE session_id = ?
             """, (
                 attempt_id,
+                _json_dumps(payload),
                 now,
                 now,
                 session_id,
@@ -276,6 +337,11 @@ def _reserve_finalization(
                     message_error,
                     message_result_json,
                     response_json,
+                    payload_json,
+                    delivery_status,
+                    notification_status,
+                    delivery_error,
+                    delivery_claimed_at,
                     error,
                     started_at,
                     local_saved_at,
@@ -288,7 +354,8 @@ def _reserve_finalization(
                 VALUES (
                     ?, ?, ?, ?,
                     'preparing', ?, 0,
-                    'pending', 0, '', '', '', '',
+                    'pending', 0, '', '', '',
+                    ?, 'pending', 'pending', '', '', '',
                     ?, '', '', '', '', ?, ?
                 )
             """, (
@@ -297,6 +364,7 @@ def _reserve_finalization(
                 user_id,
                 payload_hash,
                 attempt_id,
+                _json_dumps(payload),
                 now,
                 now,
                 now,
@@ -321,6 +389,10 @@ def _update_finalization(
     message_error: str | None = None,
     message_result: dict | None = None,
     response: dict | None = None,
+    delivery_status: str | None = None,
+    notification_status: str | None = None,
+    delivery_error: str | None = None,
+    delivery_claimed_at: str | None = None,
     error: str | None = None,
     timestamp_column: str | None = None,
 ) -> None:
@@ -359,6 +431,18 @@ def _update_finalization(
     if response is not None:
         assignments.append("response_json = ?")
         values.append(_json_dumps(response))
+    if delivery_status is not None:
+        assignments.append("delivery_status = ?")
+        values.append(delivery_status)
+    if notification_status is not None:
+        assignments.append("notification_status = ?")
+        values.append(notification_status)
+    if delivery_error is not None:
+        assignments.append("delivery_error = ?")
+        values.append(delivery_error)
+    if delivery_claimed_at is not None:
+        assignments.append("delivery_claimed_at = ?")
+        values.append(delivery_claimed_at)
     if error is not None:
         assignments.append("error = ?")
         values.append(error)
@@ -454,19 +538,8 @@ def _deliver_summary_once(
     if not visible_sessions:
         _update_finalization(
             session_id,
-            status="completed",
             message_status="skipped",
             message_error="",
-            response={
-                "ok": True,
-                "committed": True,
-                "sessionId": session_id,
-                "savedCount": len(sessions),
-                "messageOk": True,
-                "messageSkipped": True,
-                "messageStatus": "skipped",
-            },
-            timestamp_column="completed_at",
         )
         return {
             "messageOk": True,
@@ -484,7 +557,6 @@ def _deliver_summary_once(
 
     _update_finalization(
         session_id,
-        status="delivering",
         message_status="sending",
         message_attempts_delta=1,
         message_error="",
@@ -504,11 +576,9 @@ def _deliver_summary_once(
         error_text = str(exc)
         _update_finalization(
             session_id,
-            status="completed",
             message_status="failed",
             message_error=error_text,
             message_result={"exception": error_text},
-            timestamp_column="completed_at",
         )
         return {
             "messageOk": False,
@@ -526,11 +596,9 @@ def _deliver_summary_once(
         )
         _update_finalization(
             session_id,
-            status="completed",
             message_status="failed",
             message_error=error_text,
             message_result=result,
-            timestamp_column="completed_at",
         )
         return {
             "messageOk": False,
@@ -542,11 +610,9 @@ def _deliver_summary_once(
 
     _update_finalization(
         session_id,
-        status="completed",
         message_status="sent",
         message_error="",
         message_result=result if isinstance(result, dict) else {"result": result},
-        timestamp_column="completed_at",
     )
     return {
         "messageOk": True,
@@ -554,6 +620,291 @@ def _deliver_summary_once(
         "messageStatus": "sent",
         "messageError": "",
         "messageResult": result,
+    }
+
+
+def _claim_finalization_delivery(session_id: str) -> dict | None:
+    ensure_session_finalization_schema()
+    normalized_session_id = clean_cell_value(session_id)
+    if not normalized_session_id:
+        return None
+
+    now = utc_now_iso()
+    conn = get_conn()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute(
+            "SELECT * FROM edit_session_finalizations WHERE session_id = ?",
+            (normalized_session_id,),
+        ).fetchone()
+        if not row:
+            conn.commit()
+            return None
+
+        record = dict(row)
+        if clean_cell_value(record.get("delivery_status")) not in {
+            "pending",
+            "queued",
+        }:
+            conn.commit()
+            return None
+
+        cur = conn.execute(
+            """
+            UPDATE edit_session_finalizations
+            SET delivery_status = 'running',
+                delivery_claimed_at = ?,
+                delivery_started_at = ?,
+                updated_at = ?
+            WHERE session_id = ?
+              AND delivery_status IN ('pending', 'queued')
+            """,
+            (now, now, now, normalized_session_id),
+        )
+        if int(cur.rowcount or 0) != 1:
+            conn.commit()
+            return None
+
+        conn.commit()
+        record["delivery_status"] = "running"
+        record["delivery_claimed_at"] = now
+        return record
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def deliver_finalized_edit_session(session_id: str) -> dict:
+    claimed = _claim_finalization_delivery(session_id)
+    if not claimed:
+        return {
+            "ok": True,
+            "claimed": False,
+            "sessionId": clean_cell_value(session_id),
+        }
+
+    payload = _json_loads(claimed.get("payload_json") or "", {})
+    if not isinstance(payload, dict):
+        payload = {}
+
+    dialog_id = normalize_dialog_id(
+        payload.get("dialogId") or claimed.get("dialog_id")
+    )
+    editor = payload.get("editor") or {}
+
+    try:
+        fallback_sessions = _persist_finalization_sessions(
+            payload,
+            persist_data=False,
+        )
+        summary_sessions = build_session_summary_sessions(
+            session_id=clean_cell_value(session_id),
+            fallback_sessions=fallback_sessions,
+        )
+
+        try:
+            notification_delivery = (
+                deliver_committed_notification_drafts(
+                    clean_cell_value(session_id)
+                )
+            )
+        except Exception as notification_exc:
+            notification_delivery = {
+                "ok": False,
+                "status": "failed",
+                "sessionId": clean_cell_value(session_id),
+                "error": str(notification_exc),
+                "taskResults": [],
+                "chatResults": [],
+                "crmResults": [],
+            }
+
+        delivery = _deliver_summary_once(
+            session_id=clean_cell_value(session_id),
+            dialog_id=dialog_id,
+            sessions=summary_sessions,
+            editor=editor,
+        )
+
+        existing = _get_finalization_row(
+            clean_cell_value(session_id)
+        ) or {}
+        response = _json_loads(
+            existing.get("response_json") or "",
+            {},
+        )
+        response.update({
+            "notificationDelivery": notification_delivery,
+            **delivery,
+            "externalDeliveryQueued": False,
+            "externalDeliveryCompleted": True,
+        })
+
+        notification_status = clean_cell_value(
+            notification_delivery.get("status")
+        ) or ("completed" if notification_delivery.get("ok") else "failed")
+        error_parts = [
+            clean_cell_value(notification_delivery.get("error")),
+            clean_cell_value(delivery.get("messageError")),
+        ]
+        delivery_error = "; ".join(
+            part for part in error_parts if part
+        )
+
+        _update_finalization(
+            clean_cell_value(session_id),
+            status="completed",
+            delivery_status="completed",
+            notification_status=notification_status,
+            delivery_error=delivery_error,
+            response=response,
+            error="",
+            timestamp_column="completed_at",
+        )
+        write_debug_log("edit_session_external_delivery_completed", {
+            "sessionId": clean_cell_value(session_id),
+            "dialogId": dialog_id,
+            "messageStatus": delivery.get("messageStatus"),
+            "notificationDeliveryStatus": notification_status,
+            "error": delivery_error,
+        })
+        return {
+            "ok": True,
+            "claimed": True,
+            "sessionId": clean_cell_value(session_id),
+            "message": delivery,
+            "notificationDelivery": notification_delivery,
+        }
+    except Exception as exc:
+        _update_finalization(
+            clean_cell_value(session_id),
+            status="completed",
+            delivery_status="failed",
+            delivery_error=str(exc),
+            error="",
+        )
+        write_debug_log("edit_session_external_delivery_failed", {
+            "sessionId": clean_cell_value(session_id),
+            "dialogId": dialog_id,
+            "error": str(exc),
+        })
+        return {
+            "ok": False,
+            "claimed": True,
+            "sessionId": clean_cell_value(session_id),
+            "error": str(exc),
+        }
+
+
+def _delivery_thread_target(session_id: str) -> None:
+    try:
+        deliver_finalized_edit_session(session_id)
+    finally:
+        with _FINALIZATION_DELIVERY_GUARD:
+            _FINALIZATION_DELIVERY_RUNNING.discard(
+                clean_cell_value(session_id)
+            )
+
+
+def enqueue_finalization_delivery(
+    session_id: str,
+    *,
+    source: str = "session_finalize",
+) -> dict:
+    normalized_session_id = clean_cell_value(session_id)
+    if not normalized_session_id:
+        return {"ok": False, "queued": False, "error": "sessionId is required"}
+
+    with _FINALIZATION_DELIVERY_GUARD:
+        if normalized_session_id in _FINALIZATION_DELIVERY_RUNNING:
+            return {
+                "ok": True,
+                "queued": False,
+                "alreadyRunning": True,
+                "sessionId": normalized_session_id,
+            }
+        _FINALIZATION_DELIVERY_RUNNING.add(normalized_session_id)
+
+    # Give the HTTP response and Bitrix popup close flow a short head start.
+    # All inputs are already durable in SQLite, so the timer only affects when
+    # external network work begins, not whether it can be recovered.
+    thread = threading.Timer(
+        0.75,
+        _delivery_thread_target,
+        args=(normalized_session_id,),
+    )
+    thread.daemon = True
+    thread.name = f"session-finalization-{normalized_session_id[:8]}"
+    thread.start()
+    write_debug_log("edit_session_external_delivery_queued", {
+        "sessionId": normalized_session_id,
+        "source": source,
+    })
+    return {
+        "ok": True,
+        "queued": True,
+        "sessionId": normalized_session_id,
+    }
+
+
+def recover_pending_finalization_deliveries(
+    source: str = "startup",
+    limit: int = 200,
+) -> dict:
+    ensure_session_finalization_schema()
+    conn = get_conn()
+    try:
+        # A process restart leaves a claimed delivery in `running`.  Do not
+        # retry it automatically because an external request may have reached
+        # Bitrix before the process stopped.  Mark it failed/uncertain for
+        # diagnostics instead of silently creating a duplicate message.
+        now = utc_now_iso()
+        conn.execute("""
+            UPDATE edit_session_finalizations
+            SET delivery_status = 'failed',
+                delivery_error = CASE
+                    WHEN COALESCE(delivery_error, '') = ''
+                    THEN 'Приложение было перезапущено во время внешней доставки; результат требует проверки'
+                    ELSE delivery_error
+                END,
+                updated_at = ?
+            WHERE status = 'completed'
+              AND delivery_status = 'running'
+              AND COALESCE(payload_json, '') <> ''
+        """, (now,))
+        conn.commit()
+
+        rows = conn.execute(
+            """
+            SELECT session_id
+            FROM edit_session_finalizations
+            WHERE status = 'completed'
+              AND delivery_status IN ('pending', 'queued')
+              AND COALESCE(payload_json, '') <> ''
+            ORDER BY committed_at ASC, updated_at ASC
+            LIMIT ?
+            """,
+            (max(1, int(limit or 1)),),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    queued = 0
+    for row in rows:
+        result = enqueue_finalization_delivery(
+            row["session_id"],
+            source=source,
+        )
+        if result.get("queued"):
+            queued += 1
+
+    return {
+        "ok": True,
+        "source": source,
+        "found": len(rows),
+        "queued": queued,
     }
 
 
@@ -589,6 +940,7 @@ def finalize_edit_session_payload(payload: dict) -> dict:
         dialog_id=dialog_id,
         user_id=user_id,
         payload_hash=payload_hash,
+        payload=payload,
     )
     if reservation == "cached" and cached_row:
         return _cached_response(cached_row)
@@ -643,34 +995,10 @@ def finalize_edit_session_payload(payload: dict) -> dict:
             timestamp_column="committed_at",
         )
 
-        summary_sessions = build_session_summary_sessions(
-            session_id=session_id,
-            fallback_sessions=sessions,
-        )
-
-        try:
-            notification_delivery = (
-                deliver_committed_notification_drafts(session_id)
-            )
-        except Exception as notification_exc:
-            notification_delivery = {
-                "ok": False,
-                "status": "failed",
-                "sessionId": session_id,
-                "error": str(notification_exc),
-                "taskResults": [],
-                "chatResults": [],
-                "crmResults": [],
-            }
-
-        editor = payload.get("editor") or {}
-        delivery = _deliver_summary_once(
-            session_id=session_id,
-            dialog_id=dialog_id,
-            sessions=summary_sessions,
-            editor=editor,
-        )
-
+        # Local persistence, durable external jobs and lock release are already
+        # completed by commit_edit_session().  Do not keep the Bitrix popup open
+        # while Yandex/Bitrix network calls run.  Their input is stored in SQLite
+        # and processed by a background worker after this response is returned.
         response = {
             "ok": True,
             "committed": True,
@@ -679,35 +1007,56 @@ def finalize_edit_session_payload(payload: dict) -> dict:
             "savedCount": saved_count,
             "locksReleased": True,
             "externalJobsStarted": True,
-            "summaryChecklistCount": len(summary_sessions),
-            "summaryChangeCount": sum(
-                len(summary_session.get("changes") or [])
-                for summary_session in summary_sessions
-            ),
-            "notificationDelivery": notification_delivery,
-            **delivery,
+            "externalDeliveryQueued": True,
+            "externalDeliveryCompleted": False,
+            "summaryChecklistCount": 0,
+            "summaryChangeCount": 0,
+            "notificationDelivery": {
+                "ok": True,
+                "status": "queued",
+                "sessionId": session_id,
+            },
+            "messageOk": True,
+            "messageSkipped": False,
+            "messageStatus": "queued",
+            "messageError": "",
         }
         _update_finalization(
             session_id,
             status="completed",
+            saved_count=saved_count,
+            message_status="queued",
+            notification_status="queued",
+            delivery_status="queued",
+            delivery_error="",
             response=response,
             error="",
             timestamp_column="completed_at",
+        )
+
+        enqueue_result = enqueue_finalization_delivery(
+            session_id,
+            source="save_and_close",
+        )
+        response["externalDeliveryWorkerStarted"] = bool(
+            enqueue_result.get("queued")
+            or enqueue_result.get("alreadyRunning")
+        )
+        _update_finalization(
+            session_id,
+            response=response,
         )
 
         write_debug_log("edit_session_finalization_completed", {
             "sessionId": session_id,
             "dialogId": dialog_id,
             "savedCount": saved_count,
-            "summaryChecklistCount": len(summary_sessions),
-            "summaryChangeCount": sum(
-                len(summary_session.get("changes") or [])
-                for summary_session in summary_sessions
-            ),
-            "messageStatus": delivery.get("messageStatus"),
-            "notificationDeliveryStatus": (
-                notification_delivery.get("status")
-            ),
+            "locksReleased": True,
+            "messageStatus": "queued",
+            "notificationDeliveryStatus": "queued",
+            "externalDeliveryWorkerStarted": response[
+                "externalDeliveryWorkerStarted"
+            ],
         })
         return response
 

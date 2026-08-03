@@ -1,5 +1,5 @@
 {
-  "stage": "8.15",
+  "stage": "8.15.1-bitrix-hotfix",
   "hashMode": "actual-file-bytes",
   "modules": {
     "checklist-window-channel.js": {
@@ -43,8 +43,8 @@
       "bytes": 27142
     },
     "folder-replacement.js": {
-      "sha256": "0d9ece7bd18cd274e2b811f125927c421f061b5172930a1f7fdd27ae7911ed61",
-      "bytes": 19958
+      "sha256": "f268582ac9d4455855215d1bbed8f9b865717da3048b21f440bde02ab526c352",
+      "bytes": 18821
     },
     "folder-archive-ui.js": {
       "sha256": "d222b142237700fc9f230fc99d796d258c72b4261f929b2a9f906c68d96361ef",
@@ -92,7 +92,8 @@
     "Stage 8.11 loads the same external-contractor and CRM-company picker in item-folder windows.",
     "Stage 8.12 resolves the project object responsible user as curator for external recipients and retains manual fallback.",
     "Stage 8.14 displays the ten most recent assignments for each current file series in the item folder.",
-    "Stage 8.15 exposes the same manual retry-only-failed control in item-folder assignment history."
+    "Stage 8.15 exposes the same manual retry-only-failed control in item-folder assignment history.",
+    "Bitrix hotfix 8.15.1 keeps the folder notification bell visible but disabled and hides all non-error Yandex synchronization text."
   ],
-  "generatedAt": "2026-08-02T14:11:00+10:00"
+  "generatedAt": "2026-08-03T17:30:00+10:00"
 }

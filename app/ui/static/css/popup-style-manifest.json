@@ -1,5 +1,5 @@
 {
-  "version": "8.15",
+  "version": "8.15.1-bitrix-hotfix",
   "orderedFiles": [
     "popup.css",
     "uploads.css",
@@ -31,7 +31,7 @@
     "documents": ".doc-cell {",
     "checklistOverrides": ".add-item-row {"
   },
-  "assetVersion": "8.15",
+  "assetVersion": "8.15.1-bitrix-hotfix",
   "modules": {
     "popup.css": {
       "sha256": "6e8b8a6714fb2cf5357271a748c7676206ed924c7f8ee3090e66f143f69253f8",
@@ -83,6 +83,7 @@
     "Stage 8.11 adds the shared external-contractor and CRM-company search dropdown, local-save states and synchronization status hints.",
     "Stage 8.12 adds project curator status and manual fallback styles to the shared notification form.",
     "Stage 8.14 adds the shared popup and folder assignment-history disclosure and delivery-status cards.",
-    "Stage 8.15 adds retry-only-failed delivery controls and status feedback to assignment history cards."
+    "Stage 8.15 adds retry-only-failed delivery controls and status feedback to assignment history cards.",
+    "Bitrix hotfix 8.15.1 uses a new asset version for the production iframe regression fixes."
   ]
 }

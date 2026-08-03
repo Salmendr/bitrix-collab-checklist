@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import threading
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -534,6 +535,8 @@ def start_edit_session(
 
         existing = None
 
+        recovered_stale_session = False
+
         if normalized_client_session_id:
             existing = conn.execute("""
                 SELECT *
@@ -541,7 +544,7 @@ def start_edit_session(
                 WHERE dialog_id = ?
                   AND client_session_id = ?
                   AND COALESCE(user_id, '') = ?
-                  AND status = 'active'
+                  AND status IN ('active', 'error')
                 ORDER BY created_at DESC
                 LIMIT 1
             """, (
@@ -550,10 +553,56 @@ def start_edit_session(
                 normalized_user_id,
             )).fetchone()
 
+        # A Bitrix popup receives a new browser-window identifier after it is
+        # reopened.  If the previous session of the same employee failed or
+        # its heartbeat expired, resume that exact server session instead of
+        # creating a second session which would then block on its old lock.
+        # A live session with a fresh heartbeat is intentionally not resumed:
+        # a second simultaneous popup of the same employee remains read-only.
+        if not existing and normalized_user_id:
+            existing = conn.execute("""
+                SELECT s.*
+                FROM edit_sessions AS s
+                WHERE s.dialog_id = ?
+                  AND COALESCE(s.user_id, '') = ?
+                  AND (
+                      s.status = 'error'
+                      OR (
+                          s.status IN ('active', 'committing')
+                          AND COALESCE(s.expires_at, '') <> ''
+                          AND s.expires_at <= ?
+                      )
+                  )
+                ORDER BY
+                    CASE WHEN EXISTS (
+                        SELECT 1
+                        FROM edit_session_checklists AS c
+                        WHERE c.session_id = s.session_id
+                          AND c.status = 'locked'
+                          AND COALESCE(c.lock_id, '') <> ''
+                    ) THEN 0 ELSE 1 END,
+                    CASE
+                        WHEN s.status = 'error' THEN 0
+                        WHEN s.status = 'committing' THEN 1
+                        ELSE 2
+                    END,
+                    s.updated_at DESC,
+                    s.created_at DESC
+                LIMIT 1
+            """, (
+                normalized_dialog_id,
+                normalized_user_id,
+                now,
+            )).fetchone()
+            recovered_stale_session = bool(existing)
+
         if existing:
             conn.execute("""
                 UPDATE edit_sessions
                 SET user_name = ?,
+                    client_session_id = ?,
+                    status = 'active',
+                    close_reason = '',
                     heartbeat_at = ?,
                     expires_at = ?,
                     updated_at = ?,
@@ -561,6 +610,7 @@ def start_edit_session(
                 WHERE session_id = ?
             """, (
                 normalized_user_name,
+                normalized_client_session_id,
                 now,
                 expires_at,
                 now,
@@ -572,6 +622,7 @@ def start_edit_session(
             return {
                 "created": False,
                 "resumed": True,
+                "recovered": recovered_stale_session,
                 "session": get_edit_session(
                     existing["session_id"]
                 ),
@@ -799,6 +850,50 @@ def begin_edit_session_commit(
     return get_edit_session(record["session_id"]) or {}
 
 
+def _dispatch_committed_edit_session_jobs(
+    session_id: str,
+) -> None:
+    from app.checklists.edit_session_yandex import (
+        enqueue_committed_edit_session_yandex_jobs,
+    )
+    from app.checklists.edit_session_structure import (
+        enqueue_committed_edit_session_structure_jobs,
+    )
+
+    try:
+        enqueue_committed_edit_session_yandex_jobs(
+            session_id,
+            source="edit_session_commit_background",
+        )
+    except Exception:
+        # Jobs are already durable in SQLite. Startup recovery or a repeated
+        # commit will dispatch them again without losing local data.
+        pass
+
+    try:
+        enqueue_committed_edit_session_structure_jobs(
+            session_id,
+            source="edit_session_commit_background",
+        )
+    except Exception:
+        # Structural jobs are durable for the same reason.
+        pass
+
+
+def _schedule_committed_edit_session_jobs(
+    session_id: str,
+    delay_seconds: float = 0.75,
+) -> None:
+    timer = threading.Timer(
+        max(0.0, float(delay_seconds)),
+        _dispatch_committed_edit_session_jobs,
+        args=(clean_cell_value(session_id),),
+    )
+    timer.daemon = True
+    timer.name = f"edit-session-jobs-{clean_cell_value(session_id)[:8]}"
+    timer.start()
+
+
 def complete_edit_session_commit(
     session_id: str,
 ) -> dict:
@@ -831,12 +926,10 @@ def complete_edit_session_commit(
         purge_committed_session_files,
     )
     from app.checklists.edit_session_yandex import (
-        enqueue_committed_edit_session_yandex_jobs,
         ensure_edit_session_yandex_schema,
         prepare_edit_session_yandex_jobs_in_transaction,
     )
     from app.checklists.edit_session_structure import (
-        enqueue_committed_edit_session_structure_jobs,
         prepare_edit_session_structure_jobs_in_transaction,
     )
     from app.checklists.yandex_structure_jobs import (
@@ -932,25 +1025,12 @@ def complete_edit_session_commit(
         record["session_id"]
     )
 
-    try:
-        enqueue_committed_edit_session_yandex_jobs(
-            record["session_id"],
-            source="edit_session_commit",
-        )
-    except Exception:
-        # Jobs уже записаны в SQLite атомарно вместе с commit.
-        # Startup recovery повторно поставит queued jobs в очередь.
-        pass
-
-    try:
-        enqueue_committed_edit_session_structure_jobs(
-            record["session_id"],
-            source="edit_session_commit",
-        )
-    except Exception:
-        # Структурные jobs также записаны в SQLite вместе с commit.
-        # Startup recovery повторно поставит queued jobs в очередь.
-        pass
+    # The durable job rows were committed together with the session and locks
+    # are already released. Dispatch them with a short delay so Save and Close
+    # can return to Bitrix without waiting for or racing the external workers.
+    _schedule_committed_edit_session_jobs(
+        record["session_id"]
+    )
 
     return get_edit_session(record["session_id"]) or {}
 
@@ -969,21 +1049,44 @@ def commit_edit_session(
     )
 
     if record.get("status") == "committed":
-        try:
-            from app.checklists.edit_session_yandex import (
-                enqueue_committed_edit_session_yandex_jobs,
-            )
-            enqueue_committed_edit_session_yandex_jobs(
-                record.get("session_id") or session_id,
-                source="edit_session_commit_repeat",
-            )
-        except Exception:
-            pass
+        _schedule_committed_edit_session_jobs(
+            record.get("session_id") or session_id
+        )
         return record
 
-    return complete_edit_session_commit(
+    target_session_id = (
         record.get("session_id") or session_id
     )
+
+    try:
+        return complete_edit_session_commit(
+            target_session_id
+        )
+    except Exception as exc:
+        # A failed durable commit must remain retryable.  Leaving the session
+        # in `committing` creates a permanent same-user lock after the popup is
+        # reopened, because no lifecycle worker treats `committing` as expired.
+        # Return it to `error`; the same popup can retry immediately and a new
+        # Bitrix popup can recover the same server session after failure.
+        now = utc_now_iso()
+        conn = get_conn()
+        try:
+            conn.execute("""
+                UPDATE edit_sessions
+                SET status = 'error',
+                    error = ?,
+                    updated_at = ?
+                WHERE session_id = ?
+                  AND status = 'committing'
+            """, (
+                "edit session commit failed: " + str(exc),
+                now,
+                target_session_id,
+            ))
+            conn.commit()
+        finally:
+            conn.close()
+        raise
 
 
 def begin_edit_session_rollback(

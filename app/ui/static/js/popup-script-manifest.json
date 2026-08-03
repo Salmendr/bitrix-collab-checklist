@@ -1,6 +1,6 @@
 {
-  "stage": "8.15",
-  "generatedAt": "2026-08-02T14:11:00+10:00",
+  "stage": "8.15.1-bitrix-hotfix",
+  "generatedAt": "2026-08-03T17:30:00+10:00",
   "loadOrder": [
     "popup-bootstrap.js",
     "checklist-action-icons.js",
@@ -73,12 +73,12 @@
       "bytes": 6711
     },
     "popup-core.js": {
-      "sha256": "cc6d211615a564566d956fede695517d6e0ca4387586a4b39d682cfea76fc7c8",
-      "bytes": 104272
+      "sha256": "69adbece5c857934ee2d6b4e00afabd0a8e0eee758059f69c5da0563a0965494",
+      "bytes": 103464
     },
     "popup-document-list.js": {
-      "sha256": "bb91c63f4eab5c880e96430619c7548cd002c575d659423d88ee4a1e9c11054e",
-      "bytes": 14530
+      "sha256": "2f7f47b7c904c9320b3b58cfd67760662a9a76530206c4110b49c79ef7eb36f0",
+      "bytes": 13446
     },
     "document-assignment-history.js": {
       "sha256": "8ca593270b9e1e0170187046f5480c5fc8a7237c8dc62d1a89677e4f17d65e62",
@@ -105,8 +105,8 @@
       "bytes": 25202
     },
     "popup-session-enhancements.js": {
-      "sha256": "168deeb8b8f2ab51d6c541052475ad43232993475c77373985fa662f048ee63a",
-      "bytes": 43669
+      "sha256": "0766351fc301463f264770f554867bdc6ffe6885a65c1882e1b1c3a3eb2ab46d",
+      "bytes": 43811
     },
     "popup-edit-session.js": {
       "sha256": "1032d32752df4b3a59e40381bdf3c80303354dc4ee1337a3ef5dfb4d28810658",
@@ -125,8 +125,8 @@
       "bytes": 46917
     },
     "popup-notification-drafts.js": {
-      "sha256": "81e0a9ff5bb60699bb32cc6d5d02fa5dea18aca529fdd851bf45b5d142bdb973",
-      "bytes": 2417
+      "sha256": "90806658195dc18b0a2920ea2cdc69bf4de6df27f18d9761a181d029bf7cf088",
+      "bytes": 2436
     },
     "popup-item-ordering.js": {
       "sha256": "684448ea90d897dcd036d84035119efb15e42b1234a243f80af380e9805a7412",
@@ -257,7 +257,8 @@
     "New external contractors are stored locally with deterministic phone, email and title deduplication; CRM synchronization is deferred until a committed delivery flow invokes it.",
     "Stage 8.12 resolves the project object responsible user as curator for external recipients and retains manual fallback.",
     "Stage 8.14 displays the ten most recent document assignments by stable seriesId in popup document rows.",
-    "Stage 8.15 adds explicit manual retry controls for failed/blocked CRM, task and chat deliveries while preserving successful operations through existing idempotency keys."
+    "Stage 8.15 adds explicit manual retry controls for failed/blocked CRM, task and chat deliveries while preserving successful operations through existing idempotency keys.",
+    "Bitrix hotfix 8.15.1 resumes stale same-user sessions, makes Save and Close return after durable local commit, hides non-error Yandex status labels and temporarily disables notification bells."
   ],
   "hashMode": "actual-file-bytes",
   "lineEndingNote": "Hashes are calculated from bytes written to disk. This is stable for Windows CRLF and Unix LF.",
@@ -291,12 +292,12 @@
       "bytes": 6711
     },
     "popup-core.js": {
-      "sha256": "cc6d211615a564566d956fede695517d6e0ca4387586a4b39d682cfea76fc7c8",
-      "bytes": 104272
+      "sha256": "69adbece5c857934ee2d6b4e00afabd0a8e0eee758059f69c5da0563a0965494",
+      "bytes": 103464
     },
     "popup-document-list.js": {
-      "sha256": "6d1f3266368ba6cbe9ac0105f2779c747748e9413c45829b32a01505ea053ce1",
-      "bytes": 12779
+      "sha256": "2f7f47b7c904c9320b3b58cfd67760662a9a76530206c4110b49c79ef7eb36f0",
+      "bytes": 13446
     },
     "popup-document-actions.js": {
       "sha256": "370eabb81820fc10a483ce8a5ab65d3997d80a0ab01ac53f4df1020ae54fae1c",
@@ -319,8 +320,8 @@
       "bytes": 25202
     },
     "popup-session-enhancements.js": {
-      "sha256": "168deeb8b8f2ab51d6c541052475ad43232993475c77373985fa662f048ee63a",
-      "bytes": 43669
+      "sha256": "0766351fc301463f264770f554867bdc6ffe6885a65c1882e1b1c3a3eb2ab46d",
+      "bytes": 43811
     },
     "popup-edit-session.js": {
       "sha256": "1032d32752df4b3a59e40381bdf3c80303354dc4ee1337a3ef5dfb4d28810658",
@@ -335,8 +336,8 @@
       "bytes": 46917
     },
     "popup-notification-drafts.js": {
-      "sha256": "81e0a9ff5bb60699bb32cc6d5d02fa5dea18aca529fdd851bf45b5d142bdb973",
-      "bytes": 2417
+      "sha256": "90806658195dc18b0a2920ea2cdc69bf4de6df27f18d9761a181d029bf7cf088",
+      "bytes": 2436
     },
     "popup-item-ordering.js": {
       "sha256": "684448ea90d897dcd036d84035119efb15e42b1234a243f80af380e9805a7412",

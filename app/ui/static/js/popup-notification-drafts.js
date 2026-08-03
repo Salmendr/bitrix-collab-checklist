@@ -39,7 +39,7 @@
 
     global.document.addEventListener('click', function (event) {
         const button = event.target.closest('[data-role="notify-documents"]');
-        if (!button) return;
+        if (!button || button.disabled) return;
         event.preventDefault();
         event.stopPropagation();
         openForButton(button).catch(function (error) {

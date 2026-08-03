@@ -1640,26 +1640,6 @@ def _folder_mirror_status_presentation(
     ).lower()
 
     presentations = {
-        "queued": (
-            "Ожидает Яндекс",
-            "Файл ожидает синхронизации с Яндекс.Диском",
-            "queued",
-        ),
-        "running": (
-            "Загрузка на Яндекс",
-            "Файл загружается на Яндекс.Диск",
-            "running",
-        ),
-        "synced": (
-            "Синхронизирован",
-            "Файл синхронизирован с Яндекс.Диском",
-            "synced",
-        ),
-        "disabled": (
-            "",
-            "",
-            "disabled",
-        ),
         "error": (
             "Ошибка Яндекса",
             (
@@ -1667,11 +1647,6 @@ def _folder_mirror_status_presentation(
                 "Замена доступна после подтверждения"
             ),
             "error",
-        ),
-        "cancelled": (
-            "Синхронизация отменена",
-            "Задача синхронизации отменена",
-            "cancelled",
         ),
     }
 
@@ -2021,11 +1996,11 @@ def _build_folder_actions_html(
                 class="folder-action-button checklist-action-button checklist-action-button-bell"
                 type="button"
                 id="folderNotificationBtn"
-                data-role="notify-documents"
-                data-draft-count="0"
-                title="Создать или изменить черновик оповещения"
-                aria-label="Создать или изменить черновик оповещения"
-                {"" if documents else "disabled"}
+                data-role="notify-documents-disabled"
+                title="Оповещения временно недоступны"
+                aria-label="Оповещения временно недоступны"
+                aria-disabled="true"
+                disabled
             >
                 <span data-checklist-icon="bell"></span>
             </button>
@@ -2142,7 +2117,7 @@ def api_checklist_folder(
     ui_static_base_url = (
         f"{app_base_path}/ui-static"
     )
-    ui_asset_version = "8.15"
+    ui_asset_version = "8.15.1-bitrix-hotfix"
     popup_url = (
         f"{app_base_path}/popup"
         f"?dialogId={quote(dialog_id, safe='')}"

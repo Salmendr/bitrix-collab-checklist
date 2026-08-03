@@ -800,12 +800,10 @@ def resolve_custom_item_parent_yandex_path(
         group_id = 0
 
     specs = get_folder_specs_for_checklist(checklist_key)
+    group_relative_paths: list[str] = []
 
     for raw_spec in (specs or {}).values():
         spec = raw_spec or {}
-
-        if not spec.get("customItemsRoot"):
-            continue
 
         try:
             spec_group_id = int(spec.get("groupId") or 0)
@@ -818,11 +816,53 @@ def resolve_custom_item_parent_yandex_path(
         relative_path = (
             clean_cell_value(spec.get("relativePath"))
             or clean_cell_value(spec.get("folderName"))
-        )
+        ).strip("/")
 
-        if relative_path:
+        if not relative_path:
+            continue
+
+        # Groups with a dedicated custom-items root (BIM and adjacent tasks)
+        # use the full configured folder.  Ordinary groups derive their parent
+        # directory from the common leading segment of standard item paths.
+        if spec.get("customItemsRoot"):
             return normalize_yandex_disk_path(
-                f"{root_path.rstrip('/')}/{relative_path.strip('/')}"
+                f"{root_path.rstrip('/')}/{relative_path}"
+            )
+
+        group_relative_paths.append(relative_path)
+
+    if group_relative_paths:
+        split_paths = [
+            [part for part in path.split("/") if part]
+            for path in group_relative_paths
+        ]
+        common_parts: list[str] = []
+
+        for parts in zip(*split_paths):
+            if len(set(parts)) != 1:
+                break
+            common_parts.append(parts[0])
+
+        # Standard item paths include the item folder itself.  For custom
+        # items we need the group directory, therefore one common leading
+        # segment is sufficient for stages P/R (01_Общие данные,
+        # 02_Стадия П/Р, 03_Экспертиза ...).  If a deeper common directory
+        # exists, use it as well.
+        if common_parts:
+            relative_parent = "/".join(common_parts)
+            return normalize_yandex_disk_path(
+                f"{root_path.rstrip('/')}/{relative_parent}"
+            )
+
+        first_segments = {
+            parts[0]
+            for parts in split_paths
+            if parts
+        }
+        if len(first_segments) == 1:
+            relative_parent = next(iter(first_segments))
+            return normalize_yandex_disk_path(
+                f"{root_path.rstrip('/')}/{relative_parent}"
             )
 
     return root_path

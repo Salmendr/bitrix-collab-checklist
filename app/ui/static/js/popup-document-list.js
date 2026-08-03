@@ -10,34 +10,14 @@ function normalizeYandexFolderStatus(value) {
 
 function getYandexFolderStateText(status, action = '') {
     const normalizedAction = String(action || '').trim();
+    if (status !== 'error') return '';
     if (normalizedAction === 'move_item_folder') {
-        const moveLabels = {
-            queued: 'Папка Яндекс.Диска ожидает перемещения',
-            running: 'Папка Яндекс.Диска перемещается…',
-            ready: 'Папка Яндекс.Диска перемещена',
-            error: 'Ошибка перемещения папки — нажмите Яндекс для повтора',
-            disabled: ''
-        };
-        return moveLabels[status] || '';
+        return 'Ошибка перемещения папки — нажмите Яндекс для повтора';
     }
     if (normalizedAction === 'rename_item_folder') {
-        const renameLabels = {
-            queued: 'Папка Яндекс.Диска ожидает переименования',
-            running: 'Папка Яндекс.Диска переименовывается…',
-            ready: 'Папка Яндекс.Диска переименована',
-            error: 'Ошибка переименования папки — нажмите Яндекс для повтора',
-            disabled: ''
-        };
-        return renameLabels[status] || '';
+        return 'Ошибка переименования папки — нажмите Яндекс для повтора';
     }
-    const labels = {
-        queued: 'Папка Яндекс.Диска ожидает создания',
-        running: 'Папка Яндекс.Диска создаётся…',
-        ready: 'Папка Яндекс.Диска готова',
-        error: 'Ошибка синхронизации папки — нажмите Яндекс для повтора',
-        disabled: ''
-    };
-    return labels[status] || '';
+    return 'Ошибка синхронизации папки — нажмите Яндекс для повтора';
 }
 
 function assignmentHistoryPanelId(itemId, seriesId) {
@@ -109,7 +89,7 @@ function buildDocumentCell(item) {
         : yandexRetry
             ? 'Повторить создание папки на Яндекс.Диске'
             : yandexPending
-                ? getYandexFolderStateText(yandexFolderStatus, yandexStructureAction)
+                ? 'Операция с папкой Яндекс.Диска выполняется'
                 : yandexDisabled
                     ? 'Открыть папку пункта на Яндекс.Диске'
                     : 'Открыть папку пункта на Яндекс.Диске';
@@ -258,12 +238,12 @@ function buildDocumentCell(item) {
                     <button
                         class="doc-icon-btn checklist-action-button checklist-action-button-bell"
                         type="button"
-                        data-role="notify-documents"
+                        data-role="notify-documents-disabled"
                         data-item-id="${esc(itemId)}"
-                        data-draft-count="0"
-                        title="Создать или изменить черновик оповещения"
-                        aria-label="Создать или изменить черновик оповещения"
-                        ${editingAllowed ? '' : 'disabled'}
+                        title="Оповещения временно недоступны"
+                        aria-label="Оповещения временно недоступны"
+                        aria-disabled="true"
+                        disabled
                     >
                         ${iconSvg('bell')}
                     </button>

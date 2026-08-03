@@ -77,30 +77,6 @@
         const normalized = normalizeStatus(status);
         const error = String(errorText || '').trim();
 
-        if (normalized === 'queued') {
-            return {
-                text: 'Ожидает Яндекс',
-                className: 'queued',
-                title: 'Файл ожидает синхронизации с Яндекс.Диском'
-            };
-        }
-
-        if (normalized === 'running') {
-            return {
-                text: 'Загрузка на Яндекс',
-                className: 'running',
-                title: 'Файл загружается на Яндекс.Диск'
-            };
-        }
-
-        if (normalized === 'synced') {
-            return {
-                text: 'Синхронизирован',
-                className: 'synced',
-                title: 'Файл синхронизирован с Яндекс.Диском'
-            };
-        }
-
         if (normalized === 'error') {
             return {
                 text: 'Ошибка Яндекса',
@@ -112,19 +88,9 @@
             };
         }
 
-        if (normalized === 'cancelled') {
-            return {
-                text: 'Синхронизация отменена',
-                className: 'cancelled',
-                title: error || 'Задача синхронизации отменена'
-            };
-        }
-
         return {
             text: '',
-            className: normalized === 'disabled'
-                ? 'disabled'
-                : 'unknown',
+            className: normalized || 'unknown',
             title: ''
         };
     }
@@ -161,7 +127,7 @@
                     + 'сессии редактирования'
                 )
                 : blocked
-                    ? view.title
+                    ? 'Заменить файл'
                     : 'Заменить файл';
             button.setAttribute(
                 'aria-label',
@@ -171,7 +137,7 @@
                         + 'сессии редактирования'
                     )
                     : blocked
-                        ? view.title
+                        ? 'Заменить файл'
                         : 'Заменить файл'
             );
             button.classList.toggle(

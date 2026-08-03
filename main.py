@@ -49,6 +49,9 @@ from app.checklists.document_assignment_history_routes import (
 from app.checklists.notification_delivery import (
     ensure_notification_delivery_schema,
 )
+from app.checklists.session_finalization import (
+    recover_pending_finalization_deliveries,
+)
 from app.checklists.assignment_parts import (
     backfill_assignment_parts_from_drafts,
 )
@@ -164,6 +167,9 @@ def startup_event():
         source="startup"
     )
     start_edit_session_sweeper()
+    recover_pending_finalization_deliveries(
+        source="startup"
+    )
 
     start_yandex_warmup_workers()
     enqueue_all_saved_project_contexts(source="startup")

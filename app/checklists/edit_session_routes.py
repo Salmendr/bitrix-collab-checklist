@@ -140,6 +140,7 @@ async def api_checklist_edit_session_start(
             "ok": True,
             "created": bool(result.get("created")),
             "resumed": bool(result.get("resumed")),
+            "recovered": bool(result.get("recovered")),
             "session": public_edit_session_with_locks(
                 result.get("session")
             ),

@@ -1391,6 +1391,9 @@ async function finalizePopupSession(saveChanges) {
         popupFinalizationInProgress = false;
         popupFinalizeRequestInProgress = false;
         suppressAutoCloseSave = false;
+        closeSummarySent = false;
+        if (saveCloseBtn) saveCloseBtn.disabled = false;
+        if (cancelBtn) cancelBtn.disabled = false;
         updateLockNotice();
         return false;
     }

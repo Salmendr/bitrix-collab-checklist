@@ -2049,19 +2049,8 @@
                             ? 'Повторить переименование папки на Яндекс.Диске'
                             : 'Повторить создание папки на Яндекс.Диске';
                 }
-                if (status === 'queued') {
-                    return normalizedAction === 'move_item_folder'
-                        ? 'Папка Яндекс.Диска ожидает перемещения'
-                        : normalizedAction === 'rename_item_folder'
-                            ? 'Папка Яндекс.Диска ожидает переименования'
-                            : 'Папка Яндекс.Диска ожидает создания';
-                }
-                if (status === 'running') {
-                    return normalizedAction === 'move_item_folder'
-                        ? 'Папка Яндекс.Диска перемещается…'
-                        : normalizedAction === 'rename_item_folder'
-                            ? 'Папка Яндекс.Диска переименовывается…'
-                            : 'Папка Яндекс.Диска создаётся…';
+                if (status === 'queued' || status === 'running') {
+                    return 'Открыть папку пункта на Яндекс.Диске';
                 }
                 if (status === 'disabled') {
                     return 'Открыть папку пункта на Яндекс.Диске';
