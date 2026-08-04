@@ -23,6 +23,9 @@
                 return;
             }
 
+            if (typeof registerPopupCloseHandoff === 'function') {
+                registerPopupCloseHandoff({ source: 'popup_hidden' });
+            }
             sendCloseSummaryOnce('popup_hidden');
         });
 
@@ -34,6 +37,9 @@
                 return;
             }
 
+            if (typeof registerPopupCloseHandoff === 'function') {
+                registerPopupCloseHandoff({ source: 'popup_pagehide' });
+            }
             sendCloseSummaryOnce('popup_pagehide');
         });
 
@@ -47,6 +53,9 @@
                 return '';
             }
 
+            if (typeof registerPopupCloseHandoff === 'function') {
+                registerPopupCloseHandoff({ source: 'popup_beforeunload' });
+            }
             sendCloseSummaryOnce('popup_beforeunload');
             return undefined;
         });

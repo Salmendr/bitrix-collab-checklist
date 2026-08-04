@@ -45,6 +45,73 @@ let popupFinalizationInProgress = false;
 let popupUploadFinalizeWaitPromise = null;
 let popupFinalizeRequestInProgress = false;
 
+const POPUP_CLOSE_HANDOFF_PREFIX = 'checklist_popup_close_handoff_v1:';
+const popupCloseToken = String(
+    new URLSearchParams(window.location.search || '').get('closeToken') || ''
+).trim();
+
+function getPopupCloseHandoffKey() {
+    return popupCloseToken
+        ? POPUP_CLOSE_HANDOFF_PREFIX + popupCloseToken
+        : '';
+}
+
+function registerPopupCloseHandoff(extra = {}) {
+    const storageKey = getPopupCloseHandoffKey();
+    const sessionId = getActiveEditSessionId();
+
+    if (!storageKey || !sessionId) {
+        return false;
+    }
+
+    const identity = getCurrentEditorIdentity();
+    const handoff = {
+        version: 1,
+        closeToken: popupCloseToken,
+        sessionId,
+        dialogId: String(dialogId || '').trim(),
+        checklistKey: String(currentChecklistKey || 'id').trim() || 'id',
+        userId: String(identity.userId || '').trim(),
+        userName: String(identity.userName || '').trim(),
+        clientSessionId: String(clientSessionId || '').trim(),
+        updatedAt: Date.now(),
+        ...(
+            extra && typeof extra === 'object'
+                ? extra
+                : {}
+        )
+    };
+
+    try {
+        localStorage.setItem(storageKey, JSON.stringify(handoff));
+        return true;
+    } catch (error) {
+        debugLog('popup_close_handoff_write_failed', {
+            closeToken: popupCloseToken,
+            sessionId,
+            error: String(error && error.message || error || '')
+        });
+        return false;
+    }
+}
+
+function clearPopupCloseHandoff() {
+    const storageKey = getPopupCloseHandoffKey();
+    if (!storageKey) return;
+
+    try {
+        localStorage.removeItem(storageKey);
+    } catch (error) {
+        // The server finalization remains authoritative even if storage cleanup fails.
+    }
+}
+
+window.ChecklistPopupCloseHandoff = Object.freeze({
+    token: popupCloseToken,
+    register: registerPopupCloseHandoff,
+    clear: clearPopupCloseHandoff
+});
+
 const headerRightEl = document.querySelector('.header-right');
 if (headerRightEl && !document.getElementById('lockNotice')) {
     const lockNode = document.createElement('div');
@@ -559,8 +626,18 @@ function updateLockNotice() {
 
 window.addEventListener(
     'checklist-edit-session-state',
-    function () {
+    function (event) {
         updateLockNotice();
+
+        const detail = event && event.detail || {};
+        if (
+            String(detail.status || '').trim() === 'active'
+            && String(detail.sessionId || '').trim()
+        ) {
+            registerPopupCloseHandoff({
+                source: 'edit_session_state'
+            });
+        }
     }
 );
 
@@ -644,7 +721,26 @@ function buildSessionFinalizePayload(closeEvent) {
         ...buildCloseBatchPayload(closeEvent),
         sessionId: getActiveEditSessionId(),
         userId: identity.userId,
+        clientSessionId: String(clientSessionId || '').trim(),
         reason: String(closeEvent || 'save_and_close')
+    };
+}
+
+function buildCompactSessionFinalizePayload(closeEvent) {
+    const identity = getCurrentEditorIdentity();
+    return {
+        sessionId: getActiveEditSessionId(),
+        dialogId,
+        userId: identity.userId,
+        userName: identity.userName,
+        clientSessionId: String(clientSessionId || '').trim(),
+        editor: {
+            id: identity.userId,
+            name: identity.userName
+        },
+        sessions: [],
+        closeEvent: String(closeEvent || 'popup_unload_autosave'),
+        reason: String(closeEvent || 'popup_unload_autosave')
     };
 }
 
@@ -658,7 +754,9 @@ async function finalizeDirtyChecklists(
     }
 
     const dirtyKeys = getDirtyChecklistKeys();
-    const payload = buildSessionFinalizePayload(closeEvent);
+    const payload = useBeacon
+        ? buildCompactSessionFinalizePayload(closeEvent)
+        : buildSessionFinalizePayload(closeEvent);
 
     if (useBeacon) {
         const queued = !!(
@@ -1427,6 +1525,10 @@ async function finalizePopupSession(saveChanges) {
     };
     updateLockNotice();
 
+    // The launcher callback is reserved for the Bitrix host cross. A close
+    // initiated after a successful Save/Cancel must not finalize a second time.
+    clearPopupCloseHandoff();
+
     // Stage 7.1.1.1: both successful save and rollback use the safe local
     // fallback. Bitrix closes through BX24.closeApplication(); a direct local
     // tab reloads instead of being redirected to a blank page.
@@ -1435,11 +1537,16 @@ async function finalizePopupSession(saveChanges) {
 }
 
 function sendCloseSummaryOnce(eventName) {
+    registerPopupCloseHandoff({
+        source: String(eventName || 'popup_lifecycle')
+    });
+
+    // A tab/iframe can become hidden without being closed. The reliable Bitrix
+    // host-cross signal is handled by the launcher close callback; pagehide and
+    // beforeunload stay as compact-beacon fallbacks.
     if (eventName === 'popup_hidden' || suppressAutoCloseSave || closeSummarySent) {
         return;
     }
-
-    closeSummarySent = true;
 
     if (getActiveEditSessionId()) {
         const finalizeResult = finalizeDirtyChecklists(
@@ -1448,14 +1555,19 @@ function sendCloseSummaryOnce(eventName) {
         );
 
         Promise.resolve(finalizeResult).then(function (result) {
+            const queued = !!(result && result.queued);
+            if (queued) {
+                closeSummarySent = true;
+            }
             debugLog('popup_unload_finalize_requested', {
                 eventName,
                 sessionId: getActiveEditSessionId(),
                 dialogId,
                 checklistKey: currentChecklistKey,
-                beaconQueued: !!(result && result.queued)
+                beaconQueued: queued
             });
         }).catch(function (error) {
+            closeSummarySent = false;
             debugLog('popup_unload_finalize_failed', {
                 eventName,
                 sessionId: getActiveEditSessionId(),
@@ -1465,6 +1577,7 @@ function sendCloseSummaryOnce(eventName) {
         return;
     }
 
+    closeSummarySent = true;
     persistDirtyChecklists(eventName, true);
     releaseChecklistLock(currentChecklistKey, true);
 }

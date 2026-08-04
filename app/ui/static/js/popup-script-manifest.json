@@ -1,6 +1,6 @@
 {
-  "stage": "8.15.1-bitrix-hotfix",
-  "generatedAt": "2026-08-03T17:30:00+10:00",
+  "stage": "8.15.3-popup-cross-finalize",
+  "generatedAt": "2026-08-04T12:50:00+10:00",
   "loadOrder": [
     "popup-bootstrap.js",
     "checklist-action-icons.js",
@@ -105,12 +105,12 @@
       "bytes": 25202
     },
     "popup-session-enhancements.js": {
-      "sha256": "0766351fc301463f264770f554867bdc6ffe6885a65c1882e1b1c3a3eb2ab46d",
-      "bytes": 43811
+      "sha256": "264b067064bec1522fce486aa17074313ce0d3337fff8f5e7cbbcd563c21c558",
+      "bytes": 47424
     },
     "popup-edit-session.js": {
-      "sha256": "1032d32752df4b3a59e40381bdf3c80303354dc4ee1337a3ef5dfb4d28810658",
-      "bytes": 12527
+      "sha256": "c8849b75c5df5ee98191076a6b308f988a944259766d8c822098464bcd996fd7",
+      "bytes": 13091
     },
     "bitrix-user-picker.js": {
       "sha256": "e69ee7af0913383cda4f02ba83279c64fe4650715532eee91176c47cfe57b1c9",
@@ -137,8 +137,8 @@
       "bytes": 9410
     },
     "popup-event-shell.js": {
-      "sha256": "6e93afd223103270c887b07e41d7c53a1abdc7140e35981b78c59ccd6820499a",
-      "bytes": 1631
+      "sha256": "b5f080eb74e23ee94208158dd9c984774da45beb9ff79398e55634d640225008",
+      "bytes": 2095
     },
     "popup-event-window-sync.js": {
       "sha256": "4d3f9c3de4aeb4e92ef532f0912d1edbba29958bb5bf3739bee6d047bc5333a7",
@@ -258,7 +258,8 @@
     "Stage 8.12 resolves the project object responsible user as curator for external recipients and retains manual fallback.",
     "Stage 8.14 displays the ten most recent document assignments by stable seriesId in popup document rows.",
     "Stage 8.15 adds explicit manual retry controls for failed/blocked CRM, task and chat deliveries while preserving successful operations through existing idempotency keys.",
-    "Bitrix hotfix 8.15.1 resumes stale same-user sessions, makes Save and Close return after durable local commit, hides non-error Yandex status labels and temporarily disables notification bells."
+    "Bitrix hotfix 8.15.1 resumes stale same-user sessions, makes Save and Close return after durable local commit, hides non-error Yandex status labels and temporarily disables notification bells.",
+    "8.15.3: Bitrix host-cross close callback and compact idempotent unload finalization."
   ],
   "hashMode": "actual-file-bytes",
   "lineEndingNote": "Hashes are calculated from bytes written to disk. This is stable for Windows CRLF and Unix LF.",

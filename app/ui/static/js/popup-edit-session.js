@@ -29,6 +29,16 @@
         activeSessionStatus = String(status || '').trim() || 'idle';
         lastSessionError = String(errorText || '').trim();
         emitSessionState();
+
+        const handoff = global.ChecklistPopupCloseHandoff;
+        if (
+            activeSessionStatus === 'active'
+            && activeSessionId
+            && handoff
+            && typeof handoff.register === 'function'
+        ) {
+            handoff.register({ source: 'popup_edit_session' });
+        }
     }
 
     function actor() {
@@ -258,6 +268,9 @@
             }
 
             setSessionStatus('committed');
+            if (global.ChecklistPopupCloseHandoff) {
+                global.ChecklistPopupCloseHandoff.clear();
+            }
             debugLog('popup_edit_session_finalized', {
                 sessionId: activeSessionId,
                 reason: requestPayload.reason,
@@ -347,6 +360,9 @@
                 ).trim()
             );
 
+            if (global.ChecklistPopupCloseHandoff) {
+                global.ChecklistPopupCloseHandoff.clear();
+            }
             debugLog('popup_edit_session_rolled_back', {
                 sessionId: activeSessionId,
                 status: activeSessionStatus,

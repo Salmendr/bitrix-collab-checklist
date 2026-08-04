@@ -278,29 +278,31 @@ def _reserve_finalization(
 
         if row:
             record = dict(row)
+            status = clean_cell_value(record.get("status"))
+
+            # Once the local durable commit has reached a terminal state, any
+            # repeated close signal is an idempotent replay. This includes a
+            # compact Bitrix host-cross payload arriving after the full Save
+            # payload; payload-shape differences must not produce a false 409.
+            if status == "completed":
+                conn.commit()
+                return "cached", record
+
+            if status == "failed" and record.get("committed_at"):
+                conn.commit()
+                return "cached", record
+
             existing_hash = clean_cell_value(record.get("payload_hash"))
             if existing_hash != payload_hash:
                 raise SessionFinalizationPayloadConflictError(
                     "finalization payload differs from the already reserved payload"
                 )
 
-            status = clean_cell_value(record.get("status"))
-            if status == "completed":
-                conn.commit()
-                return "cached", record
-
             if status in FINALIZATION_ACTIVE_STATUSES:
                 conn.commit()
                 raise SessionFinalizationInProgressError(
                     "edit session finalization is already in progress"
                 )
-
-            # A local commit failure may be retried with exactly the same payload.
-            # A completed local commit with a failed/uncertain delivery is not
-            # automatically retried, because that could duplicate a Bitrix message.
-            if status == "failed" and record.get("committed_at"):
-                conn.commit()
-                return "cached", record
 
             conn.execute("""
                 UPDATE edit_session_finalizations
@@ -928,6 +930,22 @@ def finalize_edit_session_payload(payload: dict) -> dict:
         dialog_id=dialog_id,
         user_id=user_id,
     )
+    requested_client_session_id = clean_cell_value(
+        payload.get("clientSessionId")
+    )
+    current_client_session_id = clean_cell_value(
+        session.get("clientSessionId")
+        or session.get("client_session_id")
+    )
+    if (
+        requested_client_session_id
+        and current_client_session_id
+        and requested_client_session_id != current_client_session_id
+    ):
+        raise EditSessionConflictError(
+            "edit session ownership moved to another popup window"
+        )
+
     session_status = clean_cell_value(session.get("status"))
     if session_status == "rolled_back":
         raise EditSessionConflictError(

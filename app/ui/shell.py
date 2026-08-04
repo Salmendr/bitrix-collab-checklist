@@ -131,10 +131,11 @@ def app_home_html(
                 function extractFromBx24() {{
                     let dialogId = '';
                     let checklistKey = '';
+                    let closeToken = '';
 
                     try {{
                         if (!(window.BX24 && typeof window.BX24.placement === 'object' && typeof window.BX24.placement.info === 'function')) {{
-                            return {{ dialogId: '', checklistKey: '' }};
+                            return {{ dialogId: '', checklistKey: '', closeToken: '' }};
                         }}
 
                         const info = window.BX24.placement.info() || {{}};
@@ -180,6 +181,23 @@ def app_home_html(
                             }}
                         }}
 
+                        const closeTokenCandidates = [
+                            options.closeToken,
+                            options.CLOSE_TOKEN,
+                            options.close_token,
+                            info.closeToken,
+                            info.CLOSE_TOKEN,
+                            info.close_token
+                        ];
+
+                        for (let i = 0; i < closeTokenCandidates.length; i++) {{
+                            const candidate = String(closeTokenCandidates[i] || '').trim();
+                            if (candidate) {{
+                                closeToken = candidate;
+                                break;
+                            }}
+                        }}
+
                         try {{
                             console.log('app_home placement.info =', info);
                         }} catch (e) {{}}
@@ -189,7 +207,8 @@ def app_home_html(
 
                     return {{
                         dialogId: dialogId,
-                        checklistKey: checklistKey || 'id'
+                        checklistKey: checklistKey || 'id',
+                        closeToken: closeToken
                     }};
                 }}
 
@@ -206,13 +225,16 @@ def app_home_html(
                     }}
                 }}
 
-                function rememberAndRedirect(dialogId, checklistKey) {{
+                function rememberAndRedirect(dialogId, checklistKey, closeToken) {{
                     if (!dialogId) return;
+
+                    const normalizedCloseToken = String(closeToken || '').trim();
 
                     try {{
                         localStorage.setItem('checklist_pending_dialog', JSON.stringify({{
                             dialogId: dialogId,
                             checklistKey: checklistKey || 'id',
+                            closeToken: normalizedCloseToken,
                             ts: Date.now()
                         }}));
                     }} catch (e) {{
@@ -222,7 +244,10 @@ def app_home_html(
                     const popupUrl =
                         appPath('popup') +
                         '?dialogId=' + encodeURIComponent(dialogId) +
-                        '&checklistKey=' + encodeURIComponent(checklistKey || 'id');
+                        '&checklistKey=' + encodeURIComponent(checklistKey || 'id') +
+                        (normalizedCloseToken
+                            ? '&closeToken=' + encodeURIComponent(normalizedCloseToken)
+                            : '');
 
                     resizeCurrentPopupFrame();
                     setTimeout(resizeCurrentPopupFrame, 80);
@@ -268,11 +293,18 @@ def app_home_html(
                         ) || 'id'
                     );
 
+                    const closeToken = pickValue(
+                        searchParams,
+                        hashParams,
+                        'closeToken',
+                        localPayload && localPayload.closeToken
+                    );
+
                     const ts = Number((localPayload && localPayload.ts) || 0);
                     const age = ts ? (Date.now() - ts) : 0;
 
                     if (dialogId) {{
-                        rememberAndRedirect(dialogId, checklistKey);
+                        rememberAndRedirect(dialogId, checklistKey, closeToken);
                         return;
                     }}
 
@@ -280,14 +312,19 @@ def app_home_html(
                         window.BX24.init(function () {{
                             const bxData = extractFromBx24();
                             if (bxData.dialogId) {{
-                                rememberAndRedirect(bxData.dialogId, bxData.checklistKey || checklistKey || 'id');
+                                rememberAndRedirect(
+                                    bxData.dialogId,
+                                    bxData.checklistKey || checklistKey || 'id',
+                                    bxData.closeToken || closeToken
+                                );
                                 return;
                             }}
 
                             if (localPayload && localPayload.dialogId && age < 60000) {{
                                 rememberAndRedirect(
                                     localPayload.dialogId,
-                                    normalizeChecklistKey(localPayload.checklistKey || 'id')
+                                    normalizeChecklistKey(localPayload.checklistKey || 'id'),
+                                    localPayload.closeToken || closeToken
                                 );
                             }}
                         }});
@@ -297,7 +334,8 @@ def app_home_html(
                     if (localPayload && localPayload.dialogId && age < 60000) {{
                         rememberAndRedirect(
                             localPayload.dialogId,
-                            normalizeChecklistKey(localPayload.checklistKey || 'id')
+                            normalizeChecklistKey(localPayload.checklistKey || 'id'),
+                            localPayload.closeToken || closeToken
                         );
                         return;
                     }}
@@ -429,16 +467,164 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
                 document.getElementById('error').textContent = text || '';
             }}
 
+            const POPUP_CLOSE_HANDOFF_PREFIX = 'checklist_popup_close_handoff_v1:';
+
+            function createPopupCloseToken() {{
+                try {{
+                    if (window.crypto && typeof window.crypto.randomUUID === 'function') {{
+                        return window.crypto.randomUUID().replace(/[^a-zA-Z0-9_-]+/g, '');
+                    }}
+                }} catch (e) {{}}
+
+                return 'close_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 12);
+            }}
+
+            function getPopupCloseHandoff(closeToken) {{
+                const token = String(closeToken || '').trim();
+                if (!token) return null;
+
+                try {{
+                    const raw = localStorage.getItem(POPUP_CLOSE_HANDOFF_PREFIX + token);
+                    if (!raw) return null;
+                    const payload = JSON.parse(raw);
+                    return payload && typeof payload === 'object' ? payload : null;
+                }} catch (e) {{
+                    console.log('popup close handoff read skipped:', e);
+                    return null;
+                }}
+            }}
+
+            function clearPopupCloseHandoff(closeToken) {{
+                const token = String(closeToken || '').trim();
+                if (!token) return;
+                try {{
+                    localStorage.removeItem(POPUP_CLOSE_HANDOFF_PREFIX + token);
+                }} catch (e) {{}}
+            }}
+
+            function sleep(ms) {{
+                return new Promise(function (resolve) {{
+                    setTimeout(resolve, Math.max(0, Number(ms || 0)));
+                }});
+            }}
+
+            async function finalizeClosedChecklist(closeToken, dialogId, checklistKey) {{
+                const handoff = getPopupCloseHandoff(closeToken);
+                if (!handoff) {{
+                    return;
+                }}
+
+                const handoffDialogId = String(handoff.dialogId || '').trim();
+                const expectedDialogId = String(dialogId || '').trim();
+                const sessionId = String(handoff.sessionId || '').trim();
+                const userId = String(handoff.userId || '').trim();
+                const clientSessionId = String(handoff.clientSessionId || '').trim();
+                const updatedAt = Number(handoff.updatedAt || 0);
+
+                if (
+                    !sessionId
+                    || !handoffDialogId
+                    || (expectedDialogId && handoffDialogId !== expectedDialogId)
+                    || (updatedAt && Date.now() - updatedAt > 60 * 60 * 1000)
+                ) {{
+                    clearPopupCloseHandoff(closeToken);
+                    return;
+                }}
+
+                const payload = {{
+                    sessionId: sessionId,
+                    dialogId: handoffDialogId,
+                    userId: userId,
+                    userName: String(handoff.userName || '').trim(),
+                    clientSessionId: clientSessionId,
+                    editor: {{
+                        id: userId,
+                        name: String(handoff.userName || '').trim()
+                    }},
+                    sessions: [],
+                    reason: 'bitrix_popup_cross',
+                    closeEvent: 'bitrix_popup_cross',
+                    checklistKey: String(checklistKey || handoff.checklistKey || 'id').trim() || 'id'
+                }};
+
+                // The popup is already hidden by Bitrix. A short grace period lets
+                // in-flight mutations that reached FastAPI finish before commit.
+                await sleep(450);
+
+                const delays = [0, 500, 1400];
+                let lastError = null;
+
+                for (let index = 0; index < delays.length; index++) {{
+                    if (delays[index]) await sleep(delays[index]);
+
+                    try {{
+                        const response = await fetch(
+                            appPath('api/checklist/session/finalize'),
+                            {{
+                                method: 'POST',
+                                headers: {{ 'Content-Type': 'application/json' }},
+                                body: JSON.stringify(payload)
+                            }}
+                        );
+                        const result = await response.json().catch(function () {{ return {{}}; }});
+
+                        if (response.ok && result && result.ok && result.committed === true) {{
+                            clearPopupCloseHandoff(closeToken);
+                            return;
+                        }}
+
+                        if (response.status === 409 && result && result.error) {{
+                            const conflictText = String(result.error || '');
+                            if (
+                                conflictText.includes('rolled back')
+                                || conflictText.includes('ownership moved')
+                                || conflictText.includes('не найдена')
+                            ) {{
+                                clearPopupCloseHandoff(closeToken);
+                                return;
+                            }}
+                            lastError = new Error(conflictText);
+                            continue;
+                        }}
+
+                        throw new Error(
+                            String(result && result.error || ('HTTP ' + response.status))
+                        );
+                    }} catch (error) {{
+                        lastError = error;
+                    }}
+                }}
+
+                try {{
+                    if (navigator.sendBeacon) {{
+                        navigator.sendBeacon(
+                            appPath('api/checklist/session/finalize'),
+                            new Blob(
+                                [JSON.stringify(payload)],
+                                {{ type: 'application/json' }}
+                            )
+                        );
+                    }}
+                }} catch (e) {{}}
+
+                if (lastError) {{
+                    console.log('Bitrix popup close finalization deferred:', lastError);
+                }}
+            }}
+
             function openChecklist(dialogId, checklistKey = 'id') {{
                 if (!dialogId) {{
                     setError('dialogId не найден');
                     return;
                 }}
 
+                const closeToken = createPopupCloseToken();
+
                 try {{
                     localStorage.setItem('checklist_pending_dialog', JSON.stringify({{
                         dialogId: dialogId,
                         checklistKey: checklistKey,
+                        closeToken: closeToken,
                         ts: Date.now()
                     }}));
                 }} catch (e) {{
@@ -447,11 +633,23 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
 
                 try {{
                     if (window.BX24 && typeof window.BX24.openApplication === 'function') {{
-                        BX24.openApplication({{
-                            dialogId: dialogId,
-                            checklistKey: checklistKey,
-                            source: 'textarea'
-                        }});
+                        BX24.openApplication(
+                            {{
+                                dialogId: dialogId,
+                                checklistKey: checklistKey,
+                                source: 'textarea',
+                                closeToken: closeToken
+                            }},
+                            function () {{
+                                finalizeClosedChecklist(
+                                    closeToken,
+                                    dialogId,
+                                    checklistKey
+                                ).catch(function (error) {{
+                                    console.log('popup close callback error:', error);
+                                }});
+                            }}
+                        );
                         autoOpened = true;
                         setMeta('Открываем popup для ' + dialogId);
                         return;
@@ -463,7 +661,8 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
                 window.open(
                     appPath('popup') +
                     '?dialogId=' + encodeURIComponent(dialogId) +
-                    '&checklistKey=' + encodeURIComponent(checklistKey),
+                    '&checklistKey=' + encodeURIComponent(checklistKey) +
+                    '&closeToken=' + encodeURIComponent(closeToken),
                     '_blank'
                 );
             }}
