@@ -201,6 +201,172 @@ async function loadChecklistByKey(checklistKey) {
     }
 }
 
+function findRenderedChecklistItem(itemId) {
+    const targetItemId = String(itemId || '').trim();
+    if (!targetItemId) return null;
+
+    const candidates = document.querySelectorAll('[data-item-id]');
+    for (let index = 0; index < candidates.length; index += 1) {
+        const candidate = candidates[index];
+        if (
+            String(candidate && candidate.dataset && candidate.dataset.itemId || '')
+                .trim()
+            === targetItemId
+        ) {
+            return candidate;
+        }
+    }
+
+    return null;
+}
+
+function waitForChecklistRender() {
+    return new Promise(function (resolve) {
+        window.requestAnimationFrame(function () {
+            window.requestAnimationFrame(resolve);
+        });
+    });
+}
+
+function focusPopupHostWindow() {
+    try {
+        window.focus();
+    } catch (error) {
+        console.log('popup return focus skipped:', error);
+    }
+
+    try {
+        if (
+            window.top
+            && typeof window.top.focus === 'function'
+        ) {
+            window.top.focus();
+        }
+    } catch (error) {
+        console.log('popup host focus skipped:', error);
+    }
+}
+
+async function returnToChecklistItem(options) {
+    const payload = (
+        options
+        && typeof options === 'object'
+            ? options
+            : {}
+    );
+    const targetDialogId = String(payload.dialogId || '').trim();
+    const targetChecklistKey = String(
+        payload.checklistKey || currentChecklistKey || 'id'
+    ).trim() || 'id';
+    const targetItemId = String(payload.itemId || '').trim();
+
+    if (
+        targetDialogId
+        && String(dialogId || '').trim()
+        && targetDialogId !== String(dialogId || '').trim()
+    ) {
+        return {
+            ok: false,
+            reason: 'dialog_mismatch',
+            checklistKey: targetChecklistKey,
+            itemId: targetItemId
+        };
+    }
+
+    await loadChecklistByKey(targetChecklistKey);
+    await waitForChecklistRender();
+
+    const itemElement = findRenderedChecklistItem(targetItemId);
+    if (itemElement) {
+        try {
+            itemElement.scrollIntoView({
+                behavior: 'smooth',
+                block: 'center',
+                inline: 'nearest'
+            });
+        } catch (error) {
+            itemElement.scrollIntoView();
+        }
+
+        itemElement.classList.add('checklist-return-target');
+        window.setTimeout(function () {
+            itemElement.classList.remove('checklist-return-target');
+        }, 2400);
+
+        const focusTarget = itemElement.querySelector(
+            'button, a, input, select, textarea, [tabindex]'
+        );
+        if (focusTarget && typeof focusTarget.focus === 'function') {
+            try {
+                focusTarget.focus({ preventScroll: true });
+            } catch (error) {
+                focusTarget.focus();
+            }
+        }
+    }
+
+    focusPopupHostWindow();
+
+    if (typeof debugLog === 'function') {
+        debugLog('popup_returned_from_item_folder', {
+            checklistKey: targetChecklistKey,
+            itemId: targetItemId,
+            itemFound: !!itemElement,
+            source: String(payload.source || '')
+        });
+    }
+
+    return {
+        ok: true,
+        checklistKey: targetChecklistKey,
+        itemId: targetItemId,
+        itemFound: !!itemElement
+    };
+}
+
+window.addEventListener('message', function (event) {
+    if (
+        event
+        && event.origin
+        && event.origin !== window.location.origin
+    ) {
+        return;
+    }
+
+    const data = event && event.data ? event.data : {};
+    if (String(data.type || '') !== 'checklist-return-to-item') return;
+
+    returnToChecklistItem(data).then(function (result) {
+        try {
+            if (
+                event.source
+                && typeof event.source.postMessage === 'function'
+            ) {
+                event.source.postMessage({
+                    type: 'checklist-return-to-item-result',
+                    ...result
+                }, '*');
+            }
+        } catch (error) {
+            console.log('popup return acknowledgement skipped:', error);
+        }
+    }).catch(function (error) {
+        console.log('popup return-to-item error:', error);
+    });
+});
+
+window.ChecklistPopupNavigation = Object.freeze({
+    returnToItem: returnToChecklistItem,
+    focusItem: function (itemId) {
+        return returnToChecklistItem({
+            dialogId,
+            checklistKey: currentChecklistKey,
+            itemId,
+            source: 'popup_navigation_api'
+        });
+    }
+});
+
 window.ChecklistPopupRenderOrchestrator = Object.freeze({
     getRendererContext: getPopupRendererContext,
     resolveRenderer: function () {

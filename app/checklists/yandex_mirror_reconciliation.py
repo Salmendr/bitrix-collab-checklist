@@ -25,6 +25,15 @@ from app.checklists.yandex_mirror_queue import (
     enqueue_yandex_mirror_job,
     update_document_mirror_fields,
 )
+from app.checklists.yandex_folders import (
+    build_standard_item_yandex_repair_spec,
+)
+from app.checklists.yandex_structure_jobs import (
+    create_yandex_structure_job,
+)
+from app.checklists.yandex_structure_queue import (
+    enqueue_yandex_structure_job,
+)
 
 _RECONCILIATION_GUARD = threading.Lock()
 _RECONCILIATION_RUNNING = False
@@ -117,6 +126,8 @@ def reconcile_yandex_mirror_documents(source: str = "startup") -> dict:
         "missingLocal": 0,
         "skippedProjects": 0,
         "unrecoverable": 0,
+        "structureRepairsQueued": 0,
+        "structureRepairsExisting": 0,
         "errors": [],
     }
     context_cache: dict[str, bool] = {}
@@ -148,6 +159,78 @@ def reconcile_yandex_mirror_documents(source: str = "startup") -> dict:
             for raw_item in raw_data.get("items") or []:
                 item = migrate_legacy_document_fields(raw_item)
                 item_id = clean_cell_value(item.get("id"))
+
+                repair_spec = build_standard_item_yandex_repair_spec(
+                    dialog_id=dialog_id,
+                    checklist_key=checklist_key,
+                    item=item,
+                )
+                if repair_spec.get("repairRequired"):
+                    repair_action = clean_cell_value(
+                        repair_spec.get("repairAction")
+                    ) or "rename_item_folder"
+                    repair_key = (
+                        "startup-standard-item-repair:v1:"
+                        f"{dialog_id}:{checklist_key}:{item_id}:"
+                        f"{repair_action}:"
+                        f"{clean_cell_value(repair_spec.get('targetPath'))}"
+                    )
+                    repair_job = create_yandex_structure_job(
+                        idempotency_key=repair_key,
+                        dialog_id=dialog_id,
+                        checklist_key=checklist_key,
+                        item_id=item_id,
+                        action=repair_action,
+                        source_path=clean_cell_value(
+                            repair_spec.get("sourcePath")
+                        ),
+                        target_path=clean_cell_value(
+                            repair_spec.get("targetPath")
+                        ),
+                        folder_alias=clean_cell_value(
+                            repair_spec.get("folderAlias")
+                        ),
+                        item_name=clean_cell_value(
+                            repair_spec.get("itemName")
+                        ),
+                        group_id=int(
+                            repair_spec.get("targetGroupId")
+                            or item.get("group")
+                            or 0
+                        ),
+                        initial_status="queued",
+                        result={
+                            "sourceGroupId": int(
+                                repair_spec.get("sourceGroupId") or 0
+                            ),
+                            "targetGroupId": int(
+                                repair_spec.get("targetGroupId") or 0
+                            ),
+                            "oldName": clean_cell_value(
+                                repair_spec.get("definitionName")
+                            ),
+                            "finalName": clean_cell_value(
+                                repair_spec.get("itemName")
+                            ),
+                            "startupRepair": True,
+                        },
+                    )
+                    repair_status = clean_cell_value(
+                        repair_job.get("status")
+                    ).lower()
+                    if repair_status == "queued":
+                        enqueue_result = enqueue_yandex_structure_job(
+                            clean_cell_value(repair_job.get("job_id")),
+                            source="startup_standard_item_repair",
+                        )
+                        if (
+                            enqueue_result.get("queued")
+                            or enqueue_result.get("alreadyQueued")
+                            or enqueue_result.get("alreadyRunning")
+                        ):
+                            stats["structureRepairsQueued"] += 1
+                    else:
+                        stats["structureRepairsExisting"] += 1
 
                 for document in normalize_documents_list(item.get("documents")):
                     stats["documents"] += 1

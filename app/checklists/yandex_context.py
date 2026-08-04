@@ -421,13 +421,47 @@ def merge_item_mappings(existing_mappings: list, generated_mappings: list) -> li
     seen = set()
     seen_aliases = set()
 
-    # The newest stored record for an alias wins.  Rename operations append the
+    generated_by_alias: dict[str, dict] = {}
+    for raw_mapping in generated_mappings or []:
+        if not isinstance(raw_mapping, dict):
+            continue
+        alias = clean_cell_value(raw_mapping.get("folderAlias"))
+        if alias:
+            generated_by_alias[alias] = dict(raw_mapping)
+
+    # The newest stored record for an alias wins. Rename operations append the
     # replacement mapping, so walking backwards also repairs older contexts
     # that accidentally contain both the original and renamed item mappings.
+    #
+    # Stage 8.15.5: legacy ID mappings were generated with groupId=0 and were
+    # therefore discarded. If a stored record still has groupId=0, recover the
+    # configured group by its stable folder alias while retaining the current
+    # (possibly user-renamed) itemName.
     stored = []
-    for mapping in reversed(existing_mappings or []):
-        if not isinstance(mapping, dict):
+    for raw_mapping in reversed(existing_mappings or []):
+        if not isinstance(raw_mapping, dict):
             continue
+
+        mapping = dict(raw_mapping)
+        alias = clean_cell_value(mapping.get("folderAlias"))
+        generated = generated_by_alias.get(alias) or {}
+
+        try:
+            stored_group_id = int(mapping.get("groupId") or 0)
+        except (TypeError, ValueError):
+            stored_group_id = 0
+
+        if not stored_group_id:
+            try:
+                recovered_group_id = int(generated.get("groupId") or 0)
+            except (TypeError, ValueError):
+                recovered_group_id = 0
+            if recovered_group_id:
+                mapping["groupId"] = recovered_group_id
+                if not clean_cell_value(mapping.get("checklistKey")):
+                    mapping["checklistKey"] = generated.get("checklistKey")
+                if not clean_cell_value(mapping.get("folderAlias")):
+                    mapping["folderAlias"] = generated.get("folderAlias")
 
         identity = mapping_identity(mapping)
         alias = clean_cell_value(mapping.get("folderAlias"))
@@ -439,7 +473,7 @@ def merge_item_mappings(existing_mappings: list, generated_mappings: list) -> li
         ):
             continue
 
-        stored.append(dict(mapping))
+        stored.append(mapping)
         seen.add(identity)
         if alias:
             seen_aliases.add(alias)

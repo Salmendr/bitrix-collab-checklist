@@ -23,6 +23,10 @@ from app.checklists.storage import (
     get_item_yandex_folder,
 )
 
+from app.checklists.normalization import (
+    resolve_standard_definition_identity,
+)
+
 from app.checklists.yandex_warmup_control import is_yandex_warmup_stop_requested
 
 from app.yandex_disk.client import (
@@ -1172,12 +1176,38 @@ def build_item_yandex_relocation_spec(
     source_url = clean_cell_value(item.get("yandexFolderUrl"))
 
     if not source_path:
-        folder_info = get_item_yandex_folder(
-            dialog_id,
-            checklist_key,
-            source_name,
-            group_id=int(source_group_id or 0),
-        ) or {}
+        lookup_candidates = [
+            (
+                source_name,
+                int(source_group_id or 0),
+            ),
+            (
+                clean_cell_value(item.get("definitionName")),
+                int(
+                    item.get("definitionGroupId")
+                    or source_group_id
+                    or 0
+                ),
+            ),
+        ]
+        folder_info = {}
+        for lookup_name, lookup_group_id in lookup_candidates:
+            if not lookup_name:
+                continue
+            folder_info = get_item_yandex_folder(
+                dialog_id,
+                checklist_key,
+                lookup_name,
+                group_id=lookup_group_id,
+            ) or {}
+            folder = (
+                (folder_info.get("folder") or {})
+                if isinstance(folder_info, dict)
+                else {}
+            )
+            if clean_cell_value(folder.get("path")):
+                break
+
         folder = (
             (folder_info.get("folder") or {})
             if isinstance(folder_info, dict)
@@ -1296,6 +1326,147 @@ def build_item_yandex_move_spec(
     )
 
 
+def _find_standard_item_yandex_spec(
+    checklist_key: str,
+    definition_name: str,
+    definition_group_id: int,
+) -> tuple[str, dict]:
+    normalized_key = normalize_checklist_key(checklist_key)
+    normalized_name = clean_cell_value(definition_name).casefold()
+    normalized_group_id = int(definition_group_id or 0)
+    specs = get_folder_specs_for_checklist(normalized_key)
+
+    for spec_key, raw_spec in (specs or {}).items():
+        spec = dict(raw_spec or {})
+        spec_item_name = clean_cell_value(
+            spec.get("itemName")
+        ) or clean_cell_value(spec_key)
+        try:
+            spec_group_id = int(spec.get("groupId") or 0)
+        except (TypeError, ValueError):
+            spec_group_id = 0
+
+        if spec_item_name.casefold() != normalized_name:
+            continue
+        if (
+            normalized_group_id
+            and spec_group_id
+            and spec_group_id != normalized_group_id
+        ):
+            continue
+
+        folder_alias = (
+            clean_cell_value(spec.get("alias"))
+            or clean_cell_value(spec_key)
+        )
+        return folder_alias, spec
+
+    return "", {}
+
+
+def build_standard_item_yandex_repair_spec(
+    *,
+    dialog_id: str,
+    checklist_key: str,
+    item: dict,
+) -> dict:
+    """Build an idempotent rename/move repair for a persisted standard item.
+
+    This is used by startup reconciliation when an older build renamed an item
+    before its configured item mapping had been hydrated. The configured alias
+    and definition identity remain stable even though the visible item name
+    has changed.
+    """
+    checklist_key = normalize_checklist_key(checklist_key)
+    item = dict(item or {})
+
+    if bool(item.get("isCustom", False)):
+        return {"enabled": False, "reason": "custom_item"}
+
+    config = get_checklist_config(checklist_key)
+    definition_group_id, definition_name = (
+        resolve_standard_definition_identity(config, item)
+    )
+    current_name = clean_cell_value(item.get("name"))
+    current_group_id = int(item.get("group") or 0)
+
+    if not definition_name or not current_name:
+        return {"enabled": False, "reason": "definition_identity_unavailable"}
+
+    if definition_name.casefold() == current_name.casefold():
+        return {"enabled": False, "reason": "standard_name_unchanged"}
+
+    folder_alias, spec = _find_standard_item_yandex_spec(
+        checklist_key,
+        definition_name,
+        definition_group_id,
+    )
+    if not folder_alias:
+        return {"enabled": False, "reason": "standard_folder_spec_unavailable"}
+
+    context = get_project_storage_context(dialog_id) or {}
+    folders = ((context.get("yandexDisk") or {}).get("folders") or {})
+    folder_record = (
+        folders.get(folder_alias)
+        if isinstance(folders.get(folder_alias), dict)
+        else {}
+    )
+
+    source_path = (
+        clean_cell_value(item.get("yandexFolderPath"))
+        or clean_cell_value(folder_record.get("path"))
+    )
+    source_url = (
+        clean_cell_value(item.get("yandexFolderUrl"))
+        or clean_cell_value(folder_record.get("url"))
+    )
+
+    if not source_path:
+        root_path = get_root_path_from_context(dialog_id, checklist_key)
+        relative_path = (
+            clean_cell_value(spec.get("relativePath"))
+            or clean_cell_value(spec.get("folderName"))
+        ).strip("/")
+        if root_path and relative_path:
+            source_path = normalize_yandex_disk_path(
+                f"{root_path.rstrip('/')}/{relative_path}"
+            )
+
+    if not source_path:
+        return {"enabled": False, "reason": "standard_source_path_unavailable"}
+
+    repair_item = {
+        **item,
+        "yandexFolderAlias": folder_alias,
+        "yandexFolderUrl": (
+            clean_cell_value(item.get("yandexFolderUrl"))
+            or source_url
+        ),
+    }
+
+    spec_result = build_item_yandex_relocation_spec(
+        dialog_id=dialog_id,
+        checklist_key=checklist_key,
+        item=repair_item,
+        source_group_id=int(definition_group_id or current_group_id),
+        target_group_id=current_group_id,
+        old_name=definition_name,
+        new_name=current_name,
+        source_path_override=source_path,
+    )
+    spec_result.update({
+        "definitionName": definition_name,
+        "definitionGroupId": int(definition_group_id or 0),
+        "repairRequired": bool(spec_result.get("enabled")),
+        "repairAction": (
+            "move_item_folder"
+            if int(definition_group_id or current_group_id) != current_group_id
+            else "rename_item_folder"
+        ),
+    })
+    return spec_result
+
+
 def build_item_yandex_rename_spec(
     *,
     dialog_id: str,
@@ -1318,17 +1489,49 @@ def build_item_yandex_rename_spec(
     folder_alias = clean_cell_value(item.get("yandexFolderAlias"))
 
     if not source_path:
-        folder_info = get_item_yandex_folder(
-            dialog_id,
-            checklist_key,
-            old_name,
-            group_id=group_id,
-        ) or {}
-        folder = (folder_info.get("folder") or {}) if isinstance(folder_info, dict) else {}
-        mapping = (folder_info.get("mapping") or {}) if isinstance(folder_info, dict) else {}
+        lookup_candidates = [
+            (
+                clean_cell_value(old_name),
+                group_id,
+            ),
+            (
+                clean_cell_value(item.get("definitionName")),
+                int(item.get("definitionGroupId") or group_id or 0),
+            ),
+        ]
+        folder_info = {}
+        for lookup_name, lookup_group_id in lookup_candidates:
+            if not lookup_name:
+                continue
+            folder_info = get_item_yandex_folder(
+                dialog_id,
+                checklist_key,
+                lookup_name,
+                group_id=lookup_group_id,
+            ) or {}
+            folder = (
+                (folder_info.get("folder") or {})
+                if isinstance(folder_info, dict)
+                else {}
+            )
+            if clean_cell_value(folder.get("path")):
+                break
+
+        folder = (
+            (folder_info.get("folder") or {})
+            if isinstance(folder_info, dict)
+            else {}
+        )
+        mapping = (
+            (folder_info.get("mapping") or {})
+            if isinstance(folder_info, dict)
+            else {}
+        )
         source_path = clean_cell_value(folder.get("path"))
         source_url = source_url or clean_cell_value(folder.get("url"))
-        folder_alias = folder_alias or clean_cell_value(mapping.get("folderAlias"))
+        folder_alias = folder_alias or clean_cell_value(
+            mapping.get("folderAlias")
+        )
 
     if not folder_alias:
         folder_alias = f"{checklist_key}_{slugify_folder_part(item_id or old_name)}"

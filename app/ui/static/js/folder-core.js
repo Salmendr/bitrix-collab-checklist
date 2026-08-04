@@ -51,31 +51,88 @@
         bootstrap.popupUrl || ''
     ).trim();
 
-    function returnToChecklistPopup() {
-        let openerFocused = false;
+    let folderReturnInProgress = false;
+
+    function focusChecklistPopupWindow(openerWindow) {
+        try {
+            if (
+                openerWindow
+                && typeof openerWindow.focus === 'function'
+            ) {
+                openerWindow.focus();
+            }
+        } catch (error) {
+            console.log('folder return opener focus skipped:', error);
+        }
 
         try {
             if (
-                global.opener
-                && !global.opener.closed
+                openerWindow
+                && openerWindow.top
+                && typeof openerWindow.top.focus === 'function'
             ) {
-                if (typeof global.opener.focus === 'function') {
-                    global.opener.focus();
-                }
-                openerFocused = true;
-                global.close();
+                openerWindow.top.focus();
             }
         } catch (error) {
-            console.log('folder return opener error:', error);
+            // Bitrix and the application can have different origins. Focusing
+            // the top window is best-effort and the direct popup focus above
+            // remains the primary path.
+            console.log('folder return top focus skipped:', error);
+        }
+    }
+
+    async function returnToChecklistPopup(event) {
+        if (event && typeof event.preventDefault === 'function') {
+            event.preventDefault();
+        }
+        if (folderReturnInProgress) return;
+
+        folderReturnInProgress = true;
+        if (folderBackButton) {
+            folderBackButton.disabled = true;
+            folderBackButton.setAttribute('aria-busy', 'true');
         }
 
-        if (openerFocused) {
-            global.setTimeout(function () {
-                if (!global.closed && folderPopupUrl) {
-                    global.location.assign(folderPopupUrl);
+        try {
+            const openerWindow = (
+                global.opener
+                && !global.opener.closed
+                    ? global.opener
+                    : null
+            );
+
+            if (openerWindow) {
+                const navigationApi = openerWindow.ChecklistPopupNavigation;
+                if (
+                    navigationApi
+                    && typeof navigationApi.returnToItem === 'function'
+                ) {
+                    const result = await navigationApi.returnToItem({
+                        dialogId: folderDialogId,
+                        checklistKey: folderChecklistKey,
+                        itemId: folderItemId,
+                        source: 'folder_back_button'
+                    });
+
+                    if (!result || result.ok !== false) {
+                        focusChecklistPopupWindow(openerWindow);
+                        global.close();
+
+                        // A browser can refuse window.close() after restoring a
+                        // tab chain. In that case navigate this tab to the exact
+                        // checklist stage and item instead of leaving the user
+                        // in the folder page.
+                        global.setTimeout(function () {
+                            if (!global.closed && folderPopupUrl) {
+                                global.location.assign(folderPopupUrl);
+                            }
+                        }, 220);
+                        return;
+                    }
                 }
-            }, 160);
-            return;
+            }
+        } catch (error) {
+            console.log('folder return navigation error:', error);
         }
 
         if (folderPopupUrl) {
@@ -85,6 +142,13 @@
 
         if (global.history && global.history.length > 1) {
             global.history.back();
+            return;
+        }
+
+        folderReturnInProgress = false;
+        if (folderBackButton) {
+            folderBackButton.disabled = false;
+            folderBackButton.removeAttribute('aria-busy');
         }
     }
 

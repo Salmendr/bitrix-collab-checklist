@@ -1,6 +1,6 @@
 {
-  "stage": "8.15.4-inactivity-yandex-reconciliation",
-  "generatedAt": "2026-08-04T15:08:58+10:00",
+  "stage": "8.15.5-id-yandex-folder-return",
+  "generatedAt": "2026-08-04T16:40:00+10:00",
   "loadOrder": [
     "popup-bootstrap.js",
     "checklist-action-icons.js",
@@ -202,12 +202,12 @@
       "bytes": 2244
     },
     "popup-render-orchestrator.js": {
-      "sha256": "36b975075393c4184368feb5403f0cb2e03bbff5623e099f803c0fe1775120a5",
-      "bytes": 6020
+      "sha256": "e64bb8528ac6918d05c039bf8e5294a13f4adbdad9f32a5f5108157b3df3e6c4",
+      "bytes": 10570
     },
     "popup-init.js": {
-      "sha256": "8e37731214484d1a7b189233cfee6033a0a03e6a89fdbe7517d3348f3c82913e",
-      "bytes": 1267
+      "sha256": "fe4e820d6e49b456574b2a0484319c37ef05e67a81083a2a3b246381a772b665",
+      "bytes": 2393
     }
   },
   "notes": [
@@ -268,7 +268,8 @@
     "Stage 8.15.4 separates the ID Not Required group into its own card with the same 14px spacing used by configured P/R panels.",
     "Stage 8.15.4 tracks real popup and folder interactions, warns after 24 minutes, and runs the same durable finalize flow as Save and Close after 25 minutes.",
     "Stage 8.15.4 sends lastActivityAt through the edit-session heartbeat and accepts an idempotent server-side inactivity finalization fallback.",
-    "Stage 8.15.4 startup reconciliation restores only current local documents without duplicating synced, queued or running Yandex upload jobs."
+    "Stage 8.15.4 startup reconciliation restores only current local documents without duplicating synced, queued or running Yandex upload jobs.",
+    "Stage 8.15.5 exposes ChecklistPopupNavigation so item-folder return always restores the originating checklist stage and scrolls to the exact item."
   ],
   "hashMode": "actual-file-bytes",
   "lineEndingNote": "Hashes are calculated from bytes written to disk. This is stable for Windows CRLF and Unix LF.",
@@ -418,12 +419,12 @@
       "bytes": 2244
     },
     "popup-render-orchestrator.js": {
-      "sha256": "36b975075393c4184368feb5403f0cb2e03bbff5623e099f803c0fe1775120a5",
-      "bytes": 6020
+      "sha256": "e64bb8528ac6918d05c039bf8e5294a13f4adbdad9f32a5f5108157b3df3e6c4",
+      "bytes": 10570
     },
     "popup-init.js": {
-      "sha256": "8e37731214484d1a7b189233cfee6033a0a03e6a89fdbe7517d3348f3c82913e",
-      "bytes": 1267
+      "sha256": "fe4e820d6e49b456574b2a0484319c37ef05e67a81083a2a3b246381a772b665",
+      "bytes": 2393
     }
   }
 }

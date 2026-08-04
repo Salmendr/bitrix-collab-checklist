@@ -16,6 +16,32 @@
                     href: window.location.href,
                     hasDialogId: !!dialogId
                 });
+
+                const initialFocusItemId = String(
+                    new URLSearchParams(window.location.search)
+                        .get('focusItemId')
+                    || ''
+                ).trim();
+                if (
+                    initialFocusItemId
+                    && window.ChecklistPopupNavigation
+                    && typeof window.ChecklistPopupNavigation.returnToItem
+                        === 'function'
+                ) {
+                    window.setTimeout(function () {
+                        window.ChecklistPopupNavigation.returnToItem({
+                            dialogId,
+                            checklistKey: currentChecklistKey,
+                            itemId: initialFocusItemId,
+                            source: 'popup_url_focus'
+                        }).catch(function (error) {
+                            console.log(
+                                'initial popup item focus skipped:',
+                                error
+                            );
+                        });
+                    }, 80);
+                }
             } catch (e) {
                 logRenderError('renderAll', e);
             }

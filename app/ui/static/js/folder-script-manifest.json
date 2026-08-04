@@ -1,5 +1,5 @@
 {
-  "stage": "8.15.4-inactivity-yandex-reconciliation",
+  "stage": "8.15.5-id-yandex-folder-return",
   "hashMode": "actual-file-bytes",
   "modules": {
     "checklist-window-channel.js": {
@@ -11,8 +11,8 @@
       "bytes": 5537
     },
     "folder-core.js": {
-      "sha256": "24b1a8bae7be6a81ae87b04da302616aaa7a5c92a00b4c57e4cfec935a0de70a",
-      "bytes": 13908
+      "sha256": "58722269880e4f16eeff4d4736ff806a8dbe602a6739ade003fdc9488417e621",
+      "bytes": 16348
     },
     "bitrix-user-picker.js": {
       "sha256": "e69ee7af0913383cda4f02ba83279c64fe4650715532eee91176c47cfe57b1c9",
@@ -94,7 +94,8 @@
     "Stage 8.14 displays the ten most recent assignments for each current file series in the item folder.",
     "Stage 8.15 exposes the same manual retry-only-failed control in item-folder assignment history.",
     "Bitrix hotfix 8.15.1 keeps the folder notification bell visible but disabled and hides all non-error Yandex synchronization text.",
-    "Stage 8.15.4 publishes throttled click, key, input, change, drag, drop, touch and scroll activity from item-folder windows to the parent popup inactivity timer."
+    "Stage 8.15.4 publishes throttled click, key, input, change, drag, drop, touch and scroll activity from item-folder windows to the parent popup inactivity timer.",
+    "Stage 8.15.5 makes the folder back button call the opener navigation API and falls back to a stage-and-item popup URL if the opener cannot be restored."
   ],
-  "generatedAt": "2026-08-04T15:08:58+10:00"
+  "generatedAt": "2026-08-04T16:40:00+10:00"
 }

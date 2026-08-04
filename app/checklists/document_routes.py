@@ -2117,11 +2117,12 @@ def api_checklist_folder(
     ui_static_base_url = (
         f"{app_base_path}/ui-static"
     )
-    ui_asset_version = "8.15.4-inactivity-yandex"
+    ui_asset_version = "8.15.5-id-yandex-folder-return"
     popup_url = (
         f"{app_base_path}/popup"
         f"?dialogId={quote(dialog_id, safe='')}"
         f"&checklistKey={quote(checklist_key, safe='')}"
+        f"&focusItemId={quote(item_id, safe='')}"
     )
 
     bootstrap_payload = {
