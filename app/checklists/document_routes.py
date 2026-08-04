@@ -2117,7 +2117,7 @@ def api_checklist_folder(
     ui_static_base_url = (
         f"{app_base_path}/ui-static"
     )
-    ui_asset_version = "8.15.5-id-yandex-folder-return"
+    ui_asset_version = "8.15.5.1-folder-return-close"
     popup_url = (
         f"{app_base_path}/popup"
         f"?dialogId={quote(dialog_id, safe='')}"

@@ -1,5 +1,5 @@
 {
-  "stage": "8.15.5-id-yandex-folder-return",
+  "stage": "8.15.5.1-folder-return-close",
   "hashMode": "actual-file-bytes",
   "modules": {
     "checklist-window-channel.js": {
@@ -11,8 +11,8 @@
       "bytes": 5537
     },
     "folder-core.js": {
-      "sha256": "58722269880e4f16eeff4d4736ff806a8dbe602a6739ade003fdc9488417e621",
-      "bytes": 16348
+      "sha256": "c7f3481892e5faa7af6f095b04ff331c7e4b79b2b9f6bd61700b8220f40c5be5",
+      "bytes": 17784
     },
     "bitrix-user-picker.js": {
       "sha256": "e69ee7af0913383cda4f02ba83279c64fe4650715532eee91176c47cfe57b1c9",
@@ -95,7 +95,8 @@
     "Stage 8.15 exposes the same manual retry-only-failed control in item-folder assignment history.",
     "Bitrix hotfix 8.15.1 keeps the folder notification bell visible but disabled and hides all non-error Yandex synchronization text.",
     "Stage 8.15.4 publishes throttled click, key, input, change, drag, drop, touch and scroll activity from item-folder windows to the parent popup inactivity timer.",
-    "Stage 8.15.5 makes the folder back button call the opener navigation API and falls back to a stage-and-item popup URL if the opener cannot be restored."
+    "Stage 8.15.5 makes the folder back button call the opener navigation API and falls back to a stage-and-item popup URL if the opener cannot be restored.",
+    "Hotfix 8.15.5.1 starts opener navigation without awaiting it, calls window.close() synchronously inside the trusted back-button click, and always replaces the surviving folder tab with the exact popup URL when the host refuses to close it."
   ],
-  "generatedAt": "2026-08-04T16:40:00+10:00"
+  "generatedAt": "2026-08-04T17:20:00+10:00"
 }

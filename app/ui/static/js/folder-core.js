@@ -81,7 +81,31 @@
         }
     }
 
-    async function returnToChecklistPopup(event) {
+    function replaceFolderWindowWithPopup() {
+        if (!folderPopupUrl) return false;
+
+        try {
+            global.location.replace(folderPopupUrl);
+        } catch (error) {
+            global.location.assign(folderPopupUrl);
+        }
+
+        return true;
+    }
+
+    function scheduleFolderReturnFallback() {
+        if (!folderPopupUrl) return;
+
+        // Do not inspect window.closed here. Chromium can mark the browsing
+        // context as closing even when the host shell keeps the tab visible.
+        // If close() really succeeds this timer disappears with the window;
+        // otherwise the folder tab deterministically becomes the target popup.
+        global.setTimeout(function () {
+            replaceFolderWindowWithPopup();
+        }, 120);
+    }
+
+    function returnToChecklistPopup(event) {
         if (event && typeof event.preventDefault === 'function') {
             event.preventDefault();
         }
@@ -107,36 +131,53 @@
                     navigationApi
                     && typeof navigationApi.returnToItem === 'function'
                 ) {
-                    const result = await navigationApi.returnToItem({
+                    // Start navigation in the opener, but do not await it here.
+                    // Waiting for checklist rendering consumes the click's user
+                    // activation and Bitrix/Chromium can then reject close().
+                    Promise.resolve(
+                        navigationApi.returnToItem({
+                            dialogId: folderDialogId,
+                            checklistKey: folderChecklistKey,
+                            itemId: folderItemId,
+                            source: 'folder_back_button'
+                        })
+                    ).catch(function (error) {
+                        console.log(
+                            'folder return opener navigation error:',
+                            error
+                        );
+                    });
+
+                    focusChecklistPopupWindow(openerWindow);
+                    scheduleFolderReturnFallback();
+
+                    // Must remain synchronous inside the trusted click handler.
+                    global.close();
+                    return;
+                }
+
+                try {
+                    openerWindow.postMessage({
+                        type: 'checklist-return-to-item',
                         dialogId: folderDialogId,
                         checklistKey: folderChecklistKey,
                         itemId: folderItemId,
                         source: 'folder_back_button'
-                    });
+                    }, global.location.origin);
 
-                    if (!result || result.ok !== false) {
-                        focusChecklistPopupWindow(openerWindow);
-                        global.close();
-
-                        // A browser can refuse window.close() after restoring a
-                        // tab chain. In that case navigate this tab to the exact
-                        // checklist stage and item instead of leaving the user
-                        // in the folder page.
-                        global.setTimeout(function () {
-                            if (!global.closed && folderPopupUrl) {
-                                global.location.assign(folderPopupUrl);
-                            }
-                        }, 220);
-                        return;
-                    }
+                    focusChecklistPopupWindow(openerWindow);
+                    scheduleFolderReturnFallback();
+                    global.close();
+                    return;
+                } catch (error) {
+                    console.log('folder return postMessage error:', error);
                 }
             }
         } catch (error) {
             console.log('folder return navigation error:', error);
         }
 
-        if (folderPopupUrl) {
-            global.location.assign(folderPopupUrl);
+        if (replaceFolderWindowWithPopup()) {
             return;
         }
 
