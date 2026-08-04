@@ -165,6 +165,202 @@ def create_yandex_upload_job(
     return get_upload_job(job_id) or {"jobId": job_id}
 
 
+def ensure_yandex_upload_job_for_reconciliation(
+    *,
+    dialog_id: str,
+    checklist_key: str,
+    item_id: str,
+    document_id: str,
+    local_path: str,
+    file_name: str,
+    file_size: int,
+) -> dict:
+    """Idempotently restore/create one upload job for a current document."""
+    ensure_upload_jobs_table()
+    normalized_dialog_id = normalize_dialog_id(dialog_id)
+    normalized_checklist_key = normalize_checklist_key(checklist_key)
+    normalized_item_id = clean_cell_value(item_id)
+    normalized_document_id = clean_cell_value(document_id)
+    now = utc_now()
+    conn = get_conn()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute(
+            """
+            SELECT *
+            FROM upload_jobs
+            WHERE job_type = 'upload'
+              AND dialog_id = ?
+              AND checklist_key = ?
+              AND item_id = ?
+              AND document_id = ?
+            ORDER BY created_at DESC, job_id DESC
+            LIMIT 1
+            """,
+            (
+                normalized_dialog_id,
+                normalized_checklist_key,
+                normalized_item_id,
+                normalized_document_id,
+            ),
+        ).fetchone()
+
+        if row:
+            record = dict(row)
+            status = clean_cell_value(record.get("status")).lower()
+            if status == "synced":
+                conn.commit()
+                return {**record, "reconciledAction": "existing_synced"}
+
+            if status == "queued":
+                # A legacy queued row can still point at an obsolete local path.
+                # Refresh only local metadata; status/attempt history and the
+                # idempotent job identity remain unchanged.
+                conn.execute(
+                    """
+                    UPDATE upload_jobs
+                    SET local_path = ?,
+                        file_name = ?,
+                        file_size = ?,
+                        total_bytes = ?,
+                        updated_at = ?
+                    WHERE job_id = ?
+                    """,
+                    (
+                        clean_cell_value(local_path),
+                        clean_cell_value(file_name),
+                        int(file_size or 0),
+                        int(file_size or 0),
+                        now,
+                        record["job_id"],
+                    ),
+                )
+                conn.commit()
+                refreshed = dict(record)
+                refreshed.update({
+                    "local_path": clean_cell_value(local_path),
+                    "file_name": clean_cell_value(file_name),
+                    "file_size": int(file_size or 0),
+                    "total_bytes": int(file_size or 0),
+                    "updated_at": now,
+                    "reconciledAction": "existing_queued",
+                })
+                return refreshed
+
+            if status == "running":
+                conn.commit()
+                return {**record, "reconciledAction": "existing_running"}
+
+            permanent_stage = clean_cell_value(record.get("stage")).lower()
+            error_text = clean_cell_value(record.get("error")).lower()
+            retry_markers = (
+                "401", "unauthorized", "не авторизован", "timeout",
+                "timed out", "connection", "network", "reset by peer",
+                "429", "500", "502", "503", "504", "temporarily",
+                "yandex folder not found", "yandex folder path is empty",
+                "mirror failed",
+            )
+            retriable_error = (
+                status == "skipped" and permanent_stage == "yandex_disabled"
+            ) or (
+                status == "error"
+                and permanent_stage in {"mirror_failed", "exception", "folder_prepare"}
+                and any(marker in error_text for marker in retry_markers)
+            )
+
+            if permanent_stage in {
+                "local_file_missing",
+                "document_removed_before_upload",
+                "document_removed_after_upload",
+                "cancelled",
+            }:
+                row = None
+            elif status in {"error", "skipped"} and not retriable_error:
+                conn.commit()
+                return {
+                    **record,
+                    "reconciledAction": "unrecoverable_" + (status or "unknown"),
+                }
+            else:
+                conn.execute(
+                    """
+                    UPDATE upload_jobs
+                    SET local_path = ?,
+                        file_name = ?,
+                        file_size = ?,
+                        status = 'queued',
+                        stage = 'mirror_queued',
+                        progress_percent = 0,
+                        uploaded_bytes = 0,
+                        total_bytes = ?,
+                        error = '',
+                        started_at = '',
+                        finished_at = '',
+                        updated_at = ?
+                    WHERE job_id = ?
+                    """,
+                    (
+                        clean_cell_value(local_path),
+                        clean_cell_value(file_name),
+                        int(file_size or 0),
+                        int(file_size or 0),
+                        now,
+                        record["job_id"],
+                    ),
+                )
+                conn.commit()
+                restored = dict(record)
+                restored.update({
+                    "status": "queued",
+                    "stage": "mirror_queued",
+                    "local_path": clean_cell_value(local_path),
+                    "file_name": clean_cell_value(file_name),
+                    "file_size": int(file_size or 0),
+                    "error": "",
+                    "reconciledAction": "requeued_" + (status or "unknown"),
+                })
+                return restored
+
+        job_id = uuid.uuid4().hex
+        action_key = ""
+        conn.execute(
+            """
+            INSERT INTO upload_jobs(
+                job_id, job_type, dialog_id, checklist_key, item_id,
+                document_id, local_path, file_name, file_size, yandex_path,
+                status, stage, progress_percent, uploaded_bytes, total_bytes,
+                error, attempts, created_at, updated_at, started_at,
+                finished_at, source_action_key
+            )
+            VALUES (?, 'upload', ?, ?, ?, ?, ?, ?, ?, '',
+                    'queued', 'mirror_queued', 0, 0, ?, '', 0, ?, ?, '', '', ?)
+            """,
+            (
+                job_id,
+                normalized_dialog_id,
+                normalized_checklist_key,
+                normalized_item_id,
+                normalized_document_id,
+                clean_cell_value(local_path),
+                clean_cell_value(file_name),
+                int(file_size or 0),
+                int(file_size or 0),
+                now,
+                now,
+                action_key,
+            ),
+        )
+        conn.commit()
+        created = get_upload_job(job_id) or {"job_id": job_id}
+        created["reconciledAction"] = "created_legacy_job"
+        return created
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
 def create_yandex_delete_job(
     dialog_id: str,
     checklist_key: str,

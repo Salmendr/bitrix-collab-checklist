@@ -68,6 +68,9 @@ from app.checklists.yandex_mirror_queue import (
     start_yandex_mirror_workers,
     recover_yandex_mirror_state_on_startup,
 )
+from app.checklists.yandex_mirror_reconciliation import (
+    start_yandex_mirror_reconciliation,
+)
 
 from app.checklists.edit_session_worker import (
     recover_edit_sessions_on_startup,
@@ -183,3 +186,9 @@ def startup_event():
         source="startup"
     )
     start_yandex_structure_workers()
+
+    # Stage 8.15.4: one asynchronous pass per process startup restores
+    # legacy/skipped/failed current-document uploads without duplicating synced jobs.
+    start_yandex_mirror_reconciliation(
+        source="startup"
+    )

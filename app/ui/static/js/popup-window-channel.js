@@ -165,6 +165,17 @@
         }
     );
 
+    channel.subscribe(
+        'checklist-user-activity',
+        function (envelope) {
+            const payload = envelope.payload || {};
+            global.dispatchEvent(new CustomEvent(
+                'checklist-folder-user-activity',
+                { detail: payload }
+            ));
+        }
+    );
+
     global.addEventListener(
         'beforeunload',
         function () {

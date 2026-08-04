@@ -68,6 +68,35 @@ YANDEX_MIRROR_GUARD = threading.Lock()
 YANDEX_MIRROR_QUEUED_JOB_IDS: set[str] = set()
 YANDEX_MIRROR_RUNNING_JOB_IDS: set[str] = set()
 YANDEX_MIRROR_WORKERS_STARTED = False
+YANDEX_MIRROR_AUTH_BLOCKED = False
+YANDEX_MIRROR_AUTH_ERROR = ""
+YANDEX_DOCUMENT_LOCKS_GUARD = threading.Lock()
+YANDEX_DOCUMENT_LOCKS: dict[str, threading.RLock] = {}
+
+
+def _document_update_lock(dialog_id: str, checklist_key: str) -> threading.RLock:
+    lock_key = normalize_dialog_id(dialog_id) + "::" + normalize_checklist_key(checklist_key)
+    with YANDEX_DOCUMENT_LOCKS_GUARD:
+        return YANDEX_DOCUMENT_LOCKS.setdefault(lock_key, threading.RLock())
+
+
+def _is_yandex_auth_error(value) -> bool:
+    text = clean_cell_value(str(value or "")).lower()
+    return (
+        "401" in text
+        or "unauthorized" in text
+        or "не авторизован" in text
+    )
+
+
+def _block_yandex_mirror_for_auth(error_text: str) -> None:
+    global YANDEX_MIRROR_AUTH_BLOCKED, YANDEX_MIRROR_AUTH_ERROR
+    with YANDEX_MIRROR_GUARD:
+        YANDEX_MIRROR_AUTH_BLOCKED = True
+        YANDEX_MIRROR_AUTH_ERROR = clean_cell_value(error_text)
+    write_debug_log("yandex_mirror_auth_blocked_until_restart", {
+        "error": YANDEX_MIRROR_AUTH_ERROR,
+    })
 
 
 def get_yandex_mirror_worker_count() -> int:
@@ -118,49 +147,50 @@ def update_document_mirror_fields(
     document_id: str,
     updates: dict,
 ) -> bool:
-    dialog_id = normalize_dialog_id(dialog_id)
-    checklist_key = normalize_checklist_key(checklist_key)
+    with _document_update_lock(dialog_id, checklist_key):
+        dialog_id = normalize_dialog_id(dialog_id)
+        checklist_key = normalize_checklist_key(checklist_key)
 
-    data = get_checklist(dialog_id, checklist_key)
-    items = data.get("items", []) or []
+        data = get_checklist(dialog_id, checklist_key)
+        items = data.get("items", []) or []
 
-    found = False
+        found = False
 
-    for index, item in enumerate(items):
-        if str(item.get("id") or "") != str(item_id or ""):
-            continue
+        for index, item in enumerate(items):
+            if str(item.get("id") or "") != str(item_id or ""):
+                continue
 
-        item = migrate_legacy_document_fields(item)
-        documents = normalize_documents_list(item.get("documents"))
+            item = migrate_legacy_document_fields(item)
+            documents = normalize_documents_list(item.get("documents"))
 
-        next_documents = []
-        for doc in documents:
-            if str(doc.get("id") or "") == str(document_id or ""):
-                doc = {
-                    **doc,
-                    **dict(updates or {}),
-                }
-                found = True
+            next_documents = []
+            for doc in documents:
+                if str(doc.get("id") or "") == str(document_id or ""):
+                    doc = {
+                        **doc,
+                        **dict(updates or {}),
+                    }
+                    found = True
 
-            next_documents.append(doc)
+                next_documents.append(doc)
 
-        item["documents"] = normalize_documents_list(next_documents)
+            item["documents"] = normalize_documents_list(next_documents)
 
-        first_doc = item["documents"][0] if item["documents"] else {}
-        item["documentUrl"] = clean_cell_value(first_doc.get("fileUrl"))
-        item["documentName"] = clean_cell_value(first_doc.get("name"))
+            first_doc = item["documents"][0] if item["documents"] else {}
+            item["documentUrl"] = clean_cell_value(first_doc.get("fileUrl"))
+            item["documentName"] = clean_cell_value(first_doc.get("name"))
 
-        items[index] = item
-        break
+            items[index] = item
+            break
 
-    if not found:
-        return False
+        if not found:
+            return False
 
-    data["items"] = items
-    data = normalize_checklist_data(data, checklist_key)
-    save_checklist(dialog_id, data, checklist_key)
+        data["items"] = items
+        data = normalize_checklist_data(data, checklist_key)
+        save_checklist(dialog_id, data, checklist_key)
 
-    return True
+        return True
 
 
 def document_still_exists(
@@ -195,6 +225,19 @@ def enqueue_yandex_mirror_job(job_id: str, source: str = "") -> dict:
             "ok": False,
             "queued": False,
             "error": "jobId is required",
+        }
+
+    with YANDEX_MIRROR_GUARD:
+        auth_blocked = YANDEX_MIRROR_AUTH_BLOCKED
+        auth_error = YANDEX_MIRROR_AUTH_ERROR
+    if auth_blocked:
+        return {
+            "ok": True,
+            "queued": False,
+            "deferred": True,
+            "authBlocked": True,
+            "error": auth_error,
+            "jobId": job_id,
         }
 
     job = get_upload_job(job_id)
@@ -847,6 +890,8 @@ def process_upload_job(job: dict):
 
     if not result.get("ok"):
         error = clean_cell_value(result.get("reason")) or "mirror failed"
+        if _is_yandex_auth_error(error):
+            _block_yandex_mirror_for_auth(error)
         update_document_mirror_fields(
             dialog_id,
             checklist_key,
@@ -1026,6 +1071,14 @@ def yandex_mirror_worker(worker_index: int):
         job_id = clean_cell_value(job_id)
 
         with YANDEX_MIRROR_GUARD:
+            auth_blocked = YANDEX_MIRROR_AUTH_BLOCKED
+        if auth_blocked:
+            with YANDEX_MIRROR_GUARD:
+                YANDEX_MIRROR_QUEUED_JOB_IDS.discard(job_id)
+            YANDEX_MIRROR_QUEUE.task_done()
+            continue
+
+        with YANDEX_MIRROR_GUARD:
             YANDEX_MIRROR_QUEUED_JOB_IDS.discard(job_id)
             YANDEX_MIRROR_RUNNING_JOB_IDS.add(job_id)
 
@@ -1056,6 +1109,8 @@ def yandex_mirror_worker(worker_index: int):
                 str(exc),
                 stage="exception",
             )
+            if _is_yandex_auth_error(exc):
+                _block_yandex_mirror_for_auth(str(exc))
 
             replacement_result = (
                 handle_document_replacement_after_job(
@@ -1081,6 +1136,12 @@ def yandex_mirror_worker(worker_index: int):
 
 def start_yandex_mirror_workers():
     global YANDEX_MIRROR_WORKERS_STARTED
+    global YANDEX_MIRROR_AUTH_BLOCKED
+    global YANDEX_MIRROR_AUTH_ERROR
+
+    with YANDEX_MIRROR_GUARD:
+        YANDEX_MIRROR_AUTH_BLOCKED = False
+        YANDEX_MIRROR_AUTH_ERROR = ""
 
     with YANDEX_MIRROR_GUARD:
         if YANDEX_MIRROR_WORKERS_STARTED:
@@ -1124,4 +1185,6 @@ def get_yandex_mirror_queue_state() -> dict:
             "queueSize": YANDEX_MIRROR_QUEUE.qsize(),
             "queuedJobIds": sorted(YANDEX_MIRROR_QUEUED_JOB_IDS),
             "runningJobIds": sorted(YANDEX_MIRROR_RUNNING_JOB_IDS),
+            "authBlocked": YANDEX_MIRROR_AUTH_BLOCKED,
+            "authError": YANDEX_MIRROR_AUTH_ERROR,
         }

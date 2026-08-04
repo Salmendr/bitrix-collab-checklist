@@ -1,6 +1,6 @@
 {
-  "stage": "8.15.3-popup-cross-finalize",
-  "generatedAt": "2026-08-04T12:50:00+10:00",
+  "stage": "8.15.4-inactivity-yandex-reconciliation",
+  "generatedAt": "2026-08-04T15:08:58+10:00",
   "loadOrder": [
     "popup-bootstrap.js",
     "checklist-action-icons.js",
@@ -19,6 +19,7 @@
     "popup-document-replacement.js",
     "popup-session-enhancements.js",
     "popup-edit-session.js",
+    "popup-inactivity.js",
     "bitrix-user-picker.js",
     "bitrix-company-picker.js",
     "notification-draft-ui.js",
@@ -89,8 +90,8 @@
       "bytes": 19074
     },
     "popup-window-channel.js": {
-      "sha256": "4dd5ecc1576acbefd4f9a4d76cb59965a2e288afa6e58fffa121ae357fc07a72",
-      "bytes": 5006
+      "sha256": "5b9abaff9f29705db8745e4737f28bfb449fc23b4ae3ef2cf47050607f2f5723",
+      "bytes": 5316
     },
     "popup-upload-progress.js": {
       "sha256": "1ac521269bbc1ab10021985631974ccfe29aed3bf2524537aa1d2b3f99dc02de",
@@ -105,12 +106,16 @@
       "bytes": 25202
     },
     "popup-session-enhancements.js": {
-      "sha256": "264b067064bec1522fce486aa17074313ce0d3337fff8f5e7cbbcd563c21c558",
-      "bytes": 47424
+      "sha256": "d7a69806176b1faad882ba82dda293b921f59ebaa2d8e1191772858cc06eb510",
+      "bytes": 47985
     },
     "popup-edit-session.js": {
-      "sha256": "c8849b75c5df5ee98191076a6b308f988a944259766d8c822098464bcd996fd7",
-      "bytes": 13091
+      "sha256": "8cd402644dc0c9724b46b22c725e19a572232fa81d7105a8d3c094de9d6c7c42",
+      "bytes": 15502
+    },
+    "popup-inactivity.js": {
+      "sha256": "039f89a3adaea08cd3e3f8c3e6529bca4b3b85ad2860f22ae2ef29d20932c8d8",
+      "bytes": 6563
     },
     "bitrix-user-picker.js": {
       "sha256": "e69ee7af0913383cda4f02ba83279c64fe4650715532eee91176c47cfe57b1c9",
@@ -153,8 +158,8 @@
       "bytes": 485
     },
     "popup-renderer-id.js": {
-      "sha256": "3d50a2d4455f0cd86ec1111d69d3d0d4c39d1f860135de62af4fbcc2bb0b4b81",
-      "bytes": 5446
+      "sha256": "9ca7f840410d945507bf5715106ca132d2f7ea824d6560c6ba378d72821560b6",
+      "bytes": 6148
     },
     "popup-renderer-concept.js": {
       "sha256": "6a143212d9e7d7a6e8d7bc3e11b8b490b9c2a11786f845713df418f08ad7c347",
@@ -165,8 +170,8 @@
       "bytes": 4388
     },
     "popup-renderer-generic.js": {
-      "sha256": "8670542a719a30a20a267ad3b52f934f7a5b288a52f970d96941c5ed41397720",
-      "bytes": 6520
+      "sha256": "0fa7bb881a44d3e0ecf9fd14fc1bcce92fc48e90cf1f244388003ee726974125",
+      "bytes": 6583
     },
     "popup-renderer-configured-bim.js": {
       "sha256": "b266fb19a1f1f46e34a5c84b9b646c79563983b77f6bb5799889776a6f605194",
@@ -259,7 +264,11 @@
     "Stage 8.14 displays the ten most recent document assignments by stable seriesId in popup document rows.",
     "Stage 8.15 adds explicit manual retry controls for failed/blocked CRM, task and chat deliveries while preserving successful operations through existing idempotency keys.",
     "Bitrix hotfix 8.15.1 resumes stale same-user sessions, makes Save and Close return after durable local commit, hides non-error Yandex status labels and temporarily disables notification bells.",
-    "8.15.3: Bitrix host-cross close callback and compact idempotent unload finalization."
+    "8.15.3: Bitrix host-cross close callback and compact idempotent unload finalization.",
+    "Stage 8.15.4 separates the ID Not Required group into its own card with the same 14px spacing used by configured P/R panels.",
+    "Stage 8.15.4 tracks real popup and folder interactions, warns after 24 minutes, and runs the same durable finalize flow as Save and Close after 25 minutes.",
+    "Stage 8.15.4 sends lastActivityAt through the edit-session heartbeat and accepts an idempotent server-side inactivity finalization fallback.",
+    "Stage 8.15.4 startup reconciliation restores only current local documents without duplicating synced, queued or running Yandex upload jobs."
   ],
   "hashMode": "actual-file-bytes",
   "lineEndingNote": "Hashes are calculated from bytes written to disk. This is stable for Windows CRLF and Unix LF.",

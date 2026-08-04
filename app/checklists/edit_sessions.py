@@ -8,7 +8,11 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from app.db import get_conn
-from app.settings import EDIT_SESSION_TTL_SECONDS
+from app.settings import (
+    EDIT_SESSION_TTL_SECONDS,
+    EDIT_SESSION_HEARTBEAT_SECONDS,
+    EDIT_SESSION_INACTIVITY_SECONDS,
+)
 
 from app.checklists.utils import (
     clean_cell_value,
@@ -47,6 +51,10 @@ class EditSessionConflictError(EditSessionError):
 
 
 class EditSessionPermissionError(EditSessionError):
+    pass
+
+
+class EditSessionInactivityExpiredError(EditSessionConflictError):
     pass
 
 
@@ -125,6 +133,8 @@ def ensure_edit_session_tables() -> None:
             started_at TEXT,
             heartbeat_at TEXT,
             expires_at TEXT,
+            last_activity_at TEXT,
+            idle_expires_at TEXT,
             commit_started_at TEXT,
             committed_at TEXT,
             rollback_started_at TEXT,
@@ -149,6 +159,8 @@ def ensure_edit_session_tables() -> None:
     }
 
     edit_session_recovery_columns = {
+        "last_activity_at": "TEXT",
+        "idle_expires_at": "TEXT",
         "recovery_attempts": "INTEGER DEFAULT 0",
         "last_recovery_at": "TEXT",
         "last_recovery_source": "TEXT",
@@ -168,6 +180,11 @@ def ensure_edit_session_tables() -> None:
     cur.execute("""
         CREATE INDEX IF NOT EXISTS idx_edit_sessions_status_expiry
         ON edit_sessions(status, expires_at)
+    """)
+
+    cur.execute("""
+        CREATE INDEX IF NOT EXISTS idx_edit_sessions_status_idle_expiry
+        ON edit_sessions(status, idle_expires_at)
     """)
 
     cur.execute("""
@@ -423,6 +440,8 @@ def public_edit_session_payload(record: dict | None) -> dict:
         "startedAt": record.get("started_at") or "",
         "heartbeatAt": record.get("heartbeat_at") or "",
         "expiresAt": record.get("expires_at") or "",
+        "lastActivityAt": record.get("last_activity_at") or "",
+        "idleExpiresAt": record.get("idle_expires_at") or "",
         "commitStartedAt": (
             record.get("commit_started_at") or ""
         ),
@@ -527,6 +546,9 @@ def start_edit_session(
     expires_at = utc_after_seconds_iso(
         EDIT_SESSION_TTL_SECONDS
     )
+    idle_expires_at = utc_after_seconds_iso(
+        EDIT_SESSION_INACTIVITY_SECONDS
+    )
 
     conn = get_conn()
 
@@ -605,6 +627,8 @@ def start_edit_session(
                     close_reason = '',
                     heartbeat_at = ?,
                     expires_at = ?,
+                    last_activity_at = ?,
+                    idle_expires_at = ?,
                     updated_at = ?,
                     error = ''
                 WHERE session_id = ?
@@ -613,6 +637,8 @@ def start_edit_session(
                 normalized_client_session_id,
                 now,
                 expires_at,
+                now,
+                idle_expires_at,
                 now,
                 existing["session_id"],
             ))
@@ -643,6 +669,8 @@ def start_edit_session(
                 started_at,
                 heartbeat_at,
                 expires_at,
+                last_activity_at,
+                idle_expires_at,
                 commit_started_at,
                 committed_at,
                 rollback_started_at,
@@ -655,7 +683,7 @@ def start_edit_session(
             VALUES (
                 ?, ?, ?, ?, ?,
                 'active', '', ?,
-                ?, ?, ?,
+                ?, ?, ?, ?, ?,
                 '', '', '', '', '', '', ?, ?
             )
         """, (
@@ -668,6 +696,8 @@ def start_edit_session(
             now,
             now,
             expires_at,
+            now,
+            idle_expires_at,
             now,
             now,
         ))
@@ -688,33 +718,76 @@ def heartbeat_edit_session(
     session_id: str,
     dialog_id: str = "",
     user_id: str = "",
+    client_session_id: str = "",
+    last_activity_at: str = "",
 ) -> dict:
     ensure_edit_session_tables()
 
     normalized_session_id = clean_cell_value(session_id)
-
     if not normalized_session_id:
         raise ValueError("sessionId is required")
 
     record = get_edit_session(normalized_session_id)
-
     if not record:
-        raise EditSessionNotFoundError(
-            "edit session not found"
-        )
+        raise EditSessionNotFoundError("edit session not found")
 
-    validate_edit_session_identity(
-        record,
-        dialog_id,
-        user_id,
+    validate_edit_session_identity(record, dialog_id, user_id)
+
+    requested_client_session_id = clean_cell_value(client_session_id)
+    current_client_session_id = clean_cell_value(
+        record.get("client_session_id")
     )
+    if (
+        requested_client_session_id
+        and current_client_session_id
+        and requested_client_session_id != current_client_session_id
+    ):
+        raise EditSessionConflictError(
+            "edit session ownership moved to another popup window"
+        )
 
     if record.get("status") != "active":
-        raise EditSessionConflictError(
-            "edit session is not active"
+        raise EditSessionConflictError("edit session is not active")
+
+    now_dt = utc_now()
+    now = now_dt.isoformat(timespec="seconds")
+
+    # A confirmed user interaction may arrive together with the heartbeat.
+    # Advance activity monotonically and never accept a timestamp from the future.
+    current_activity = (
+        parse_iso_datetime(record.get("last_activity_at") or "")
+        or parse_iso_datetime(record.get("started_at") or "")
+        or now_dt
+    )
+    incoming_activity = parse_iso_datetime(last_activity_at)
+    if incoming_activity and incoming_activity > now_dt:
+        incoming_activity = now_dt
+    effective_activity = max(
+        current_activity,
+        incoming_activity or current_activity,
+    )
+    activity_advanced = effective_activity > current_activity
+
+    idle_expires = parse_iso_datetime(
+        record.get("idle_expires_at") or ""
+    )
+    if activity_advanced or not idle_expires:
+        idle_expires = effective_activity + timedelta(
+            seconds=EDIT_SESSION_INACTIVITY_SECONDS
         )
 
-    if is_edit_session_expired(record):
+    if idle_expires <= now_dt and not activity_advanced:
+        raise EditSessionInactivityExpiredError(
+            "edit session inactivity timeout"
+        )
+
+    # New sessions use the absolute inactivity deadline as the authoritative
+    # lifecycle timeout. The shorter heartbeat TTL remains only for legacy
+    # rows created before this column existed.
+    if (
+        not clean_cell_value(record.get("idle_expires_at"))
+        and is_edit_session_expired(record)
+    ):
         saved = expire_edit_session(
             normalized_session_id,
             reason="heartbeat_timeout_autosave",
@@ -725,28 +798,36 @@ def heartbeat_edit_session(
             else "edit session heartbeat expired"
         )
 
-    now = utc_now_iso()
-    expires_at = utc_after_seconds_iso(
-        EDIT_SESSION_TTL_SECONDS
+    expires_at = (
+        now_dt + timedelta(seconds=EDIT_SESSION_TTL_SECONDS)
+    ).isoformat(timespec="seconds")
+    effective_activity_iso = effective_activity.isoformat(
+        timespec="seconds"
     )
+    idle_expires_iso = idle_expires.isoformat(timespec="seconds")
 
     conn = get_conn()
-
-    cur = conn.execute("""
+    cur = conn.execute(
+        """
         UPDATE edit_sessions
         SET heartbeat_at = ?,
             expires_at = ?,
+            last_activity_at = ?,
+            idle_expires_at = ?,
             updated_at = ?,
             error = ''
         WHERE session_id = ?
           AND status = 'active'
-    """, (
-        now,
-        expires_at,
-        now,
-        normalized_session_id,
-    ))
-
+        """,
+        (
+            now,
+            expires_at,
+            effective_activity_iso,
+            idle_expires_iso,
+            now,
+            normalized_session_id,
+        ),
+    )
     conn.commit()
     updated = int(cur.rowcount or 0)
     conn.close()
@@ -973,6 +1054,7 @@ def complete_edit_session_commit(
             SET status = 'committed',
                 committed_at = ?,
                 expires_at = '',
+                idle_expires_at = '',
                 error = '',
                 updated_at = ?
             WHERE session_id = ?
@@ -1247,6 +1329,7 @@ def complete_edit_session_rollback(
             SET status = 'rolled_back',
                 rolled_back_at = ?,
                 expires_at = '',
+                idle_expires_at = '',
                 error = '',
                 updated_at = ?
             WHERE session_id = ?
@@ -1359,61 +1442,114 @@ def list_expired_edit_sessions(
     limit: int = 100,
 ) -> list[dict]:
     ensure_edit_session_tables()
-
-    safe_limit = max(
-        1,
-        min(int(limit or 100), 1000),
-    )
-
-    now = utc_now_iso()
+    safe_limit = max(1, min(int(limit or 100), 1000))
+    now_dt = utc_now()
+    now = now_dt.isoformat(timespec="seconds")
+    stale_heartbeat_before = (
+        now_dt - timedelta(
+            seconds=max(45, int(EDIT_SESSION_HEARTBEAT_SECONDS) * 3)
+        )
+    ).isoformat(timespec="seconds")
     conn = get_conn()
-
-    rows = conn.execute("""
-        SELECT *
+    rows = conn.execute(
+        """
+        SELECT *,
+               CASE
+                   WHEN COALESCE(idle_expires_at, '') <> ''
+                    AND idle_expires_at <= ?
+                   THEN 'inactivity'
+                   ELSE 'heartbeat'
+               END AS expiry_kind
         FROM edit_sessions
         WHERE status IN ('active', 'error')
-          AND expires_at <> ''
-          AND expires_at <= ?
-        ORDER BY expires_at ASC
+          AND (
+              (
+                  COALESCE(idle_expires_at, '') <> ''
+                  AND idle_expires_at <= ?
+                  AND (
+                      status = 'error'
+                      OR COALESCE(heartbeat_at, '') = ''
+                      OR heartbeat_at <= ?
+                  )
+              )
+              OR
+              (
+                  COALESCE(idle_expires_at, '') = ''
+                  AND COALESCE(expires_at, '') <> ''
+                  AND expires_at <= ?
+              )
+          )
+        ORDER BY
+            CASE
+                WHEN COALESCE(idle_expires_at, '') <> ''
+                 AND idle_expires_at <= ?
+                THEN idle_expires_at
+                ELSE expires_at
+            END ASC
         LIMIT ?
-    """, (
-        now,
-        safe_limit,
-    )).fetchall()
-
+        """,
+        (
+            now,
+            now,
+            stale_heartbeat_before,
+            now,
+            now,
+            safe_limit,
+        ),
+    ).fetchall()
     conn.close()
-
     return [dict(row) for row in rows]
+
+
+def _finalize_inactive_edit_session(record: dict, source: str) -> dict:
+    from app.checklists.session_finalization import (
+        finalize_edit_session_payload,
+    )
+
+    payload = {
+        "sessionId": record.get("session_id") or "",
+        "dialogId": record.get("dialog_id") or "",
+        "userId": record.get("user_id") or "",
+        "userName": record.get("user_name") or "",
+        "clientSessionId": record.get("client_session_id") or "",
+        "editor": {
+            "id": record.get("user_id") or "",
+            "name": record.get("user_name") or "",
+        },
+        "sessions": [],
+        "reason": "inactivity_timeout",
+        "closeEvent": "inactivity_timeout",
+        "source": clean_cell_value(source),
+    }
+    return finalize_edit_session_payload(payload)
 
 
 def sweep_expired_edit_sessions(
     source: str = "sweeper",
     limit: int = 100,
 ) -> dict:
-    """Commit expired sessions; never roll them back automatically."""
-    expired_records = list_expired_edit_sessions(
-        limit=limit
-    )
-
+    """Finalize inactivity with summary delivery; safely commit other expiry."""
+    expired_records = list_expired_edit_sessions(limit=limit)
     committed = []
+    inactivity_finalized = []
     errors = []
 
     for record in expired_records:
         session_id = record.get("session_id") or ""
-
         try:
-            result = expire_edit_session(
-                session_id,
-                reason=f"{source}_heartbeat_timeout_autosave",
-            )
-            committed.append(
-                public_edit_session_payload(result)
-            )
+            if record.get("expiry_kind") == "inactivity":
+                result = _finalize_inactive_edit_session(record, source)
+                inactivity_finalized.append(result)
+                latest = get_edit_session(session_id) or {}
+                committed.append(public_edit_session_payload(latest))
+            else:
+                result = expire_edit_session(
+                    session_id,
+                    reason=f"{source}_heartbeat_timeout_autosave",
+                )
+                committed.append(public_edit_session_payload(result))
         except Exception as exc:
-            errors.append({
-                "sessionId": session_id,
-                "error": str(exc),
-            })
+            errors.append({"sessionId": session_id, "error": str(exc)})
 
     return {
         "ok": not errors,
@@ -1421,10 +1557,12 @@ def sweep_expired_edit_sessions(
         "expiredFound": len(expired_records),
         "savedCount": len(committed),
         "committedCount": len(committed),
+        "inactivityFinalizedCount": len(inactivity_finalized),
         "rolledBackCount": 0,
         "errorCount": len(errors),
         "saved": committed,
         "committed": committed,
+        "inactivityFinalized": inactivity_finalized,
         "rolledBack": [],
         "errors": errors,
     }

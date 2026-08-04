@@ -1172,6 +1172,15 @@ function startLockHeartbeat() {
                 return;
             }
 
+            if (heartbeatResult.inactivityFinalized) {
+                stopLockHeartbeat();
+                window.dispatchEvent(new CustomEvent(
+                    'checklist-edit-session-inactivity-finalized',
+                    { detail: heartbeatResult }
+                ));
+                return;
+            }
+
             const hasCurrentLock = syncCurrentLockFromSessionHeartbeat(
                 heartbeatResult
             );
@@ -1364,7 +1373,11 @@ function popupHasPendingUploads() {
     );
 }
 
-async function finalizePopupSession(saveChanges) {
+async function finalizePopupSession(saveChanges, options = {}) {
+    const finalizeOptions = options && typeof options === 'object' ? options : {};
+    const finalizeReason = saveChanges
+        ? String(finalizeOptions.reason || 'save_and_close')
+        : 'cancel_button';
     if (
         popupFinalizationInProgress
         || popupFinalizeRequestInProgress
@@ -1381,7 +1394,7 @@ async function finalizePopupSession(saveChanges) {
         if (typeof settleInlineItemRename === 'function') {
             await settleInlineItemRename({
                 discard: !saveChanges,
-                reason: saveChanges ? 'save_and_close' : 'cancel_button'
+                reason: finalizeReason
             });
         }
     } catch (renameError) {
@@ -1446,7 +1459,7 @@ async function finalizePopupSession(saveChanges) {
 
         if (saveChanges) {
             persistResult = await finalizeDirtyChecklists(
-                'save_and_close',
+                finalizeReason,
                 false
             );
         } else {
@@ -1535,6 +1548,8 @@ async function finalizePopupSession(saveChanges) {
     closePopupWindow();
     return true;
 }
+
+window.finalizePopupSession = finalizePopupSession;
 
 function sendCloseSummaryOnce(eventName) {
     registerPopupCloseHandoff({

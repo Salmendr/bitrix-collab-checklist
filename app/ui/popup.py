@@ -21,6 +21,10 @@ from app.checklists.document_assignment_history import (
 )
 from app.yandex_disk.client import is_yandex_disk_enabled
 from app.ui.template_engine import render_ui_template
+from app.settings import (
+    EDIT_SESSION_INACTIVITY_SECONDS,
+    EDIT_SESSION_INACTIVITY_WARNING_SECONDS,
+)
 
 def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
     dialog_id = normalize_dialog_id(dialogId)
@@ -149,6 +153,12 @@ def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
         sorted(get_file_delete_allowed_user_ids()),
         ensure_ascii=False
     )
+    inactivity_seconds_json = json.dumps(
+        int(EDIT_SESSION_INACTIVITY_SECONDS)
+    )
+    inactivity_warning_seconds_json = json.dumps(
+        int(EDIT_SESSION_INACTIVITY_WARNING_SECONDS)
+    )
 
     return render_ui_template(
         "popup.html",
@@ -169,5 +179,7 @@ def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
             "POPUP_CHECKLIST_KEY_JSON": checklist_key_json,
             "POPUP_CHECKLIST_TITLE_JSON": checklist_title_json,
             "POPUP_FILE_DELETE_ALLOWED_USER_IDS_JSON": file_delete_allowed_user_ids_json,
+            "POPUP_INACTIVITY_SECONDS_JSON": inactivity_seconds_json,
+            "POPUP_INACTIVITY_WARNING_SECONDS_JSON": inactivity_warning_seconds_json,
         },
     )

@@ -7,6 +7,7 @@ from app.logging_utils import write_debug_log
 
 from app.checklists.edit_sessions import (
     EditSessionConflictError,
+    EditSessionInactivityExpiredError,
     EditSessionNotFoundError,
     EditSessionPermissionError,
     commit_edit_session,
@@ -181,12 +182,36 @@ async def api_checklist_edit_session_heartbeat(
     user_id = clean_cell_value(
         payload.get("userId")
     )
+    client_session_id = clean_cell_value(
+        payload.get("clientSessionId")
+    )
+    last_activity_at = clean_cell_value(
+        payload.get("lastActivityAt")
+    )
 
     try:
+        existing_session = get_edit_session_for_actor(
+            session_id=session_id,
+            dialog_id=dialog_id,
+            user_id=user_id,
+        )
+        if (
+            clean_cell_value(existing_session.get("status")) == "committed"
+            and clean_cell_value(existing_session.get("close_reason"))
+                == "inactivity_timeout"
+        ):
+            return JSONResponse({
+                "ok": True,
+                "session": public_edit_session_with_locks(existing_session),
+                "inactivityFinalized": True,
+            })
+
         session = heartbeat_edit_session(
             session_id=session_id,
             dialog_id=dialog_id,
             user_id=user_id,
+            client_session_id=client_session_id,
+            last_activity_at=last_activity_at,
         )
 
         heartbeat_all_edit_session_locks(
@@ -200,6 +225,23 @@ async def api_checklist_edit_session_heartbeat(
             "session": public_edit_session_with_locks(
                 session
             ),
+            "inactivityFinalized": False,
+        })
+
+    except EditSessionInactivityExpiredError:
+        # A live browser must run the normal Save-and-Close flow so its upload
+        # manager can reach idle first. The background sweeper finalizes only
+        # when this heartbeat itself has gone stale (frozen/closed browser).
+        current = get_edit_session_for_actor(
+            session_id=session_id,
+            dialog_id=dialog_id,
+            user_id=user_id,
+        )
+        return JSONResponse({
+            "ok": True,
+            "session": public_edit_session_with_locks(current),
+            "inactivityDue": True,
+            "inactivityFinalized": False,
         })
 
     except Exception as exc:

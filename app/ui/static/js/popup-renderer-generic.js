@@ -123,6 +123,7 @@ function setGenericSplitTableMode(enabled) {
     [leftTableEl, middleTableEl, rightTableEl].forEach(table => {
         if (!table) return;
         table.classList.toggle('generic-split-table', !!enabled);
+        if (enabled) table.classList.remove('id-split-table');
     });
 }
 

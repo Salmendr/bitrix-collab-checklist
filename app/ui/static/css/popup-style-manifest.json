@@ -1,5 +1,5 @@
 {
-  "version": "8.15.1-bitrix-hotfix",
+  "version": "8.15.4-inactivity-yandex-reconciliation",
   "orderedFiles": [
     "popup.css",
     "uploads.css",
@@ -22,16 +22,16 @@
     "notifications.css",
     "assignment-history.css"
   ],
-  "sourceSha256": "c0068a01b62d8d3393d5cc1dbb649f86d657f0bdd5cc4e87c2dcd36c3f15c5da",
-  "sourceLength": 47327,
-  "sourceLineCount": 2091,
+  "sourceSha256": "c93364da40b402016c181a429fafcf0fe117e3dc4ffc378bc0b95a46b27919b3",
+  "sourceLength": 48311,
+  "sourceLineCount": 2122,
   "boundaries": {
     "uploads": ".upload-progress-cards {",
     "checklist": ".content {",
     "documents": ".doc-cell {",
     "checklistOverrides": ".add-item-row {"
   },
-  "assetVersion": "8.15.1-bitrix-hotfix",
+  "assetVersion": "8.15.4-inactivity-yandex-reconciliation",
   "modules": {
     "popup.css": {
       "sha256": "6e8b8a6714fb2cf5357271a748c7676206ed924c7f8ee3090e66f143f69253f8",
@@ -42,8 +42,8 @@
       "bytes": 2452
     },
     "checklist.css": {
-      "sha256": "cdb0428c9ed918679f0810f7af7ba3ef8fa77a28d6a1a908354049b6e1447148",
-      "bytes": 6027
+      "sha256": "74247f1858c8669607b267e6c28136c466688f54ad879f024907c8c0ba81e13e",
+      "bytes": 7011
     },
     "action-controls.css": {
       "sha256": "733ab12942f7935c0c20f79e343ae702e987fe19b940fa5f0ac29025eb46a40d",
@@ -84,6 +84,7 @@
     "Stage 8.12 adds project curator status and manual fallback styles to the shared notification form.",
     "Stage 8.14 adds the shared popup and folder assignment-history disclosure and delivery-status cards.",
     "Stage 8.15 adds retry-only-failed delivery controls and status feedback to assignment history cards.",
-    "Bitrix hotfix 8.15.1 uses a new asset version for the production iframe regression fixes."
+    "Bitrix hotfix 8.15.1 uses a new asset version for the production iframe regression fixes.",
+    "Stage 8.15.4 adds the separated ID Not Required card and the fixed inactivity warning banner."
   ]
 }

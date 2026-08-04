@@ -66,19 +66,33 @@ if (!popupIdRendererCommon) {
                     ? groups.find(g => Number(g.id) === 4)
                     : null;
 
-                const panelHtml = `
-                    <div class="table id-table">
+                const mainPanel = `
+                    <div class="id-subtable">
                         <div class="thead">
                             ${buildIdHeader(mainGroup, showDates)}
                         </div>
                         <div>
                             ${renderIdGroup(mainGroup, showDates)}
-                            ${appendNotRequired && notRequiredGroup && hasItemsInGroup(4) ? renderIdGroup(notRequiredGroup, false) : ''}
                         </div>
                     </div>
                 `;
 
-                return panelHtml;
+                const notRequiredPanel = (
+                    appendNotRequired
+                    && notRequiredGroup
+                    && hasItemsInGroup(4)
+                ) ? `
+                    <div class="id-subtable">
+                        <div class="thead">
+                            ${buildIdHeader(notRequiredGroup, false)}
+                        </div>
+                        <div>
+                            ${renderIdGroup(notRequiredGroup, false)}
+                        </div>
+                    </div>
+                ` : '';
+
+                return mainPanel + notRequiredPanel;
             }
 
             function renderIdTables() {
@@ -91,6 +105,11 @@ if (!popupIdRendererCommon) {
                 const otherGroup = groups.find(g => Number(g.id) === 3) || { id: 3, title: 'Прочее' };
 
                 tablesGridEl.classList.add('id-three-cols');
+                [leftTableEl, middleTableEl, rightTableEl].forEach(table => {
+                    if (!table) return;
+                    table.classList.remove('generic-split-table');
+                    table.classList.add('id-split-table');
+                });
                 tablesGridEl.style.gridTemplateColumns = 'minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr)';
                 tablesGridEl.style.justifyContent = '';
 

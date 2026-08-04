@@ -2117,7 +2117,7 @@ def api_checklist_folder(
     ui_static_base_url = (
         f"{app_base_path}/ui-static"
     )
-    ui_asset_version = "8.15.1-bitrix-hotfix"
+    ui_asset_version = "8.15.4-inactivity-yandex"
     popup_url = (
         f"{app_base_path}/popup"
         f"?dialogId={quote(dialog_id, safe='')}"

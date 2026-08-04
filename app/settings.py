@@ -40,6 +40,20 @@ EDIT_SESSION_TTL_SECONDS = 300
 EDIT_SESSION_HEARTBEAT_SECONDS = 20
 EDIT_SESSION_SWEEP_SECONDS = 15
 
+# Stage 8.15.4: absolute inactivity is equivalent to Save and Close.
+# The warning is shown one minute before the automatic durable commit.
+EDIT_SESSION_INACTIVITY_SECONDS = max(60, int(os.getenv(
+    "EDIT_SESSION_INACTIVITY_SECONDS",
+    "1500",
+)))
+EDIT_SESSION_INACTIVITY_WARNING_SECONDS = max(10, min(
+    EDIT_SESSION_INACTIVITY_SECONDS - 1,
+    int(os.getenv(
+        "EDIT_SESSION_INACTIVITY_WARNING_SECONDS",
+        "60",
+    )),
+))
+
 def ensure_runtime_directories():
     """
     Создаёт только штатные runtime-директории приложения.

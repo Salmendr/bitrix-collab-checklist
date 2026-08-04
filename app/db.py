@@ -176,6 +176,8 @@ def init_db():
             started_at TEXT,
             heartbeat_at TEXT,
             expires_at TEXT,
+            last_activity_at TEXT,
+            idle_expires_at TEXT,
             commit_started_at TEXT,
             committed_at TEXT,
             rollback_started_at TEXT,
@@ -200,6 +202,8 @@ def init_db():
     }
 
     edit_session_recovery_columns = {
+        "last_activity_at": "TEXT",
+        "idle_expires_at": "TEXT",
         "recovery_attempts": "INTEGER DEFAULT 0",
         "last_recovery_at": "TEXT",
         "last_recovery_source": "TEXT",
@@ -219,6 +223,11 @@ def init_db():
     cur.execute("""
         CREATE INDEX IF NOT EXISTS idx_edit_sessions_status_expiry
         ON edit_sessions(status, expires_at)
+    """)
+
+    cur.execute("""
+        CREATE INDEX IF NOT EXISTS idx_edit_sessions_status_idle_expiry
+        ON edit_sessions(status, idle_expires_at)
     """)
 
     cur.execute("""

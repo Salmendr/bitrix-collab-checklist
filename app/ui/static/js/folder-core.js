@@ -236,6 +236,52 @@
             : null
     );
 
+    let folderActivityLastPublishedAt = 0;
+    function publishFolderUserActivity(eventType = 'interaction') {
+        const now = Date.now();
+        if (now - folderActivityLastPublishedAt < 750) return;
+        folderActivityLastPublishedAt = now;
+        const payload = {
+            activityAt: new Date(now).toISOString(),
+            eventType: String(eventType || 'interaction'),
+            sessionId: getFolderEditSessionId(),
+            checklistKey: folderChecklistKey,
+            itemId: folderItemId
+        };
+        if (folderWindowChannel) {
+            folderWindowChannel.publish('checklist-user-activity', payload);
+        }
+        try {
+            if (global.opener && !global.opener.closed) {
+                global.opener.postMessage({
+                    type: 'checklist-user-activity',
+                    ...payload
+                }, global.location.origin);
+            }
+        } catch (error) {
+            // BroadcastChannel remains the primary transport.
+        }
+    }
+
+    ['pointerdown', 'keydown', 'input', 'change', 'dragstart', 'drop', 'touchstart'].forEach(
+        eventName => global.document.addEventListener(
+            eventName,
+            event => {
+                if (event.isTrusted === false) return;
+                publishFolderUserActivity(eventName);
+            },
+            { capture: true, passive: true }
+        )
+    );
+    global.document.addEventListener(
+        'scroll',
+        event => {
+            if (event.isTrusted === false) return;
+            publishFolderUserActivity('scroll');
+        },
+        { capture: true, passive: true }
+    );
+
     global.ChecklistFolderArchiveBootstrap = Object.freeze({
         deleteApiUrl: folderArchiveDeleteApiUrl,
         dialogId: folderDialogId,

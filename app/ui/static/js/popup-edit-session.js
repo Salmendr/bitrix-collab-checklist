@@ -5,6 +5,10 @@
     let activeSessionStatus = 'idle';
     let lastSessionError = '';
     let startPromise = null;
+    let lastActivityAt = new Date().toISOString();
+    let heartbeatPromise = null;
+    let activityHeartbeatTimer = null;
+    let lastActivityHeartbeatAt = 0;
 
     function emitSessionState() {
         try {
@@ -165,39 +169,68 @@
         if (!activeSessionId || activeSessionStatus !== 'active') {
             return null;
         }
+        if (heartbeatPromise) {
+            return heartbeatPromise;
+        }
 
-        const identity = actor();
+        heartbeatPromise = (async function () {
+            const identity = actor();
+            try {
+                const result = await post(
+                    'api/checklist/session/heartbeat',
+                    {
+                        sessionId: activeSessionId,
+                        dialogId,
+                        userId: identity.userId,
+                        clientSessionId,
+                        lastActivityAt
+                    }
+                );
+
+                if (result.inactivityFinalized) {
+                    setSessionStatus('committed');
+                    global.dispatchEvent(new CustomEvent(
+                        'checklist-edit-session-inactivity-finalized',
+                        { detail: result }
+                    ));
+                    return result;
+                }
+                if (result.inactivityDue) {
+                    global.dispatchEvent(new CustomEvent(
+                        'checklist-edit-session-inactivity-due',
+                        { detail: result }
+                    ));
+                    return result;
+                }
+
+                setSessionStatus(
+                    String(
+                        result.session
+                        && result.session.status
+                        || 'active'
+                    ).trim()
+                );
+                return result;
+            } catch (error) {
+                const errorText = String(
+                    error && error.message || error || ''
+                );
+                activeSessionId = '';
+                setSessionStatus('failed', errorText);
+                if (!silent) {
+                    console.log('edit session heartbeat error:', error);
+                }
+                return null;
+            }
+        })();
 
         try {
-            const result = await post(
-                'api/checklist/session/heartbeat',
-                {
-                    sessionId: activeSessionId,
-                    dialogId,
-                    userId: identity.userId
-                }
-            );
-
-            setSessionStatus(
-                String(
-                    result.session
-                    && result.session.status
-                    || 'active'
-                ).trim()
-            );
-            return result;
-        } catch (error) {
-            const errorText = String(
-                error && error.message || error || ''
-            );
-            activeSessionId = '';
-            setSessionStatus('failed', errorText);
-            if (!silent) {
-                console.log('edit session heartbeat error:', error);
-            }
-            return null;
+            return await heartbeatPromise;
+        } finally {
+            heartbeatPromise = null;
         }
     }
+
 
     async function commit(reason = 'save_and_close') {
         await ensureActive();
@@ -416,6 +449,37 @@
         return queued;
     }
 
+    function noteActivity(activityValue = '') {
+        const parsed = new Date(activityValue || Date.now());
+        if (Number.isNaN(parsed.getTime())) return lastActivityAt;
+        const now = Date.now();
+        const clamped = new Date(Math.min(parsed.getTime(), now));
+        if (clamped.getTime() > new Date(lastActivityAt).getTime()) {
+            lastActivityAt = clamped.toISOString();
+        }
+
+        // Throttled immediate sync prevents a real interaction near the
+        // 25-minute boundary from racing the server-side fallback.
+        if (
+            activeSessionId
+            && activeSessionStatus === 'active'
+            && now - lastActivityHeartbeatAt >= 5000
+            && !activityHeartbeatTimer
+        ) {
+            activityHeartbeatTimer = global.setTimeout(async function () {
+                activityHeartbeatTimer = null;
+                lastActivityHeartbeatAt = Date.now();
+                await heartbeat(true);
+            }, 100);
+        }
+        return lastActivityAt;
+    }
+
+
+    function getLastActivityAt() {
+        return lastActivityAt;
+    }
+
     function invalidate(errorText = '') {
         activeSessionId = '';
         setSessionStatus(
@@ -456,6 +520,8 @@
         getSessionId,
         getStatus,
         isActive,
-        getLastError
+        getLastError,
+        noteActivity,
+        getLastActivityAt
     });
 })(window);
