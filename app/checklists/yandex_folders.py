@@ -32,17 +32,37 @@ from app.checklists.yandex_warmup_control import is_yandex_warmup_stop_requested
 from app.yandex_disk.client import (
     is_yandex_disk_enabled,
     normalize_yandex_disk_path,
+    yandex_disk_client_url,
     yandex_disk_upload_bytes,
     yandex_disk_upload_file,
     yandex_disk_ensure_folder,
     yandex_disk_publish_path,
     yandex_disk_get_resource_meta,
+    yandex_disk_try_get_resource_meta,
+    yandex_disk_list_folder_children,
     yandex_disk_move_path,
 )
 
 
 
 ACTIVE_YANDEX_WARMUPS: set[str] = set()
+
+
+class YandexFolderConflictError(RuntimeError):
+    def __init__(self, source_path: str, target_path: str):
+        self.candidates = [
+            {
+                "name": clean_cell_value(path).rstrip("/").rsplit("/", 1)[-1],
+                "path": normalize_yandex_disk_path(path),
+                "url": yandex_disk_client_url(path),
+                "clientUrl": yandex_disk_client_url(path),
+            }
+            for path in (source_path, target_path)
+            if clean_cell_value(path)
+        ]
+        super().__init__(
+            "Конфликт папок Яндекс.Диска — источник и целевая папка существуют."
+        )
 
 def can_create_custom_item_yandex_folder(dialog_id: str, checklist_key: str) -> bool:
     config = get_checklist_config(checklist_key)
@@ -68,6 +88,62 @@ def sanitize_yandex_folder_name(value: str) -> str:
     value = re.sub(r'[<>:"/\\\\|?*]+', "_", value)
     value = re.sub(r"\s+", " ", value).strip()
     return value or "Новый пункт"
+
+
+CUSTOM_FOLDER_PREFIX_RE = re.compile(r"^(\d{1,4})[_\-\s]+(.+)$")
+
+
+def split_custom_folder_prefix(folder_name: str) -> tuple[int, str]:
+    normalized = clean_cell_value(folder_name)
+    match = CUSTOM_FOLDER_PREFIX_RE.match(normalized)
+    if not match:
+        return 0, normalized
+    return int(match.group(1) or 0), clean_cell_value(match.group(2))
+
+
+def custom_folder_base_name(folder_name: str) -> str:
+    return split_custom_folder_prefix(folder_name)[1]
+
+
+def next_free_custom_folder_prefix(parent_path: str) -> int:
+    used: set[int] = set()
+    for child in yandex_disk_list_folder_children(parent_path):
+        if clean_cell_value(child.get("type")).lower() != "dir":
+            continue
+        prefix, _ = split_custom_folder_prefix(child.get("name") or "")
+        if prefix > 0:
+            used.add(prefix)
+    # A queued structure job is a durable prefix reservation even before the
+    # corresponding remote folder exists. This prevents two rapidly created
+    # custom items from receiving the same number.
+    from app.checklists.yandex_structure_jobs import (
+        list_reserved_yandex_structure_target_paths,
+    )
+    for target_path in list_reserved_yandex_structure_target_paths(parent_path):
+        prefix, _ = split_custom_folder_prefix(
+            target_path.rstrip("/").rsplit("/", 1)[-1]
+        )
+        if prefix > 0:
+            used.add(prefix)
+    prefix = 1
+    while prefix in used:
+        prefix += 1
+    return prefix
+
+
+def build_stable_custom_folder_target_path(
+    *,
+    parent_path: str,
+    item_name: str,
+    preserve_source_name: str = "",
+) -> str:
+    parent = normalize_yandex_disk_path(parent_path).rstrip("/")
+    base_name = sanitize_yandex_folder_name(item_name)
+    preserved_prefix, _ = split_custom_folder_prefix(preserve_source_name)
+    prefix = preserved_prefix or next_free_custom_folder_prefix(parent)
+    return normalize_yandex_disk_path(
+        f"{parent}/{prefix:02d}_{base_name}"
+    )
 
 
 def get_folder_specs_for_checklist(checklist_key: str) -> dict:
@@ -1026,6 +1102,7 @@ def ensure_yandex_folder_for_custom_item(
     group_id: int,
     item_name: str,
     item_id: str,
+    target_path: str = "",
 ) -> dict:
     checklist_key = normalize_checklist_key(checklist_key)
     parent_path = resolve_custom_item_parent_yandex_path(
@@ -1037,9 +1114,16 @@ def ensure_yandex_folder_for_custom_item(
     if not parent_path:
         raise RuntimeError("Yandex root path not found in project storage context")
 
-    folder_name = sanitize_yandex_folder_name(item_name)
+    folder_path = (
+        normalize_yandex_disk_path(target_path)
+        if clean_cell_value(target_path)
+        else build_stable_custom_folder_target_path(
+            parent_path=parent_path,
+            item_name=item_name,
+        )
+    )
+    folder_name = folder_path.rstrip("/").rsplit("/", 1)[-1]
     folder_alias = f"{checklist_key}_{slugify_folder_part(item_id or item_name)}"
-    folder_path = normalize_yandex_disk_path(f"{parent_path.rstrip('/')}/{folder_name}")
 
     folder_meta = ensure_folder_and_get_public_url(folder_path)
 
@@ -1256,14 +1340,22 @@ def build_item_yandex_relocation_spec(
         if source_path
         else sanitize_yandex_folder_name(source_name or target_name)
     )
-    target_folder_name = (
-        sanitize_yandex_folder_name(target_name)
-        if is_custom
-        else _preserve_standard_folder_prefix(
+    if is_custom and same_group:
+        source_prefix, _ = split_custom_folder_prefix(source_folder_name)
+        target_folder_name = (
+            f"{source_prefix:02d}_{sanitize_yandex_folder_name(target_name)}"
+            if source_prefix
+            else sanitize_yandex_folder_name(target_name)
+        )
+    elif is_custom:
+        # The next free prefix in the new section is resolved by the worker
+        # while holding the project resource lock.
+        target_folder_name = sanitize_yandex_folder_name(target_name)
+    else:
+        target_folder_name = _preserve_standard_folder_prefix(
             source_folder_name,
             target_name,
         )
-    )
     target_path = (
         normalize_yandex_disk_path(
             f"{target_parent.rstrip('/')}/{target_folder_name}"
@@ -1538,11 +1630,18 @@ def build_item_yandex_rename_spec(
 
     if source_path:
         parent_path, source_folder_name = _split_yandex_parent_and_name(source_path)
-        target_folder_name = (
-            sanitize_yandex_folder_name(new_name)
-            if is_custom
-            else _preserve_standard_folder_prefix(source_folder_name, new_name)
-        )
+        if is_custom:
+            source_prefix, _ = split_custom_folder_prefix(source_folder_name)
+            target_folder_name = (
+                f"{source_prefix:02d}_{sanitize_yandex_folder_name(new_name)}"
+                if source_prefix
+                else sanitize_yandex_folder_name(new_name)
+            )
+        else:
+            target_folder_name = _preserve_standard_folder_prefix(
+                source_folder_name,
+                new_name,
+            )
         target_path = normalize_yandex_disk_path(
             f"{parent_path.rstrip('/')}/{target_folder_name}"
         )
@@ -1674,11 +1773,29 @@ def rename_yandex_folder_for_item(
     if target_parent:
         ensure_yandex_folder_chain(target_parent)
 
-    move_result = yandex_disk_move_path(
-        source_path,
-        target_path,
-        overwrite=False,
-    )
+    source_meta = yandex_disk_try_get_resource_meta(source_path)
+    target_meta = yandex_disk_try_get_resource_meta(target_path)
+    if source_meta and target_meta and source_path != target_path:
+        raise YandexFolderConflictError(source_path, target_path)
+    if not source_meta and not target_meta:
+        raise RuntimeError("Yandex source folder path is unavailable")
+
+    if source_meta:
+        move_result = yandex_disk_move_path(
+            source_path,
+            target_path,
+            overwrite=False,
+        )
+    else:
+        # A worker can restart after the remote move succeeded but before the
+        # SQLite job was marked completed. Continue publishing/mapping the
+        # already moved target instead of creating or overwriting anything.
+        move_result = {
+            "ok": True,
+            "sourcePath": source_path,
+            "targetPath": target_path,
+            "resumedAfterMove": True,
+        }
     yandex_disk_publish_path(target_path)
     meta = yandex_disk_get_resource_meta(target_path)
     folder_name = clean_cell_value(meta.get("name")) or target_path.rsplit("/", 1)[-1]
@@ -1936,13 +2053,10 @@ def ensure_item_yandex_folder_for_upload(
         return existing
 
     if is_custom:
-        restored = ensure_yandex_folder_for_custom_item(
-            dialog_id=dialog_id,
-            checklist_key=checklist_key,
-            group_id=item_group,
-            item_name=item_name,
-            item_id=item_id,
-        )
+        # Legacy custom paths must first pass conflict-aware reconciliation.
+        # Creating a folder here could duplicate an old folder in a wrong
+        # section, so the mirror job remains recoverable instead.
+        return None
     else:
         restored = ensure_standard_yandex_folder_for_item(
             dialog_id=dialog_id,

@@ -32,6 +32,7 @@ from app.checklists.upload_jobs import (
     list_pending_yandex_job_ids,
     list_pending_yandex_job_ids_for_item,
     list_yandex_folder_resolution_error_job_ids,
+    list_yandex_upload_error_job_ids,
     retry_failed_yandex_upload_job,
     claim_upload_job,
     update_upload_job_progress,
@@ -56,6 +57,9 @@ from app.checklists.document_replacements import (
 )
 
 from app.checklists.yandex_folders import mirror_document_file_to_yandex
+from app.checklists.yandex_resource_locks import (
+    yandex_project_resource_guard,
+)
 from app.yandex_disk.client import (
     is_yandex_disk_enabled,
     yandex_disk_delete_path,
@@ -467,6 +471,125 @@ def requeue_yandex_folder_resolution_failures(
         "results": results,
     }
     write_debug_log("yandex_folder_resolution_failures_requeued", result)
+    return result
+
+
+def requeue_current_yandex_file_failures(
+    *,
+    dialog_id: str = "",
+    checklist_key: str = "",
+    item_id: str = "",
+    source: str = "manual_recovery",
+) -> dict:
+    """Retry only failed jobs for current, local, not-yet-synced files."""
+    job_ids = list_yandex_upload_error_job_ids(
+        dialog_id=dialog_id,
+        checklist_key=checklist_key,
+        item_id=item_id,
+        limit=500,
+    )
+    results = []
+    requeued = 0
+    queued = 0
+
+    for job_id in job_ids:
+        job = get_upload_job(job_id) or {}
+        found = find_document_in_checklist(
+            job.get("dialog_id"),
+            job.get("checklist_key"),
+            job.get("item_id"),
+            job.get("document_id"),
+        )
+        if not found:
+            results.append({
+                "jobId": job_id,
+                "skipped": True,
+                "reason": "document no longer exists",
+            })
+            continue
+        _, item, document = found
+        if clean_cell_value(document.get("mirrorStatus")).lower() == "synced":
+            results.append({
+                "jobId": job_id,
+                "skipped": True,
+                "reason": "document is already synced",
+            })
+            continue
+        local_path = clean_cell_value(job.get("local_path"))
+        if not local_path or not Path(local_path).is_file():
+            results.append({
+                "jobId": job_id,
+                "skipped": True,
+                "reason": "local file is unavailable",
+            })
+            continue
+
+        latest_structure = get_latest_yandex_structure_job_for_item(
+            dialog_id=job.get("dialog_id"),
+            checklist_key=job.get("checklist_key"),
+            item_id=job.get("item_id"),
+        ) or {}
+        structure_status = clean_cell_value(
+            latest_structure.get("status")
+        ).lower()
+        if structure_status in {"queued", "running", "error", "conflict"}:
+            results.append({
+                "jobId": job_id,
+                "skipped": True,
+                "reason": "folder structure is not ready",
+                "structureJobId": latest_structure.get("job_id") or "",
+                "structureStatus": structure_status,
+            })
+            continue
+        if (
+            not latest_structure
+            and not clean_cell_value(item.get("yandexFolderPath"))
+        ):
+            results.append({
+                "jobId": job_id,
+                "skipped": True,
+                "reason": "folder dependency is unavailable",
+            })
+            continue
+
+        retried = retry_failed_yandex_upload_job(job_id) or {}
+        if clean_cell_value(retried.get("status")) != "queued":
+            results.append({
+                "jobId": job_id,
+                "skipped": True,
+                "reason": "job could not be returned to queued state",
+            })
+            continue
+        update_document_mirror_fields(
+            job.get("dialog_id"),
+            job.get("checklist_key"),
+            job.get("item_id"),
+            job.get("document_id"),
+            {"mirrorStatus": "queued", "mirrorError": ""},
+        )
+        requeued += 1
+        enqueue_result = enqueue_yandex_mirror_job(
+            job_id,
+            source=f"{source}_file_retry",
+        )
+        if enqueue_result.get("queued"):
+            queued += 1
+        results.append({
+            "jobId": job_id,
+            "requeued": True,
+            "enqueueResult": enqueue_result,
+        })
+
+    result = {
+        "ok": True,
+        "source": source,
+        "found": len(job_ids),
+        "requeued": requeued,
+        "queued": queued,
+        "skipped": len(job_ids) - requeued,
+        "results": results,
+    }
+    write_debug_log("yandex_current_file_failures_requeued", result)
     return result
 
 
@@ -988,7 +1111,13 @@ def process_yandex_mirror_job(job_id: str):
     job_type = clean_cell_value(job.get("job_type"))
 
     if job_type == "upload":
-        process_upload_job(job)
+        with yandex_project_resource_guard(
+            job.get("dialog_id") or "",
+            checklist_key=job.get("checklist_key") or "",
+            item_id=job.get("item_id") or "",
+            operation="upload_file",
+        ):
+            process_upload_job(job)
 
         replacement_result = (
             handle_document_replacement_after_job(
@@ -1030,7 +1159,13 @@ def process_yandex_mirror_job(job_id: str):
         return
 
     if job_type == "delete":
-        process_delete_job(job)
+        with yandex_project_resource_guard(
+            job.get("dialog_id") or "",
+            checklist_key=job.get("checklist_key") or "",
+            item_id=job.get("item_id") or "",
+            operation="delete_file",
+        ):
+            process_delete_job(job)
 
         replacement_result = (
             handle_document_replacement_after_job(

@@ -23,6 +23,9 @@ from app.checklists.yandex_warmup_control import (
     is_yandex_warmup_stop_requested,
     get_yandex_warmup_stop_state,
 )
+from app.checklists.yandex_resource_locks import (
+    yandex_project_resource_guard,
+)
 
 
 def get_yandex_warmup_worker_count() -> int:
@@ -260,7 +263,11 @@ def yandex_warmup_worker(worker_index: int):
         })
 
         try:
-            result = run_project_yandex_folder_warmup(dialog_id)
+            with yandex_project_resource_guard(
+                dialog_id,
+                operation="project_folder_warmup",
+            ):
+                result = run_project_yandex_folder_warmup(dialog_id)
 
             write_debug_log("yandex_warmup_queue_item_finished", {
                 "dialogId": dialog_id,

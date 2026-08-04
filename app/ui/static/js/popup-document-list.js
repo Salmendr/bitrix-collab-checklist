@@ -3,13 +3,16 @@
 // Stage 8.2: technical Yandex folder state is separated from the local item folder.
 function normalizeYandexFolderStatus(value) {
     const normalized = String(value || '').trim().toLowerCase();
-    return ['queued', 'running', 'ready', 'error', 'disabled'].includes(normalized)
+    return ['queued', 'running', 'ready', 'error', 'conflict', 'disabled'].includes(normalized)
         ? normalized
         : '';
 }
 
 function getYandexFolderStateText(status, action = '') {
     const normalizedAction = String(action || '').trim();
+    if (status === 'conflict') {
+        return 'Конфликт папок Яндекс.Диска — нажмите Яндекс для проверки';
+    }
     if (status !== 'error') return '';
     if (normalizedAction === 'move_item_folder') {
         return 'Ошибка перемещения папки — нажмите Яндекс для повтора';
@@ -74,11 +77,16 @@ function buildDocumentCell(item) {
             : { disabled: false, reason: '' }
     );
     const stageYandexDisabled = !!stageYandexAvailability.disabled;
+    const mirrorErrorDocuments = documents.filter(doc => (
+        String(doc && doc.mirrorStatus || '').trim().toLowerCase() === 'error'
+    ));
+    const hasMirrorErrors = mirrorErrorDocuments.length > 0;
     const yandexPending = ['queued', 'running'].includes(
         yandexFolderStatus
     );
     const yandexDisabled = yandexFolderStatus === 'disabled';
-    const yandexRetry = yandexFolderStatus === 'error';
+    const yandexConflict = yandexFolderStatus === 'conflict';
+    const yandexRetry = yandexFolderStatus === 'error' || hasMirrorErrors;
     const yandexButtonDisabled = (
         stageYandexDisabled
         || yandexPending
@@ -86,8 +94,10 @@ function buildDocumentCell(item) {
     );
     const yandexButtonTitle = stageYandexDisabled
         ? 'Открыть папку пункта на Яндекс.Диске'
-        : yandexRetry
-            ? 'Повторить создание папки на Яндекс.Диске'
+        : yandexConflict
+            ? 'Показать конфликт папок Яндекс.Диска'
+            : yandexRetry
+            ? 'Повторить только неуспешную синхронизацию Яндекс.Диска'
             : yandexPending
                 ? 'Операция с папкой Яндекс.Диска выполняется'
                 : yandexDisabled
@@ -164,6 +174,15 @@ function buildDocumentCell(item) {
                 ></div>
             </div>
         ` : '';
+        const mirrorErrorHtml = mirrorStatus === 'error' ? `
+            <div
+                class="doc-yandex-file-error"
+                data-role="yandex-file-error"
+                title="${esc(mirrorError || 'Ошибка синхронизации файла')}"
+            >
+                Ошибка синхронизации файла: ${esc(docName)}
+            </div>
+        ` : '';
 
         return `
             <div class="doc-file-block">
@@ -196,6 +215,7 @@ function buildDocumentCell(item) {
                     ${iconSvg('replace')}
                 </button>
             </div>
+            ${mirrorErrorHtml}
             ${historyHtml}
             </div>
         `;
@@ -261,6 +281,7 @@ function buildDocumentCell(item) {
                         data-yandex-folder-url="${esc(yandexFolderUrl)}"
                         data-yandex-action="${esc(yandexStructureAction)}"
                         data-structure-job-id="${esc(yandexStructureJobId)}"
+                        data-has-mirror-errors="${hasMirrorErrors ? '1' : '0'}"
                         data-stage-yandex-disabled="${stageYandexDisabled ? '1' : '0'}"
                         title="${esc(yandexButtonTitle)}"
                         aria-label="${esc(yandexButtonTitle)}"

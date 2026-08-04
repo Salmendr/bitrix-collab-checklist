@@ -1,5 +1,5 @@
 {
-  "version": "8.15.5-id-yandex-folder-return",
+  "version": "8.15.6-yandex-recovery",
   "orderedFiles": [
     "popup.css",
     "uploads.css",
@@ -31,7 +31,7 @@
     "documents": ".doc-cell {",
     "checklistOverrides": ".add-item-row {"
   },
-  "assetVersion": "8.15.5-id-yandex-folder-return",
+  "assetVersion": "8.15.6-yandex-recovery",
   "modules": {
     "popup.css": {
       "sha256": "6e8b8a6714fb2cf5357271a748c7676206ed924c7f8ee3090e66f143f69253f8",
@@ -50,8 +50,8 @@
       "bytes": 3925
     },
     "documents.css": {
-      "sha256": "bc639d39467f0b9bb33d0e3e810ccd921179a9fc0737d3ab27c36df4916826a8",
-      "bytes": 8086
+      "sha256": "d031a8fcbd926f2a0e5a1cb2e60a34bed96d2182d1b1f7d21d3c3032607cf3d2",
+      "bytes": 9531
     },
     "checklist-overrides.css": {
       "sha256": "e973250044cb058101787ee202808d9020043de46645e764bc422ebf9361d979",
@@ -86,6 +86,7 @@
     "Stage 8.15 adds retry-only-failed delivery controls and status feedback to assignment history cards.",
     "Bitrix hotfix 8.15.1 uses a new asset version for the production iframe regression fixes.",
     "Stage 8.15.4 adds the separated ID Not Required card and the fixed inactivity warning banner.",
-    "Stage 8.15.5 highlights the exact checklist row briefly after returning from an item folder."
+    "Stage 8.15.5 highlights the exact checklist row briefly after returning from an item folder.",
+    "Stage 8.15.6 renders separate folder conflicts and per-file Yandex mirror errors."
   ]
 }

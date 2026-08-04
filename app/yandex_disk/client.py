@@ -1,9 +1,13 @@
 import requests
 import time
 from pathlib import Path
+from urllib.parse import quote
 from app.settings import (
     YANDEX_DISK_OAUTH_TOKEN,
     YANDEX_DISK_API_BASE,
+)
+from app.checklists.yandex_resource_locks import (
+    run_with_yandex_resource_retry,
 )
 
 
@@ -38,20 +42,62 @@ def normalize_yandex_disk_path(path: str) -> str:
     return "disk:/" + value
 
 
+def yandex_disk_client_url(target_path: str) -> str:
+    normalized = normalize_yandex_disk_path(target_path)
+    relative = normalized[len("disk:/"):].strip("/") if normalized else ""
+    return "https://disk.yandex.ru/client/disk/" + quote(relative, safe="/")
+
+
+def _response_payload(response) -> dict:
+    try:
+        payload = response.json() or {}
+        return payload if isinstance(payload, dict) else {"payload": payload}
+    except Exception:
+        return {"text": clean_disk_value(getattr(response, "text", ""))}
+
+
+def _request_with_resource_retry(
+    request_factory,
+    *,
+    operation_name: str,
+    accepted_statuses: tuple[int, ...] | None = None,
+):
+    def perform():
+        response = request_factory()
+        accepted = (
+            response.status_code in accepted_statuses
+            if accepted_statuses is not None
+            else 200 <= int(response.status_code or 0) < 300
+        )
+        if not accepted:
+            raise RuntimeError(
+                f"Yandex Disk {operation_name} failed "
+                f"(status {response.status_code}): "
+                f"{_response_payload(response)}"
+            )
+        return response
+
+    return run_with_yandex_resource_retry(
+        perform,
+        operation_name=operation_name,
+    )
+
+
 def yandex_disk_get_upload_href(target_path: str, overwrite: bool = True) -> str:
     normalized_path = normalize_yandex_disk_path(target_path)
 
-    response = requests.get(
-        f"{YANDEX_DISK_API_BASE}/resources/upload",
-        headers=get_yandex_disk_headers(),
-        params={
-            "path": normalized_path,
-            "overwrite": "true" if overwrite else "false",
-        },
-        timeout=30,
+    response = _request_with_resource_retry(
+        lambda: requests.get(
+            f"{YANDEX_DISK_API_BASE}/resources/upload",
+            headers=get_yandex_disk_headers(),
+            params={
+                "path": normalized_path,
+                "overwrite": "true" if overwrite else "false",
+            },
+            timeout=30,
+        ),
+        operation_name="get upload href",
     )
-
-    response.raise_for_status()
     data = response.json() or {}
 
     href = clean_disk_value(data.get("href"))
@@ -64,13 +110,14 @@ def yandex_disk_get_upload_href(target_path: str, overwrite: bool = True) -> str
 def yandex_disk_upload_bytes(target_path: str, file_bytes: bytes) -> dict:
     upload_href = yandex_disk_get_upload_href(target_path, overwrite=True)
 
-    upload_response = requests.put(
-        upload_href,
-        data=file_bytes,
-        timeout=120,
+    _request_with_resource_retry(
+        lambda: requests.put(
+            upload_href,
+            data=file_bytes,
+            timeout=120,
+        ),
+        operation_name="upload bytes",
     )
-
-    upload_response.raise_for_status()
 
     return {
         "ok": True,
@@ -114,23 +161,26 @@ def yandex_disk_upload_file(
     total_bytes = source_path.stat().st_size
     upload_href = yandex_disk_get_upload_href(normalized_path, overwrite=True)
 
-    with open(source_path, "rb") as f:
-        reader = ProgressFileReader(
-            raw=f,
-            total_bytes=total_bytes,
-            progress_callback=progress_callback,
-        )
+    def upload_once():
+        with open(source_path, "rb") as source:
+            reader = ProgressFileReader(
+                raw=source,
+                total_bytes=total_bytes,
+                progress_callback=progress_callback,
+            )
+            return requests.put(
+                upload_href,
+                data=reader,
+                headers={
+                    "Content-Length": str(total_bytes),
+                },
+                timeout=300,
+            )
 
-        upload_response = requests.put(
-            upload_href,
-            data=reader,
-            headers={
-                "Content-Length": str(total_bytes),
-            },
-            timeout=300,
-        )
-
-    upload_response.raise_for_status()
+    _request_with_resource_retry(
+        upload_once,
+        operation_name="upload file",
+    )
 
     return {
         "ok": True,
@@ -141,42 +191,34 @@ def yandex_disk_upload_file(
 def yandex_disk_delete_path(target_path: str, permanently: bool = True):
     normalized_path = normalize_yandex_disk_path(target_path)
 
-    response = requests.delete(
-        f"{YANDEX_DISK_API_BASE}/resources",
-        headers=get_yandex_disk_headers(),
-        params={
-            "path": normalized_path,
-            "permanently": "true" if permanently else "false",
-        },
-        timeout=30,
+    _request_with_resource_retry(
+        lambda: requests.delete(
+            f"{YANDEX_DISK_API_BASE}/resources",
+            headers=get_yandex_disk_headers(),
+            params={
+                "path": normalized_path,
+                "permanently": "true" if permanently else "false",
+            },
+            timeout=30,
+        ),
+        operation_name="delete",
+        accepted_statuses=(200, 202, 204),
     )
-
-    if response.status_code not in (200, 202, 204):
-        try:
-            payload = response.json()
-        except Exception:
-            payload = {"text": response.text}
-
-        raise RuntimeError(f"Yandex Disk delete failed: {payload}")
 
 
 def yandex_disk_ensure_folder(target_path: str) -> dict:
     normalized_path = normalize_yandex_disk_path(target_path)
 
-    response = requests.put(
-        f"{YANDEX_DISK_API_BASE}/resources",
-        headers=get_yandex_disk_headers(),
-        params={"path": normalized_path},
-        timeout=30,
+    response = _request_with_resource_retry(
+        lambda: requests.put(
+            f"{YANDEX_DISK_API_BASE}/resources",
+            headers=get_yandex_disk_headers(),
+            params={"path": normalized_path},
+            timeout=30,
+        ),
+        operation_name="create folder",
+        accepted_statuses=(201, 409),
     )
-
-    if response.status_code not in (201, 409):
-        try:
-            payload = response.json()
-        except Exception:
-            payload = {"text": response.text}
-
-        raise RuntimeError(f"Yandex Disk create folder failed: {payload}")
 
     return {
         "ok": True,
@@ -188,20 +230,16 @@ def yandex_disk_ensure_folder(target_path: str) -> dict:
 def yandex_disk_publish_path(target_path: str) -> dict:
     normalized_path = normalize_yandex_disk_path(target_path)
 
-    response = requests.put(
-        f"{YANDEX_DISK_API_BASE}/resources/publish",
-        headers=get_yandex_disk_headers(),
-        params={"path": normalized_path},
-        timeout=30,
+    _request_with_resource_retry(
+        lambda: requests.put(
+            f"{YANDEX_DISK_API_BASE}/resources/publish",
+            headers=get_yandex_disk_headers(),
+            params={"path": normalized_path},
+            timeout=30,
+        ),
+        operation_name="publish",
+        accepted_statuses=(200, 201, 202),
     )
-
-    if response.status_code not in (200, 201, 202):
-        try:
-            payload = response.json()
-        except Exception:
-            payload = {"text": response.text}
-
-        raise RuntimeError(f"Yandex Disk publish failed: {payload}")
 
     return {
         "ok": True,
@@ -229,24 +267,21 @@ def yandex_disk_move_path(
             "unchanged": True,
         }
 
-    response = requests.post(
-        f"{YANDEX_DISK_API_BASE}/resources/move",
-        headers=get_yandex_disk_headers(),
-        params={
-            "from": normalized_source,
-            "path": normalized_target,
-            "overwrite": "true" if overwrite else "false",
-            "force_async": "false",
-        },
-        timeout=30,
+    response = _request_with_resource_retry(
+        lambda: requests.post(
+            f"{YANDEX_DISK_API_BASE}/resources/move",
+            headers=get_yandex_disk_headers(),
+            params={
+                "from": normalized_source,
+                "path": normalized_target,
+                "overwrite": "true" if overwrite else "false",
+                "force_async": "false",
+            },
+            timeout=30,
+        ),
+        operation_name="move",
+        accepted_statuses=(201, 202),
     )
-
-    if response.status_code not in (201, 202):
-        try:
-            payload = response.json()
-        except Exception:
-            payload = {"text": response.text}
-        raise RuntimeError(f"Yandex Disk move failed: {payload}")
 
     operation_href = ""
     if response.status_code == 202:
@@ -258,12 +293,14 @@ def yandex_disk_move_path(
     if operation_href:
         deadline = time.monotonic() + max(1, int(wait_timeout or 45))
         while time.monotonic() < deadline:
-            operation_response = requests.get(
-                operation_href,
-                headers=get_yandex_disk_headers(),
-                timeout=30,
+            operation_response = _request_with_resource_retry(
+                lambda: requests.get(
+                    operation_href,
+                    headers=get_yandex_disk_headers(),
+                    timeout=30,
+                ),
+                operation_name="poll move operation",
             )
-            operation_response.raise_for_status()
             operation = operation_response.json() or {}
             status = clean_disk_value(operation.get("status")).lower()
             if status == "success":
@@ -288,21 +325,100 @@ def yandex_disk_move_path(
 def yandex_disk_get_resource_meta(target_path: str) -> dict:
     normalized_path = normalize_yandex_disk_path(target_path)
 
-    response = requests.get(
-        f"{YANDEX_DISK_API_BASE}/resources",
-        headers=get_yandex_disk_headers(),
-        params={
-            "path": normalized_path,
-            "fields": "name,path,public_url",
-        },
-        timeout=30,
+    response = _request_with_resource_retry(
+        lambda: requests.get(
+            f"{YANDEX_DISK_API_BASE}/resources",
+            headers=get_yandex_disk_headers(),
+            params={
+                "path": normalized_path,
+                "fields": "name,path,type,public_url",
+            },
+            timeout=30,
+        ),
+        operation_name="get resource metadata",
     )
-
-    response.raise_for_status()
     data = response.json() or {}
 
     return {
         "name": clean_disk_value(data.get("name")),
         "path": clean_disk_value(data.get("path")) or normalized_path,
+        "type": clean_disk_value(data.get("type")),
         "public_url": clean_disk_value(data.get("public_url")),
     }
+
+
+def yandex_disk_try_get_resource_meta(target_path: str) -> dict | None:
+    normalized_path = normalize_yandex_disk_path(target_path)
+    if not normalized_path:
+        return None
+    response = _request_with_resource_retry(
+        lambda: requests.get(
+            f"{YANDEX_DISK_API_BASE}/resources",
+            headers=get_yandex_disk_headers(),
+            params={
+                "path": normalized_path,
+                "fields": "name,path,type,public_url",
+            },
+            timeout=30,
+        ),
+        operation_name="probe resource metadata",
+        accepted_statuses=(200, 404),
+    )
+    if response.status_code == 404:
+        return None
+    data = response.json() or {}
+    return {
+        "name": clean_disk_value(data.get("name")),
+        "path": clean_disk_value(data.get("path")) or normalized_path,
+        "type": clean_disk_value(data.get("type")),
+        "public_url": clean_disk_value(data.get("public_url")),
+    }
+
+
+def yandex_disk_list_folder_children(target_path: str) -> list[dict]:
+    normalized_path = normalize_yandex_disk_path(target_path)
+    if not normalized_path:
+        return []
+
+    items: list[dict] = []
+    offset = 0
+    page_size = 200
+    while True:
+        response = _request_with_resource_retry(
+            lambda current_offset=offset: requests.get(
+                f"{YANDEX_DISK_API_BASE}/resources",
+                headers=get_yandex_disk_headers(),
+                params={
+                    "path": normalized_path,
+                    "limit": page_size,
+                    "offset": current_offset,
+                    "fields": (
+                        "_embedded.items.name,_embedded.items.path,"
+                        "_embedded.items.type,_embedded.items.public_url,"
+                        "_embedded.total"
+                    ),
+                },
+                timeout=30,
+            ),
+            operation_name="list folder children",
+        )
+        data = response.json() or {}
+        embedded = data.get("_embedded") or {}
+        page = embedded.get("items") or []
+        for raw in page:
+            if not isinstance(raw, dict):
+                continue
+            path = clean_disk_value(raw.get("path"))
+            items.append({
+                "name": clean_disk_value(raw.get("name")),
+                "path": path,
+                "type": clean_disk_value(raw.get("type")),
+                "public_url": clean_disk_value(raw.get("public_url")),
+                "client_url": yandex_disk_client_url(path),
+            })
+
+        offset += len(page)
+        total = int(embedded.get("total") or len(items))
+        if not page or offset >= total:
+            break
+    return items

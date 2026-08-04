@@ -21,6 +21,7 @@ SUPPORTED_STRUCTURE_ACTIONS = frozenset({
 TERMINAL_STRUCTURE_STATUSES = frozenset({
     "completed",
     "error",
+    "conflict",
     "cancelled",
     "disabled",
 })
@@ -169,7 +170,7 @@ def insert_yandex_structure_job_in_transaction(
 
     normalized_status = clean_cell_value(initial_status).lower() or "queued"
     if normalized_status not in {
-        "queued", "running", "completed", "error", "cancelled", "disabled"
+        "queued", "running", "completed", "error", "conflict", "cancelled", "disabled"
     }:
         raise ValueError("unsupported Yandex structure job status")
 
@@ -286,7 +287,7 @@ def get_latest_yandex_structure_job_for_item(
             WHERE dialog_id = ?
               AND checklist_key = ?
               AND item_id = ?
-            ORDER BY created_at DESC, job_id DESC
+            ORDER BY created_at DESC, rowid DESC
             LIMIT 1
             """,
             (
@@ -322,8 +323,7 @@ def get_blocking_yandex_structure_job_for_item(
                   'rename_item_folder',
                   'move_item_folder'
               )
-              AND status IN ('queued', 'running')
-            ORDER BY created_at ASC, job_id ASC
+            ORDER BY created_at DESC, rowid DESC
             LIMIT 1
             """,
             (
@@ -332,7 +332,12 @@ def get_blocking_yandex_structure_job_for_item(
                 clean_cell_value(item_id),
             ),
         ).fetchone()
-        return _normalize_job_record(row)
+        record = _normalize_job_record(row)
+        if clean_cell_value((record or {}).get("status")) in {
+            "queued", "running", "error", "conflict"
+        }:
+            return record
+        return None
     finally:
         conn.close()
 
@@ -351,7 +356,7 @@ def list_latest_yandex_structure_jobs_for_checklist(
             FROM yandex_structure_jobs
             WHERE dialog_id = ?
               AND checklist_key = ?
-            ORDER BY item_id ASC, created_at DESC, job_id DESC
+            ORDER BY item_id ASC, created_at DESC, rowid DESC
             """,
             (
                 normalize_dialog_id(dialog_id),
@@ -540,6 +545,36 @@ def list_pending_yandex_structure_job_ids(limit: int = 500) -> list[str]:
         conn.close()
 
 
+def list_reserved_yandex_structure_target_paths(
+    parent_path: str,
+) -> list[str]:
+    """Return durable target reservations used before remote folders exist."""
+    ensure_yandex_structure_jobs_table()
+    normalized_parent = clean_cell_value(parent_path).rstrip("/").casefold()
+    if not normalized_parent:
+        return []
+    conn = get_conn()
+    try:
+        rows = conn.execute(
+            """
+            SELECT target_path
+            FROM yandex_structure_jobs
+            WHERE status IN ('queued', 'running', 'error')
+              AND COALESCE(target_path, '') <> ''
+            """
+        ).fetchall()
+    finally:
+        conn.close()
+    result = []
+    for row in rows:
+        target = clean_cell_value(row["target_path"]).rstrip("/")
+        if not target or "/" not in target:
+            continue
+        if target.rsplit("/", 1)[0].casefold() == normalized_parent:
+            result.append(target)
+    return result
+
+
 def list_session_yandex_structure_job_ids(
     session_id: str,
     *,
@@ -631,6 +666,34 @@ def finish_yandex_structure_job(
     return get_yandex_structure_job(job_id)
 
 
+def update_yandex_structure_job_target(
+    job_id: str,
+    target_path: str,
+) -> dict | None:
+    """Persist an allocated custom prefix before the remote mutation."""
+    ensure_yandex_structure_jobs_table()
+    now = utc_now_iso()
+    conn = get_conn()
+    try:
+        conn.execute(
+            """
+            UPDATE yandex_structure_jobs
+            SET target_path = ?, updated_at = ?
+            WHERE job_id = ?
+              AND status IN ('queued', 'running')
+            """,
+            (
+                clean_cell_value(target_path),
+                now,
+                clean_cell_value(job_id),
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return get_yandex_structure_job(job_id)
+
+
 def fail_yandex_structure_job(job_id: str, error: str) -> dict | None:
     ensure_yandex_structure_jobs_table()
     now = utc_now_iso()
@@ -647,6 +710,40 @@ def fail_yandex_structure_job(job_id: str, error: str) -> dict | None:
             """,
             (
                 clean_cell_value(error),
+                now,
+                now,
+                clean_cell_value(job_id),
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return get_yandex_structure_job(job_id)
+
+
+def mark_yandex_structure_job_conflict(
+    job_id: str,
+    *,
+    error: str,
+    result: dict,
+) -> dict | None:
+    ensure_yandex_structure_jobs_table()
+    now = utc_now_iso()
+    conn = get_conn()
+    try:
+        conn.execute(
+            """
+            UPDATE yandex_structure_jobs
+            SET status = 'conflict',
+                error = ?,
+                result_json = ?,
+                finished_at = ?,
+                updated_at = ?
+            WHERE job_id = ?
+            """,
+            (
+                clean_cell_value(error),
+                stable_json_dumps(result or {}),
                 now,
                 now,
                 clean_cell_value(job_id),

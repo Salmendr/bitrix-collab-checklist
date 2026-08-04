@@ -1,0 +1,430 @@
+{
+  "stage": "8.15.5-id-yandex-folder-return",
+  "generatedAt": "2026-08-04T16:40:00+10:00",
+  "loadOrder": [
+    "popup-bootstrap.js",
+    "checklist-action-icons.js",
+    "popup-api-client.js",
+    "popup-bitrix-bridge.js",
+    "checklist-window-channel.js",
+    "popup-client-session.js",
+    "popup-document-refresh.js",
+    "popup-core.js",
+    "popup-document-list.js",
+    "document-assignment-history.js",
+    "popup-document-actions.js",
+    "popup-window-channel.js",
+    "popup-upload-progress.js",
+    "popup-upload-manager.js",
+    "popup-document-replacement.js",
+    "popup-session-enhancements.js",
+    "popup-edit-session.js",
+    "popup-inactivity.js",
+    "bitrix-user-picker.js",
+    "bitrix-company-picker.js",
+    "notification-draft-ui.js",
+    "popup-notification-drafts.js",
+    "popup-item-ordering.js",
+    "popup-item-status.js",
+    "popup-event-shell.js",
+    "popup-event-window-sync.js",
+    "popup-event-session.js",
+    "popup-renderer-common.js",
+    "popup-renderer-id.js",
+    "popup-renderer-concept.js",
+    "popup-renderer-opr.js",
+    "popup-renderer-generic.js",
+    "popup-renderer-configured-bim.js",
+    "popup-event-common.js",
+    "popup-event-id.js",
+    "popup-event-concept.js",
+    "popup-event-opr.js",
+    "popup-event-generic.js",
+    "popup-renderer-registry.js",
+    "popup-render-orchestrator.js",
+    "popup-init.js"
+  ],
+  "extractedModules": {
+    "popup-bootstrap.js": {
+      "sha256": "dc9b64928ca507b1e85b490aeec8dcc314d502eb68cef1bc14a8b8a2f072670b",
+      "bytes": 1432
+    },
+    "checklist-action-icons.js": {
+      "sha256": "d6f1dd2996f83840b3974079d7269230d68689d90f3c640a5423799b5e3c74bb",
+      "bytes": 5537
+    },
+    "popup-api-client.js": {
+      "sha256": "0683516e78abfd16154f583c4dda57f1e16e2e3a191fd5548c6ff6eb4504710f",
+      "bytes": 1787
+    },
+    "popup-bitrix-bridge.js": {
+      "sha256": "88eee130a578fae63f8bab92a0d634ad06b4a6469552714f0a19dfa65fff8b45",
+      "bytes": 4488
+    },
+    "checklist-window-channel.js": {
+      "sha256": "bb6415300c5a14fb28c409b644061e6d061c5e082efce27243aada0e3702bdd5",
+      "bytes": 10630
+    },
+    "popup-client-session.js": {
+      "sha256": "3a87eae696ca5de7e93a2a8c9700ced94186f0e36cb97a5f110a38ac7b84289f",
+      "bytes": 5273
+    },
+    "popup-document-refresh.js": {
+      "sha256": "6a6e6455b9e186e29e0ac841518b536d2b34e7a7bd3c1270b058ddd54222f55b",
+      "bytes": 6711
+    },
+    "popup-core.js": {
+      "sha256": "69adbece5c857934ee2d6b4e00afabd0a8e0eee758059f69c5da0563a0965494",
+      "bytes": 103464
+    },
+    "popup-document-list.js": {
+      "sha256": "2f7f47b7c904c9320b3b58cfd67760662a9a76530206c4110b49c79ef7eb36f0",
+      "bytes": 13446
+    },
+    "document-assignment-history.js": {
+      "sha256": "8ca593270b9e1e0170187046f5480c5fc8a7237c8dc62d1a89677e4f17d65e62",
+      "bytes": 13858
+    },
+    "popup-document-actions.js": {
+      "sha256": "370eabb81820fc10a483ce8a5ab65d3997d80a0ab01ac53f4df1020ae54fae1c",
+      "bytes": 19074
+    },
+    "popup-window-channel.js": {
+      "sha256": "5b9abaff9f29705db8745e4737f28bfb449fc23b4ae3ef2cf47050607f2f5723",
+      "bytes": 5316
+    },
+    "popup-upload-progress.js": {
+      "sha256": "1ac521269bbc1ab10021985631974ccfe29aed3bf2524537aa1d2b3f99dc02de",
+      "bytes": 11655
+    },
+    "popup-upload-manager.js": {
+      "sha256": "9bc371f02307f0d22c2b1744ed45c66d21922eb325d35e214bf10656c1e6ebb0",
+      "bytes": 19540
+    },
+    "popup-document-replacement.js": {
+      "sha256": "f7ed236bf2952b8ee12fa0d1809ae9f075f41a7d4476bd499f943c7bfa957ef9",
+      "bytes": 25202
+    },
+    "popup-session-enhancements.js": {
+      "sha256": "d7a69806176b1faad882ba82dda293b921f59ebaa2d8e1191772858cc06eb510",
+      "bytes": 47985
+    },
+    "popup-edit-session.js": {
+      "sha256": "8cd402644dc0c9724b46b22c725e19a572232fa81d7105a8d3c094de9d6c7c42",
+      "bytes": 15502
+    },
+    "popup-inactivity.js": {
+      "sha256": "039f89a3adaea08cd3e3f8c3e6529bca4b3b85ad2860f22ae2ef29d20932c8d8",
+      "bytes": 6563
+    },
+    "bitrix-user-picker.js": {
+      "sha256": "e69ee7af0913383cda4f02ba83279c64fe4650715532eee91176c47cfe57b1c9",
+      "bytes": 9311
+    },
+    "bitrix-company-picker.js": {
+      "sha256": "4f0b87f73764edbeef35133a5b68eb45d0b2e45a59aa9d20e6b66695086765b7",
+      "bytes": 12687
+    },
+    "notification-draft-ui.js": {
+      "sha256": "cb2a4ab9c2d9fc1bb63d8f8b430d8d09b9380d84250026e605d4a81e70a61f9a",
+      "bytes": 46917
+    },
+    "popup-notification-drafts.js": {
+      "sha256": "90806658195dc18b0a2920ea2cdc69bf4de6df27f18d9761a181d029bf7cf088",
+      "bytes": 2436
+    },
+    "popup-item-ordering.js": {
+      "sha256": "684448ea90d897dcd036d84035119efb15e42b1234a243f80af380e9805a7412",
+      "bytes": 28900
+    },
+    "popup-item-status.js": {
+      "sha256": "b7eea77268b80d577071ef28a4266ec020d265dcf5daff80cdd5c749a18f53cc",
+      "bytes": 9410
+    },
+    "popup-event-shell.js": {
+      "sha256": "b5f080eb74e23ee94208158dd9c984774da45beb9ff79398e55634d640225008",
+      "bytes": 2095
+    },
+    "popup-event-window-sync.js": {
+      "sha256": "4d3f9c3de4aeb4e92ef532f0912d1edbba29958bb5bf3739bee6d047bc5333a7",
+      "bytes": 9717
+    },
+    "popup-event-session.js": {
+      "sha256": "f157ba9da7f7a60478796aebefa61b025226f00d97f239f333f2a423c416d4ae",
+      "bytes": 5620
+    },
+    "popup-renderer-common.js": {
+      "sha256": "23de63d24a18c3d9204c230579af1f1027017a40192436e7f2f218ca16c00d9a",
+      "bytes": 485
+    },
+    "popup-renderer-id.js": {
+      "sha256": "9ca7f840410d945507bf5715106ca132d2f7ea824d6560c6ba378d72821560b6",
+      "bytes": 6148
+    },
+    "popup-renderer-concept.js": {
+      "sha256": "6a143212d9e7d7a6e8d7bc3e11b8b490b9c2a11786f845713df418f08ad7c347",
+      "bytes": 5033
+    },
+    "popup-renderer-opr.js": {
+      "sha256": "7c73eeea76f262447a25f5c31f51bc31d8c38b77942b8e3566f5b71580a11e68",
+      "bytes": 4388
+    },
+    "popup-renderer-generic.js": {
+      "sha256": "0fa7bb881a44d3e0ecf9fd14fc1bcce92fc48e90cf1f244388003ee726974125",
+      "bytes": 6583
+    },
+    "popup-renderer-configured-bim.js": {
+      "sha256": "b266fb19a1f1f46e34a5c84b9b646c79563983b77f6bb5799889776a6f605194",
+      "bytes": 3227
+    },
+    "popup-event-common.js": {
+      "sha256": "c4f76064b07dafcb2cb139cd774c5571f20faac1635edceb3a417f254730e125",
+      "bytes": 7051
+    },
+    "popup-event-id.js": {
+      "sha256": "90a9847aa0f64d81b60141734a713c88c5cbd6d5c6959ab9037b77b191af569c",
+      "bytes": 668
+    },
+    "popup-event-concept.js": {
+      "sha256": "f78e8b1d2e38b55bff9a83fae6ae864f6782ba3f9cfc0ff153b0fa86e9ef2dee",
+      "bytes": 693
+    },
+    "popup-event-opr.js": {
+      "sha256": "1facd71dedda6c60ce76d595e6decd7fc69c320e47f37bab68938f5bfcb6cadb",
+      "bytes": 4621
+    },
+    "popup-event-generic.js": {
+      "sha256": "e3091546a6f558fdf84645e9ba845f00b7bf96513bbeca84d5d2561db612436c",
+      "bytes": 704
+    },
+    "popup-renderer-registry.js": {
+      "sha256": "f22c332d2966080cda3314a89782e0c6f5b72b4b41b683fb0c1e1ec6e92449ad",
+      "bytes": 2244
+    },
+    "popup-render-orchestrator.js": {
+      "sha256": "e64bb8528ac6918d05c039bf8e5294a13f4adbdad9f32a5f5108157b3df3e6c4",
+      "bytes": 10570
+    },
+    "popup-init.js": {
+      "sha256": "fe4e820d6e49b456574b2a0484319c37ef05e67a81083a2a3b246381a772b665",
+      "bytes": 2393
+    }
+  },
+  "notes": [
+    "Current and archived file open/download actions use the shared accessible SVG registry.",
+    "Archive permanent-delete controls retain the existing administrator-only data-role and backend permission contract.",
+    "Stage 7.1.3 filename spacing and current-file action controls remain in place.",
+    "Business logic for upload, replacement, archives, locks, save and rollback is unchanged.",
+    "Stage 7.1.4.5 renders replacement as a real SVG path whose outline is derived from the U+21BB clockwise open circle arrow glyph. It contains one clockwise arrow only, with no SVG text and no alternate arrow symbol.",
+    "Stage 7.1.4.5 restores the exact previously approved U+21BB-derived SVG silhouette and reduces only its thickness with a 0.30 SVG morphology erosion.",
+    "Stage 7.2.1 blocks all popup checklist mutations until both the edit session and the current checklist lock are active.",
+    "Stage 7.2.1 captures the active session ID in immutable upload and replacement task contexts and asks the backend to reject sessionless frontend mutations.",
+    "Stage 7.2.1.2 uses the edit-session heartbeat as the single backend heartbeat; it already renews all session locks.",
+    "Stage 7.2.1.2 releases clean stage locks on navigation but retains locks for stages mutated by the active session.",
+    "Stage 7.2.1.2 removes the zero-delay stage Yandex folder retry loop and treats yandexDisabled as a terminal local-only state.",
+    "Stage 7.2.1.3 permits full edit-session rollback only for the explicitly confirmed Cancel button action.",
+    "Stage 7.2.1.3 auto-commits active sessions on application restart and expired sessions on heartbeat timeout; these lifecycle events never delete uploaded files or restore an old snapshot.",
+    "Stage 7.2.1.3 queues a commit beacon on popup, iframe, tab or browser close; Cancel suppresses this autosave because it follows the explicit rollback flow.",
+    "Stage 7.2.1.3 recovers interrupted rollback only when its recorded close reason is cancel_button; legacy non-explicit rollback transitions are converted to commit recovery.",
+    "Stage 7.2.3 preserves the global limit of nine concurrent uploads and serializes the backend read-modify-write mutation for each checklist item so concurrent files cannot overwrite one another in the checklist JSON.",
+    "Stage 7.2.3 throttles progress rendering, debug requests and cross-window upload snapshots so large selections do not saturate the browser or local API.",
+    "Stage 7.2.3 retries transient network, HTTP and edit-session reconnect failures without draining the remaining in-memory file queue.",
+    "Stage 7.2.3 waits for the upload queue before Save or confirmed Cancel and warns before closing a window with pending local files.",
+    "Stage 7.2.4 finalizes Save and unload through one idempotent /api/checklist/session/finalize request.",
+    "Stage 7.2.4 order is upload queue idle, local checklist persistence, edit-session commit and lock release, external jobs and Bitrix summary delivery, then popup close.",
+    "Stage 7.2.4 stores finalization and message delivery status by session_id so repeated close events do not send a second Bitrix summary.",
+    "Stage 7.2.4 defers replacement summaries until the common committed session summary and keeps rollback exclusive to confirmed Cancel.",
+    "Stage 8.2 separates local folderPath/folderUrl from Yandex folder metadata.",
+    "Stage 8.2 exposes queued/running/ready/error/disabled folder states and manual retry in the popup.",
+    "Stage 8.2 prepares pending create_item_folder retargeting so a future rename creates only the final folder name.",
+    "Stage 8.2.1 always renders the current-stage Yandex folder control and disables it when no public folder URL is available.",
+    "Stage 8.2.1 shows an item Yandex action only after at least one current document exists, including custom items.",
+    "Stage 8.2.1 keeps item Yandex controls visible but disabled when the current stage has no Yandex connection, while hidden empty custom items continue background job polling through the state marker.",
+    "Stage 8.2.1 applies the same visible-disabled rule to the Yandex action inside the item folder window.",
+    "Stage 8.3 adds transactional item renaming with automatic conflict suffixes and a shared rename action for standard and custom items.",
+    "Stage 8.3.1 replaces the separate rename icon and browser prompt with one-click inline editing of the item name; blur or Enter validates and saves, Escape cancels the local editor.",
+    "Stage 8.4 adds shared transactional drag-and-drop ordering across groups of one checklist stage, including the Not Required group, with order-version conflict protection and deferred Yandex folder moves.",
+    "Stage 8.4.1 replaces the static drag source with a floating name-only preview, collapses the source row during dragging, restores near-origin drops, and softens the vertical drag marker.",
+    "Stage 8.4.2 removes the visible Status column and controls Нет, Есть and Не требуется through the enlarged interactive circle beside each item name.",
+    "Stage 8.4.2 preserves hidden dates and the previous group while an item is in Не требуется; drag never deletes files, while the status-circle restore follows file-delete permissions and confirmation.",
+    "Stage 8.4.2 throttles drag target updates with requestAnimationFrame, midpoint hysteresis, target settling and FLIP row animations to prevent placeholder flicker.",
+    "Stage 8.4.2 hides local-only and unavailable-Yandex explanatory labels while retaining disabled Yandex controls and operational queue/error states.",
+    "Stage 8.4.3 keeps date values in backend data but removes every popup date toggle, date header and date input from the frontend.",
+    "Stage 8.4.3 transfers 33 percent of the previous item-name column width to the document column in fixed and responsive layouts.",
+    "Stage 8.8 enables the notification bell for current files and opens one shared notification-draft editor from the popup.",
+    "Stage 8.8 keeps employee/CRM lookup out of the frontend contract: internal recipient fields are manual until stages 8.10-8.12.",
+    "Stage 8.8 creates, edits and cancels session-bound drafts through the stage 8.7 backend without sending Bitrix messages or tasks.",
+    "Stage 8.9 loads the global assignment-part dictionary in the shared notification draft interface.",
+    "A typed value that does not match an existing entry is added atomically when the draft is saved.",
+    "Stage 8.10 loads the shared Bitrix employee picker before notification-draft-ui.js.",
+    "Employee search uses the server-side bitrix_users_cache and retains manual ID/name fallback when Bitrix is unavailable.",
+    "Stage 8.11 adds a shared external-contractor picker backed by local and Bitrix SUPPLIER company caches.",
+    "New external contractors are stored locally with deterministic phone, email and title deduplication; CRM synchronization is deferred until a committed delivery flow invokes it.",
+    "Stage 8.12 resolves the project object responsible user as curator for external recipients and retains manual fallback.",
+    "Stage 8.14 displays the ten most recent document assignments by stable seriesId in popup document rows.",
+    "Stage 8.15 adds explicit manual retry controls for failed/blocked CRM, task and chat deliveries while preserving successful operations through existing idempotency keys.",
+    "Bitrix hotfix 8.15.1 resumes stale same-user sessions, makes Save and Close return after durable local commit, hides non-error Yandex status labels and temporarily disables notification bells.",
+    "8.15.3: Bitrix host-cross close callback and compact idempotent unload finalization.",
+    "Stage 8.15.4 separates the ID Not Required group into its own card with the same 14px spacing used by configured P/R panels.",
+    "Stage 8.15.4 tracks real popup and folder interactions, warns after 24 minutes, and runs the same durable finalize flow as Save and Close after 25 minutes.",
+    "Stage 8.15.4 sends lastActivityAt through the edit-session heartbeat and accepts an idempotent server-side inactivity finalization fallback.",
+    "Stage 8.15.4 startup reconciliation restores only current local documents without duplicating synced, queued or running Yandex upload jobs.",
+    "Stage 8.15.5 exposes ChecklistPopupNavigation so item-folder return always restores the originating checklist stage and scrolls to the exact item."
+  ],
+  "hashMode": "actual-file-bytes",
+  "lineEndingNote": "Hashes are calculated from bytes written to disk. This is stable for Windows CRLF and Unix LF.",
+  "modules": {
+    "popup-bootstrap.js": {
+      "sha256": "dc9b64928ca507b1e85b490aeec8dcc314d502eb68cef1bc14a8b8a2f072670b",
+      "bytes": 1432
+    },
+    "checklist-action-icons.js": {
+      "sha256": "d6f1dd2996f83840b3974079d7269230d68689d90f3c640a5423799b5e3c74bb",
+      "bytes": 5537
+    },
+    "popup-api-client.js": {
+      "sha256": "0683516e78abfd16154f583c4dda57f1e16e2e3a191fd5548c6ff6eb4504710f",
+      "bytes": 1787
+    },
+    "popup-bitrix-bridge.js": {
+      "sha256": "88eee130a578fae63f8bab92a0d634ad06b4a6469552714f0a19dfa65fff8b45",
+      "bytes": 4488
+    },
+    "checklist-window-channel.js": {
+      "sha256": "bb6415300c5a14fb28c409b644061e6d061c5e082efce27243aada0e3702bdd5",
+      "bytes": 10630
+    },
+    "popup-client-session.js": {
+      "sha256": "3a87eae696ca5de7e93a2a8c9700ced94186f0e36cb97a5f110a38ac7b84289f",
+      "bytes": 5273
+    },
+    "popup-document-refresh.js": {
+      "sha256": "6a6e6455b9e186e29e0ac841518b536d2b34e7a7bd3c1270b058ddd54222f55b",
+      "bytes": 6711
+    },
+    "popup-core.js": {
+      "sha256": "69adbece5c857934ee2d6b4e00afabd0a8e0eee758059f69c5da0563a0965494",
+      "bytes": 103464
+    },
+    "popup-document-list.js": {
+      "sha256": "2f7f47b7c904c9320b3b58cfd67760662a9a76530206c4110b49c79ef7eb36f0",
+      "bytes": 13446
+    },
+    "popup-document-actions.js": {
+      "sha256": "370eabb81820fc10a483ce8a5ab65d3997d80a0ab01ac53f4df1020ae54fae1c",
+      "bytes": 19074
+    },
+    "popup-window-channel.js": {
+      "sha256": "4dd5ecc1576acbefd4f9a4d76cb59965a2e288afa6e58fffa121ae357fc07a72",
+      "bytes": 5006
+    },
+    "popup-upload-progress.js": {
+      "sha256": "1ac521269bbc1ab10021985631974ccfe29aed3bf2524537aa1d2b3f99dc02de",
+      "bytes": 11655
+    },
+    "popup-upload-manager.js": {
+      "sha256": "9bc371f02307f0d22c2b1744ed45c66d21922eb325d35e214bf10656c1e6ebb0",
+      "bytes": 19540
+    },
+    "popup-document-replacement.js": {
+      "sha256": "f7ed236bf2952b8ee12fa0d1809ae9f075f41a7d4476bd499f943c7bfa957ef9",
+      "bytes": 25202
+    },
+    "popup-session-enhancements.js": {
+      "sha256": "0766351fc301463f264770f554867bdc6ffe6885a65c1882e1b1c3a3eb2ab46d",
+      "bytes": 43811
+    },
+    "popup-edit-session.js": {
+      "sha256": "1032d32752df4b3a59e40381bdf3c80303354dc4ee1337a3ef5dfb4d28810658",
+      "bytes": 12527
+    },
+    "bitrix-user-picker.js": {
+      "sha256": "e69ee7af0913383cda4f02ba83279c64fe4650715532eee91176c47cfe57b1c9",
+      "bytes": 9311
+    },
+    "notification-draft-ui.js": {
+      "sha256": "cb2a4ab9c2d9fc1bb63d8f8b430d8d09b9380d84250026e605d4a81e70a61f9a",
+      "bytes": 46917
+    },
+    "popup-notification-drafts.js": {
+      "sha256": "90806658195dc18b0a2920ea2cdc69bf4de6df27f18d9761a181d029bf7cf088",
+      "bytes": 2436
+    },
+    "popup-item-ordering.js": {
+      "sha256": "684448ea90d897dcd036d84035119efb15e42b1234a243f80af380e9805a7412",
+      "bytes": 28900
+    },
+    "popup-item-status.js": {
+      "sha256": "b7eea77268b80d577071ef28a4266ec020d265dcf5daff80cdd5c749a18f53cc",
+      "bytes": 9410
+    },
+    "popup-event-shell.js": {
+      "sha256": "6e93afd223103270c887b07e41d7c53a1abdc7140e35981b78c59ccd6820499a",
+      "bytes": 1631
+    },
+    "popup-event-window-sync.js": {
+      "sha256": "4d3f9c3de4aeb4e92ef532f0912d1edbba29958bb5bf3739bee6d047bc5333a7",
+      "bytes": 9717
+    },
+    "popup-event-session.js": {
+      "sha256": "f157ba9da7f7a60478796aebefa61b025226f00d97f239f333f2a423c416d4ae",
+      "bytes": 5620
+    },
+    "popup-renderer-common.js": {
+      "sha256": "23de63d24a18c3d9204c230579af1f1027017a40192436e7f2f218ca16c00d9a",
+      "bytes": 485
+    },
+    "popup-renderer-id.js": {
+      "sha256": "3d50a2d4455f0cd86ec1111d69d3d0d4c39d1f860135de62af4fbcc2bb0b4b81",
+      "bytes": 5446
+    },
+    "popup-renderer-concept.js": {
+      "sha256": "6a143212d9e7d7a6e8d7bc3e11b8b490b9c2a11786f845713df418f08ad7c347",
+      "bytes": 5033
+    },
+    "popup-renderer-opr.js": {
+      "sha256": "7c73eeea76f262447a25f5c31f51bc31d8c38b77942b8e3566f5b71580a11e68",
+      "bytes": 4388
+    },
+    "popup-renderer-generic.js": {
+      "sha256": "8670542a719a30a20a267ad3b52f934f7a5b288a52f970d96941c5ed41397720",
+      "bytes": 6520
+    },
+    "popup-renderer-configured-bim.js": {
+      "sha256": "b266fb19a1f1f46e34a5c84b9b646c79563983b77f6bb5799889776a6f605194",
+      "bytes": 3227
+    },
+    "popup-event-common.js": {
+      "sha256": "c4f76064b07dafcb2cb139cd774c5571f20faac1635edceb3a417f254730e125",
+      "bytes": 7051
+    },
+    "popup-event-id.js": {
+      "sha256": "90a9847aa0f64d81b60141734a713c88c5cbd6d5c6959ab9037b77b191af569c",
+      "bytes": 668
+    },
+    "popup-event-concept.js": {
+      "sha256": "f78e8b1d2e38b55bff9a83fae6ae864f6782ba3f9cfc0ff153b0fa86e9ef2dee",
+      "bytes": 693
+    },
+    "popup-event-opr.js": {
+      "sha256": "1facd71dedda6c60ce76d595e6decd7fc69c320e47f37bab68938f5bfcb6cadb",
+      "bytes": 4621
+    },
+    "popup-event-generic.js": {
+      "sha256": "e3091546a6f558fdf84645e9ba845f00b7bf96513bbeca84d5d2561db612436c",
+      "bytes": 704
+    },
+    "popup-renderer-registry.js": {
+      "sha256": "f22c332d2966080cda3314a89782e0c6f5b72b4b41b683fb0c1e1ec6e92449ad",
+      "bytes": 2244
+    },
+    "popup-render-orchestrator.js": {
+      "sha256": "e64bb8528ac6918d05c039bf8e5294a13f4adbdad9f32a5f5108157b3df3e6c4",
+      "bytes": 10570
+    },
+    "popup-init.js": {
+      "sha256": "fe4e820d6e49b456574b2a0484319c37ef05e67a81083a2a3b246381a772b665",
+      "bytes": 2393
+    }
+  }
+}

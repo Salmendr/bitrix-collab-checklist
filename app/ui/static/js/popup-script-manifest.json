@@ -1,6 +1,6 @@
 {
-  "stage": "8.15.5-id-yandex-folder-return",
-  "generatedAt": "2026-08-04T16:40:00+10:00",
+  "stage": "8.15.6-yandex-recovery",
+  "generatedAt": "2026-08-04T00:00:00+02:00",
   "loadOrder": [
     "popup-bootstrap.js",
     "checklist-action-icons.js",
@@ -78,16 +78,16 @@
       "bytes": 103464
     },
     "popup-document-list.js": {
-      "sha256": "2f7f47b7c904c9320b3b58cfd67760662a9a76530206c4110b49c79ef7eb36f0",
-      "bytes": 13446
+      "sha256": "192228b672a965b6361095ce2e1c2d48ab1d3bfbc2cd2be027dda91d1eefcbac",
+      "bytes": 14567
     },
     "document-assignment-history.js": {
       "sha256": "8ca593270b9e1e0170187046f5480c5fc8a7237c8dc62d1a89677e4f17d65e62",
       "bytes": 13858
     },
     "popup-document-actions.js": {
-      "sha256": "370eabb81820fc10a483ce8a5ab65d3997d80a0ab01ac53f4df1020ae54fae1c",
-      "bytes": 19074
+      "sha256": "ab927b2446959ff54f29344e52666d3779925d1e17ceaea2bd99dc410def31e3",
+      "bytes": 26236
     },
     "popup-window-channel.js": {
       "sha256": "5b9abaff9f29705db8745e4737f28bfb449fc23b4ae3ef2cf47050607f2f5723",
@@ -269,7 +269,8 @@
     "Stage 8.15.4 tracks real popup and folder interactions, warns after 24 minutes, and runs the same durable finalize flow as Save and Close after 25 minutes.",
     "Stage 8.15.4 sends lastActivityAt through the edit-session heartbeat and accepts an idempotent server-side inactivity finalization fallback.",
     "Stage 8.15.4 startup reconciliation restores only current local documents without duplicating synced, queued or running Yandex upload jobs.",
-    "Stage 8.15.5 exposes ChecklistPopupNavigation so item-folder return always restores the originating checklist stage and scrolls to the exact item."
+    "Stage 8.15.5 exposes ChecklistPopupNavigation so item-folder return always restores the originating checklist stage and scrolls to the exact item.",
+    "Stage 8.15.6 adds conflict-aware custom-folder recovery, bounded Yandex lock retry and separate folder/file error controls."
   ],
   "hashMode": "actual-file-bytes",
   "lineEndingNote": "Hashes are calculated from bytes written to disk. This is stable for Windows CRLF and Unix LF.",
@@ -307,12 +308,12 @@
       "bytes": 103464
     },
     "popup-document-list.js": {
-      "sha256": "2f7f47b7c904c9320b3b58cfd67760662a9a76530206c4110b49c79ef7eb36f0",
-      "bytes": 13446
+      "sha256": "192228b672a965b6361095ce2e1c2d48ab1d3bfbc2cd2be027dda91d1eefcbac",
+      "bytes": 14567
     },
     "popup-document-actions.js": {
-      "sha256": "370eabb81820fc10a483ce8a5ab65d3997d80a0ab01ac53f4df1020ae54fae1c",
-      "bytes": 19074
+      "sha256": "ab927b2446959ff54f29344e52666d3779925d1e17ceaea2bd99dc410def31e3",
+      "bytes": 26236
     },
     "popup-window-channel.js": {
       "sha256": "4dd5ecc1576acbefd4f9a4d76cb59965a2e288afa6e58fffa121ae357fc07a72",

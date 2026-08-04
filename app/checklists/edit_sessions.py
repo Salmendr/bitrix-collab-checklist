@@ -12,6 +12,7 @@ from app.settings import (
     EDIT_SESSION_TTL_SECONDS,
     EDIT_SESSION_HEARTBEAT_SECONDS,
     EDIT_SESSION_INACTIVITY_SECONDS,
+    EDIT_SESSION_SWEEP_SECONDS,
 )
 
 from app.checklists.utils import (
@@ -36,6 +37,9 @@ TERMINAL_EDIT_SESSION_STATUSES = {
 EXPLICIT_ROLLBACK_REASONS = frozenset({
     "cancel_button",
 })
+
+EDIT_SESSION_SWEEP_MAX_FAILURES = 5
+EDIT_SESSION_SWEEP_MAX_BACKOFF_SECONDS = 15 * 60
 
 
 class EditSessionError(RuntimeError):
@@ -1498,7 +1502,75 @@ def list_expired_edit_sessions(
         ),
     ).fetchall()
     conn.close()
-    return [dict(row) for row in rows]
+
+    records = [dict(row) for row in rows]
+    due_records = []
+    for record in records:
+        if clean_cell_value(record.get("status")) != "error":
+            due_records.append(record)
+            continue
+        if clean_cell_value(
+            record.get("last_recovery_action")
+        ) != "inactivity_autosave":
+            due_records.append(record)
+            continue
+
+        attempts = int(record.get("recovery_attempts") or 0)
+        if attempts >= EDIT_SESSION_SWEEP_MAX_FAILURES:
+            continue
+        last_attempt = parse_iso_datetime(
+            record.get("last_recovery_at") or ""
+        )
+        if not last_attempt:
+            due_records.append(record)
+            continue
+        backoff_seconds = min(
+            EDIT_SESSION_SWEEP_MAX_BACKOFF_SECONDS,
+            max(1, int(EDIT_SESSION_SWEEP_SECONDS))
+            * (2 ** max(0, attempts - 1)),
+        )
+        if now_dt >= last_attempt + timedelta(seconds=backoff_seconds):
+            due_records.append(record)
+
+    return due_records
+
+
+def _record_inactivity_sweep_failure(
+    *,
+    session_id: str,
+    source: str,
+    error: Exception,
+) -> None:
+    now = utc_now_iso()
+    conn = get_conn()
+    try:
+        conn.execute(
+            """
+            UPDATE edit_sessions
+            SET recovery_attempts = CASE
+                    WHEN last_recovery_action = 'inactivity_autosave'
+                    THEN COALESCE(recovery_attempts, 0) + 1
+                    ELSE 1
+                END,
+                last_recovery_at = ?,
+                last_recovery_source = ?,
+                last_recovery_action = 'inactivity_autosave',
+                last_recovery_error = ?,
+                updated_at = ?
+            WHERE session_id = ?
+              AND status NOT IN ('committed', 'rolled_back')
+            """,
+            (
+                now,
+                clean_cell_value(source),
+                clean_cell_value(str(error)),
+                now,
+                clean_cell_value(session_id),
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def _finalize_inactive_edit_session(record: dict, source: str) -> dict:
@@ -1549,6 +1621,12 @@ def sweep_expired_edit_sessions(
                 )
                 committed.append(public_edit_session_payload(result))
         except Exception as exc:
+            if record.get("expiry_kind") == "inactivity":
+                _record_inactivity_sweep_failure(
+                    session_id=session_id,
+                    source=source,
+                    error=exc,
+                )
             errors.append({"sessionId": session_id, "error": str(exc)})
 
     return {

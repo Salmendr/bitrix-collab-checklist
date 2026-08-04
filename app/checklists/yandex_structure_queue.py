@@ -13,10 +13,17 @@ from app.checklists.utils import (
     normalize_dialog_id,
 )
 from app.checklists.yandex_folders import (
+    build_stable_custom_folder_target_path,
     can_create_custom_item_yandex_folder,
     ensure_yandex_folder_for_custom_item,
     rename_yandex_folder_for_item,
     move_yandex_folder_for_item,
+    split_custom_folder_prefix,
+    YandexFolderConflictError,
+)
+from app.checklists.storage import get_checklist
+from app.checklists.yandex_resource_locks import (
+    yandex_project_resource_guard,
 )
 from app.checklists.yandex_structure_jobs import (
     claim_yandex_structure_job,
@@ -25,7 +32,9 @@ from app.checklists.yandex_structure_jobs import (
     finish_yandex_structure_job,
     get_yandex_structure_job,
     list_pending_yandex_structure_job_ids,
+    mark_yandex_structure_job_conflict,
     requeue_interrupted_yandex_structure_jobs,
+    update_yandex_structure_job_target,
 )
 from app.checklists.yandex_structure_state import (
     persist_item_yandex_structure_state,
@@ -37,6 +46,107 @@ YANDEX_STRUCTURE_GUARD = threading.Lock()
 YANDEX_STRUCTURE_QUEUED_JOB_IDS: set[str] = set()
 YANDEX_STRUCTURE_RUNNING_JOB_IDS: set[str] = set()
 YANDEX_STRUCTURE_WORKERS_STARTED = False
+
+
+def _current_item(job: dict) -> dict:
+    data = get_checklist(
+        job.get("dialog_id") or "",
+        job.get("checklist_key") or "id",
+    )
+    item_id = clean_cell_value(job.get("item_id"))
+    return next(
+        (
+            dict(item or {})
+            for item in (data.get("items") or [])
+            if clean_cell_value((item or {}).get("id")) == item_id
+        ),
+        {},
+    )
+
+
+def _prepare_custom_job_target(job: dict, item: dict) -> dict:
+    result_data = job.get("result") if isinstance(job.get("result"), dict) else {}
+    is_custom = bool(item.get("isCustom", False) or result_data.get("isCustom"))
+    if not is_custom:
+        return job
+
+    action = clean_cell_value(job.get("action"))
+    source_path = clean_cell_value(job.get("source_path"))
+    target_path = clean_cell_value(job.get("target_path"))
+    if not target_path or "/" not in target_path:
+        return job
+
+    target_parent, target_name = target_path.rsplit("/", 1)
+    target_prefix, _ = split_custom_folder_prefix(target_name)
+    preserve_name = target_name if target_prefix else ""
+
+    if action == "rename_item_folder" and source_path:
+        source_parent, source_name = source_path.rsplit("/", 1)
+        if source_parent == target_parent and not preserve_name:
+            preserve_name = source_name
+
+    resolved_target = build_stable_custom_folder_target_path(
+        parent_path=target_parent,
+        item_name=clean_cell_value(job.get("item_name")),
+        preserve_source_name=preserve_name,
+    )
+    if resolved_target == target_path:
+        return job
+
+    updated = update_yandex_structure_job_target(
+        clean_cell_value(job.get("job_id")),
+        resolved_target,
+    )
+    return updated or {**job, "target_path": resolved_target}
+
+
+def _execute_yandex_structure_mutation(job: dict) -> dict:
+    action = clean_cell_value(job.get("action"))
+    dialog_id = normalize_dialog_id(job.get("dialog_id"))
+    checklist_key = normalize_checklist_key(job.get("checklist_key"))
+    item_id = clean_cell_value(job.get("item_id"))
+    item = _current_item(job)
+    job = _prepare_custom_job_target(job, item)
+
+    if action == "create_item_folder":
+        if not can_create_custom_item_yandex_folder(dialog_id, checklist_key):
+            raise PermissionError(
+                "custom item Yandex folder is disabled for this project"
+            )
+        return ensure_yandex_folder_for_custom_item(
+            dialog_id=dialog_id,
+            checklist_key=checklist_key,
+            group_id=int(job.get("group_id") or 0),
+            item_name=clean_cell_value(job.get("item_name")),
+            item_id=item_id,
+            target_path=clean_cell_value(job.get("target_path")),
+        )
+
+    result_data = job.get("result") if isinstance(job.get("result"), dict) else {}
+    if action == "rename_item_folder":
+        return rename_yandex_folder_for_item(
+            dialog_id=dialog_id,
+            checklist_key=checklist_key,
+            group_id=int(job.get("group_id") or 0),
+            item_id=item_id,
+            old_name=clean_cell_value(result_data.get("oldName")),
+            new_name=clean_cell_value(job.get("item_name")),
+            source_path=clean_cell_value(job.get("source_path")),
+            target_path=clean_cell_value(job.get("target_path")),
+            folder_alias=clean_cell_value(job.get("folder_alias")),
+        )
+
+    return move_yandex_folder_for_item(
+        dialog_id=dialog_id,
+        checklist_key=checklist_key,
+        source_group_id=int(result_data.get("sourceGroupId") or 0),
+        target_group_id=int(job.get("group_id") or 0),
+        item_id=item_id,
+        item_name=clean_cell_value(job.get("item_name")),
+        source_path=clean_cell_value(job.get("source_path")),
+        target_path=clean_cell_value(job.get("target_path")),
+        folder_alias=clean_cell_value(job.get("folder_alias")),
+    )
 
 
 def get_yandex_structure_worker_count() -> int:
@@ -109,62 +219,36 @@ def process_yandex_structure_job(job_id: str) -> dict:
                 "job": disabled or {},
             }
 
-        if action == "create_item_folder":
-            if not can_create_custom_item_yandex_folder(
+        if (
+            action == "create_item_folder"
+            and not can_create_custom_item_yandex_folder(
                 dialog_id,
                 checklist_key,
-            ):
-                disabled = disable_yandex_structure_job(
-                    job_id,
-                    "custom item Yandex folder is disabled for this project",
-                )
-                persist_item_yandex_structure_state(
-                    dialog_id=dialog_id,
-                    checklist_key=checklist_key,
-                    item_id=item_id,
-                    job=disabled,
-                )
-                return {
-                    "ok": True,
-                    "disabled": True,
-                    "job": disabled or {},
-                }
+            )
+        ):
+            disabled = disable_yandex_structure_job(
+                job_id,
+                "custom item Yandex folder is disabled for this project",
+            )
+            persist_item_yandex_structure_state(
+                dialog_id=dialog_id,
+                checklist_key=checklist_key,
+                item_id=item_id,
+                job=disabled,
+            )
+            return {
+                "ok": True,
+                "disabled": True,
+                "job": disabled or {},
+            }
 
-            result = ensure_yandex_folder_for_custom_item(
-                dialog_id=dialog_id,
-                checklist_key=checklist_key,
-                group_id=int(job.get("group_id") or 0),
-                item_name=clean_cell_value(job.get("item_name")),
-                item_id=item_id,
-            )
-        elif action == "rename_item_folder":
-            result_data = job.get("result") if isinstance(job.get("result"), dict) else {}
-            old_name = clean_cell_value(result_data.get("oldName"))
-            new_name = clean_cell_value(job.get("item_name"))
-            result = rename_yandex_folder_for_item(
-                dialog_id=dialog_id,
-                checklist_key=checklist_key,
-                group_id=int(job.get("group_id") or 0),
-                item_id=item_id,
-                old_name=old_name,
-                new_name=new_name,
-                source_path=clean_cell_value(job.get("source_path")),
-                target_path=clean_cell_value(job.get("target_path")),
-                folder_alias=clean_cell_value(job.get("folder_alias")),
-            )
-        else:
-            result_data = job.get("result") if isinstance(job.get("result"), dict) else {}
-            result = move_yandex_folder_for_item(
-                dialog_id=dialog_id,
-                checklist_key=checklist_key,
-                source_group_id=int(result_data.get("sourceGroupId") or 0),
-                target_group_id=int(job.get("group_id") or 0),
-                item_id=item_id,
-                item_name=clean_cell_value(job.get("item_name")),
-                source_path=clean_cell_value(job.get("source_path")),
-                target_path=clean_cell_value(job.get("target_path")),
-                folder_alias=clean_cell_value(job.get("folder_alias")),
-            )
+        with yandex_project_resource_guard(
+            dialog_id,
+            checklist_key=checklist_key,
+            item_id=item_id,
+            operation=action,
+        ):
+            result = _execute_yandex_structure_mutation(job)
 
         completed = finish_yandex_structure_job(
             job_id,
@@ -187,9 +271,9 @@ def process_yandex_structure_job(job_id: str) -> dict:
         try:
             from app.checklists.yandex_mirror_queue import (
                 enqueue_pending_yandex_mirror_jobs_for_item,
-                requeue_yandex_folder_resolution_failures,
+                requeue_current_yandex_file_failures,
             )
-            recovery_result = requeue_yandex_folder_resolution_failures(
+            recovery_result = requeue_current_yandex_file_failures(
                 dialog_id=dialog_id,
                 checklist_key=checklist_key,
                 item_id=item_id,
@@ -234,6 +318,39 @@ def process_yandex_structure_job(job_id: str) -> dict:
             "folderResolutionRecovery": recovery_result,
             "pendingMirrorJobs": pending_result,
             "mirrorReleaseError": mirror_release_error,
+        }
+    except YandexFolderConflictError as exc:
+        current_result = job.get("result") if isinstance(job.get("result"), dict) else {}
+        conflicted = mark_yandex_structure_job_conflict(
+            job_id,
+            error=str(exc),
+            result={
+                **current_result,
+                "conflictCandidates": exc.candidates,
+                "isCustom": bool(current_result.get("isCustom") or _current_item(job).get("isCustom")),
+            },
+        )
+        persist_item_yandex_structure_state(
+            dialog_id=dialog_id,
+            checklist_key=checklist_key,
+            item_id=item_id,
+            job=conflicted,
+        )
+        write_debug_log("yandex_structure_job_conflict", {
+            "jobId": job_id,
+            "action": action,
+            "dialogId": dialog_id,
+            "checklistKey": checklist_key,
+            "itemId": item_id,
+            "error": str(exc),
+            "candidates": exc.candidates,
+        })
+        return {
+            "ok": False,
+            "completed": False,
+            "conflict": True,
+            "error": str(exc),
+            "job": conflicted or {},
         }
     except Exception as exc:
         failed = fail_yandex_structure_job(job_id, str(exc))

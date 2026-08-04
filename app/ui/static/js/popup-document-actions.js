@@ -150,6 +150,169 @@ async function retryYandexStructureJob(itemId, knownJobId) {
     scheduleYandexStructurePolling(itemId, jobId, 800);
 }
 
+async function getYandexStructureJobForItem(itemId, knownJobId = '') {
+    const query = new URLSearchParams();
+    if (String(knownJobId || '').trim()) {
+        query.set('jobId', String(knownJobId || '').trim());
+    } else {
+        query.set('dialogId', String(dialogId || ''));
+        query.set('checklistKey', String(currentChecklistKey || 'id'));
+        query.set('itemId', String(itemId || ''));
+    }
+    const response = await fetch(
+        appUrl('api/checklist/yandex-structure-job') + '?' + query.toString(),
+        { cache: 'no-store' }
+    );
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || !result.ok || !result.job) {
+        throw new Error(result.error || 'Structure job не найден');
+    }
+    return result.job;
+}
+
+async function showYandexFolderConflict(itemId, knownJobId = '', knownJob = null) {
+    const job = knownJob || await getYandexStructureJobForItem(
+        itemId,
+        knownJobId
+    );
+    const candidates = Array.isArray(job && job.result && job.result.conflictCandidates)
+        ? job.result.conflictCandidates
+        : [];
+
+    const previous = document.getElementById('yandexFolderConflictOverlay');
+    if (previous) previous.remove();
+
+    const overlay = document.createElement('div');
+    overlay.id = 'yandexFolderConflictOverlay';
+    overlay.className = 'yandex-conflict-overlay';
+    overlay.innerHTML = `
+        <div class="yandex-conflict-dialog" role="dialog" aria-modal="true">
+            <h3>Конфликт папок Яндекс.Диска</h3>
+            <div>
+                Приложение не объединяет и не удаляет папки автоматически.
+                Откройте ссылки, оставьте одну правильную папку, затем нажмите
+                «Проверить снова».
+            </div>
+            <div class="yandex-conflict-links">
+                ${candidates.map((candidate, index) => `
+                    <a
+                        href="${esc(String(candidate.url || candidate.clientUrl || ''))}"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                    >
+                        ${esc(String(candidate.name || ('Папка ' + (index + 1))))}<br>
+                        <small>${esc(String(candidate.path || ''))}</small>
+                    </a>
+                `).join('') || '<span>Ссылки на папки не получены.</span>'}
+            </div>
+            <div class="yandex-conflict-actions">
+                <button type="button" data-role="yandex-conflict-close">Закрыть</button>
+                <button type="button" data-role="yandex-conflict-recheck">Проверить снова</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+
+    overlay.querySelector('[data-role="yandex-conflict-close"]')
+        .addEventListener('click', () => overlay.remove());
+    overlay.querySelector('[data-role="yandex-conflict-recheck"]')
+        .addEventListener('click', async event => {
+            const button = event.currentTarget;
+            button.disabled = true;
+            try {
+                const response = await fetch(
+                    appUrl('api/checklist/yandex-recovery/recheck'),
+                    {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            dialogId: String(dialogId || ''),
+                            checklistKey: String(currentChecklistKey || 'id'),
+                            itemId: String(itemId || '')
+                        })
+                    }
+                );
+                const result = await response.json().catch(() => ({}));
+                if (result.job) {
+                    applyYandexStructureJobToLocalItem(itemId, result.job);
+                }
+                if (result.conflict) {
+                    overlay.remove();
+                    await showYandexFolderConflict(
+                        itemId,
+                        result.job && result.job.jobId || '',
+                        result.job
+                    );
+                    renderAll();
+                    return;
+                }
+                if (!response.ok || !result.ok) {
+                    throw new Error(result.error || 'Проверка папок не выполнена');
+                }
+                overlay.remove();
+                renderAll();
+                if (result.job && ['queued', 'running'].includes(result.job.status)) {
+                    scheduleYandexStructurePolling(
+                        itemId,
+                        result.job.jobId,
+                        700
+                    );
+                }
+                setSaveState('', 'Конфликт устранён, восстановление запущено');
+            } catch (error) {
+                window.alert(error && error.message || 'Ошибка проверки папок');
+                button.disabled = false;
+            }
+        });
+}
+
+async function retryYandexRecovery(itemId) {
+    const response = await fetch(
+        appUrl('api/checklist/yandex-recovery/retry'),
+        {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                dialogId: String(dialogId || ''),
+                checklistKey: String(currentChecklistKey || 'id'),
+                itemId: String(itemId || '')
+            })
+        }
+    );
+    const result = await response.json().catch(() => ({}));
+    if (result.conflict) {
+        if (result.job) applyYandexStructureJobToLocalItem(itemId, result.job);
+        renderAll();
+        await showYandexFolderConflict(
+            itemId,
+            result.job && result.job.jobId || '',
+            result.job || null
+        );
+        return result;
+    }
+    if (!response.ok || !result.ok) {
+        throw new Error(result.error || 'Не удалось повторить синхронизацию');
+    }
+    if (result.job && result.job.jobId) {
+        applyYandexStructureJobToLocalItem(itemId, result.job);
+        const status = String(result.job.status || '').toLowerCase();
+        if (['queued', 'running'].includes(status)) {
+            scheduleYandexStructurePolling(itemId, result.job.jobId, 700);
+        }
+    }
+    renderAll();
+    if (
+        result.files
+        && Number(result.files.requeued || 0) > 0
+        && typeof loadChecklistByKey === 'function'
+    ) {
+        window.setTimeout(() => {
+            loadChecklistByKey(currentChecklistKey).catch(() => {});
+        }, 1200);
+    }
+    return result;
+}
+
 // Stage 7.1.1: document DOM actions and unified item toolbar.
 function bindDocumentActions() {
     document.querySelectorAll('[data-role="upload"]').forEach(btn => {
@@ -227,18 +390,26 @@ function bindDocumentActions() {
             const yandexStatus = String(
                 this.dataset.yandexStatus || ''
             ).trim().toLowerCase();
+            const hasMirrorErrors = this.dataset.hasMirrorErrors === '1';
             if (!itemId) return;
 
             this.dataset.loading = '1';
             this.classList.add('is-loading');
 
             try {
-                if (yandexStatus === 'error') {
-                    await retryYandexStructureJob(
+                if (yandexStatus === 'conflict') {
+                    await showYandexFolderConflict(
                         itemId,
                         this.dataset.structureJobId || ''
                     );
-                    setSaveState('', 'Повтор создания папки запущен');
+                    return;
+                }
+
+                if (yandexStatus === 'error' || hasMirrorErrors) {
+                    const recovery = await retryYandexRecovery(itemId);
+                    if (!recovery.conflict) {
+                        setSaveState('', 'Повтор неуспешной синхронизации запущен');
+                    }
                     return;
                 }
 

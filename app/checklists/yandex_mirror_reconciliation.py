@@ -15,6 +15,7 @@ from app.checklists.documents import (
 from app.checklists.storage import get_project_storage_context
 from app.checklists.upload_jobs import (
     ensure_yandex_upload_job_for_reconciliation,
+    requeue_interrupted_yandex_jobs,
 )
 from app.checklists.utils import (
     clean_cell_value,
@@ -30,9 +31,16 @@ from app.checklists.yandex_folders import (
 )
 from app.checklists.yandex_structure_jobs import (
     create_yandex_structure_job,
+    retry_yandex_structure_job,
+)
+from app.checklists.yandex_resource_locks import (
+    is_yandex_resource_locked_error,
 )
 from app.checklists.yandex_structure_queue import (
     enqueue_yandex_structure_job,
+)
+from app.checklists.yandex_custom_recovery import (
+    reconcile_custom_item_yandex_folder,
 )
 
 _RECONCILIATION_GUARD = threading.Lock()
@@ -128,6 +136,9 @@ def reconcile_yandex_mirror_documents(source: str = "startup") -> dict:
         "unrecoverable": 0,
         "structureRepairsQueued": 0,
         "structureRepairsExisting": 0,
+        "customRepairsQueued": 0,
+        "customRepairsCompleted": 0,
+        "customConflicts": 0,
         "errors": [],
     }
     context_cache: dict[str, bool] = {}
@@ -159,6 +170,30 @@ def reconcile_yandex_mirror_documents(source: str = "startup") -> dict:
             for raw_item in raw_data.get("items") or []:
                 item = migrate_legacy_document_fields(raw_item)
                 item_id = clean_cell_value(item.get("id"))
+
+                if bool(item.get("isCustom", False)):
+                    try:
+                        custom_recovery = reconcile_custom_item_yandex_folder(
+                            dialog_id=dialog_id,
+                            checklist_key=checklist_key,
+                            item_id=item_id,
+                            item=item,
+                            source=source,
+                            enqueue=True,
+                        )
+                        if custom_recovery.get("conflict"):
+                            stats["customConflicts"] += 1
+                        elif custom_recovery.get("completed"):
+                            stats["customRepairsCompleted"] += 1
+                        elif custom_recovery.get("queued"):
+                            stats["customRepairsQueued"] += 1
+                    except Exception as exc:
+                        _record_error(
+                            stats,
+                            storage_id=storage_id,
+                            item_id=item_id,
+                            error=exc,
+                        )
 
                 repair_spec = build_standard_item_yandex_repair_spec(
                     dialog_id=dialog_id,
@@ -218,6 +253,21 @@ def reconcile_yandex_mirror_documents(source: str = "startup") -> dict:
                     repair_status = clean_cell_value(
                         repair_job.get("status")
                     ).lower()
+                    if (
+                        repair_status == "error"
+                        and is_yandex_resource_locked_error(
+                            repair_job.get("error")
+                        )
+                    ):
+                        repair_job = (
+                            retry_yandex_structure_job(
+                                repair_job.get("job_id") or ""
+                            )
+                            or repair_job
+                        )
+                        repair_status = clean_cell_value(
+                            repair_job.get("status")
+                        ).lower()
                     if repair_status == "queued":
                         enqueue_result = enqueue_yandex_structure_job(
                             clean_cell_value(repair_job.get("job_id")),
@@ -347,8 +397,23 @@ def reconcile_yandex_mirror_documents(source: str = "startup") -> dict:
 def _run_reconciliation(source: str) -> None:
     global _RECONCILIATION_RUNNING
     try:
+        requeue_interrupted_yandex_jobs()
         reconcile_yandex_mirror_documents(source=source)
     finally:
+        # Dispatch legacy deletes/replacements and any still-queued uploads
+        # only after folder dependencies have been reconstructed.
+        try:
+            from app.checklists.yandex_mirror_queue import (
+                recover_yandex_mirror_state_on_startup,
+            )
+            recover_yandex_mirror_state_on_startup(
+                source=f"{source}_after_reconciliation"
+            )
+        except Exception as exc:
+            write_debug_log(
+                "yandex_mirror_post_reconciliation_recovery_failed",
+                {"source": source, "error": str(exc)},
+            )
         with _RECONCILIATION_GUARD:
             _RECONCILIATION_RUNNING = False
 

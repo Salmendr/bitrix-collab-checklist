@@ -19,7 +19,7 @@ from app.checklists.documents import (
 )
 
 YANDEX_FOLDER_STATUSES = frozenset({
-    "queued", "running", "ready", "error", "disabled"
+    "queued", "running", "ready", "error", "conflict", "disabled"
 })
 
 

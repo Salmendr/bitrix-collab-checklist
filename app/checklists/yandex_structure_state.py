@@ -20,6 +20,7 @@ PUBLIC_YANDEX_FOLDER_STATUSES = frozenset({
     "running",
     "ready",
     "error",
+    "conflict",
     "disabled",
 })
 

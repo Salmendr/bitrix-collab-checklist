@@ -258,7 +258,8 @@ def ensure_yandex_upload_job_for_reconciliation(
                 "timed out", "connection", "network", "reset by peer",
                 "429", "500", "502", "503", "504", "temporarily",
                 "yandex folder not found", "yandex folder path is empty",
-                "mirror failed",
+                "mirror failed", "diskresourcelockederror",
+                "resource is locked", "ресурс заблокирован",
             )
             retriable_error = (
                 status == "skipped" and permanent_stage == "yandex_disabled"
@@ -597,8 +598,50 @@ def list_yandex_folder_resolution_error_job_ids(
         conn.close()
 
 
+def list_yandex_upload_error_job_ids(
+    *,
+    dialog_id: str = "",
+    checklist_key: str = "",
+    item_id: str = "",
+    limit: int = 500,
+) -> list[str]:
+    """List recoverable current-file Yandex failures, not local data loss."""
+    ensure_upload_jobs_table()
+    clauses = [
+        "status = 'error'",
+        "job_type = 'upload'",
+        "stage IN ('mirror_failed', 'exception', 'folder_prepare')",
+    ]
+    params: list[object] = []
+    if clean_cell_value(dialog_id):
+        clauses.append("dialog_id = ?")
+        params.append(normalize_dialog_id(dialog_id))
+    if clean_cell_value(checklist_key):
+        clauses.append("checklist_key = ?")
+        params.append(normalize_checklist_key(checklist_key))
+    if clean_cell_value(item_id):
+        clauses.append("item_id = ?")
+        params.append(clean_cell_value(item_id))
+    params.append(max(1, int(limit or 500)))
+    conn = get_conn()
+    try:
+        rows = conn.execute(
+            f"""
+            SELECT job_id
+            FROM upload_jobs
+            WHERE {' AND '.join(clauses)}
+            ORDER BY created_at ASC, job_id ASC
+            LIMIT ?
+            """,
+            tuple(params),
+        ).fetchall()
+        return [clean_cell_value(row["job_id"]) for row in rows]
+    finally:
+        conn.close()
+
+
 def retry_failed_yandex_upload_job(job_id: str) -> dict | None:
-    """Return a folder-resolution upload failure to the durable queue."""
+    """Return a safe remote upload failure to the durable queue."""
     ensure_upload_jobs_table()
     normalized_job_id = clean_cell_value(job_id)
     now = utc_now()
@@ -618,14 +661,11 @@ def retry_failed_yandex_upload_job(job_id: str) -> dict | None:
             WHERE job_id = ?
               AND status = 'error'
               AND job_type = 'upload'
-              AND stage = 'mirror_failed'
-              AND LOWER(COALESCE(error, '')) IN (?, ?)
+              AND stage IN ('mirror_failed', 'exception', 'folder_prepare')
             """,
             (
                 now,
                 normalized_job_id,
-                "yandex folder not found",
-                "yandex folder path is empty",
             ),
         )
         conn.commit()
@@ -958,4 +998,3 @@ def resolve_document_mirror_status(document: dict | None) -> dict:
             or effective_error != stored_error
         ),
     }
-

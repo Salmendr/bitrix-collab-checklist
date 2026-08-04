@@ -604,17 +604,78 @@ def prepare_edit_session_files_for_commit(session_id: str) -> dict:
     finally:
         conn.close()
 
+    records = [dict(row) for row in rows]
+
+    def created_file_was_consumed_by_later_stash(record: dict) -> bool:
+        """Recognize a valid create -> replace/remove lineage.
+
+        A file uploaded during the current edit session can be replaced or
+        removed before that same session is committed.  The later operation
+        stashes the just-created file and removes it from its original path.
+        The old commit check treated that expected absence as external data
+        loss and left the edit session stuck forever.
+
+        We accept the missing created path only when a later active stash in
+        the same session refers to the exact path and checksum and its staged
+        copy is still present and intact.  Any other missing file remains a
+        hard conflict.
+        """
+        original_value = clean_cell_value(record.get("original_path"))
+        expected_hash = clean_cell_value(record.get("sha256"))
+        sequence_no = int(record.get("sequence_no") or 0)
+        if not original_value or not expected_hash:
+            return False
+
+        normalized_original = os.path.normcase(
+            str(normalized_absolute_path(original_value))
+        )
+        for candidate in records:
+            if int(candidate.get("sequence_no") or 0) <= sequence_no:
+                continue
+            if clean_cell_value(candidate.get("entry_kind")) != FILE_ENTRY_KIND_STASHED:
+                continue
+            candidate_original = clean_cell_value(
+                candidate.get("original_path")
+            )
+            if not candidate_original:
+                continue
+            if os.path.normcase(
+                str(normalized_absolute_path(candidate_original))
+            ) != normalized_original:
+                continue
+            if clean_cell_value(candidate.get("sha256")) != expected_hash:
+                continue
+
+            staged = require_session_file_path(
+                candidate.get("staged_path") or ""
+            )
+            if staged.is_file() and file_sha256(staged) == expected_hash:
+                return True
+        return False
+
     prepared = []
-    for row in rows:
-        record = dict(row)
+    for record in records:
         kind = clean_cell_value(record.get("entry_kind"))
         original = require_upload_path(record.get("original_path") or "")
         if kind == FILE_ENTRY_KIND_CREATED:
             if not original.is_file():
-                raise EditSessionFileConflictError(
-                    "created file is missing before commit: " + str(original)
-                )
+                if created_file_was_consumed_by_later_stash(record):
+                    write_debug_log(
+                        "edit_session_created_file_consumed",
+                        {
+                            "sessionId": normalized_session_id,
+                            "entryId": record.get("entry_id") or "",
+                            "sequenceNo": int(record.get("sequence_no") or 0),
+                            "path": str(original),
+                        },
+                    )
+                else:
+                    raise EditSessionFileConflictError(
+                        "created file is missing before commit: " + str(original)
+                    )
             if (
+                original.is_file()
+                and
                 clean_cell_value(record.get("sha256"))
                 and file_sha256(original) != record.get("sha256")
             ):
@@ -628,6 +689,13 @@ def prepare_edit_session_files_for_commit(session_id: str) -> dict:
             if not staged.is_file():
                 raise EditSessionFileConflictError(
                     "stashed file is missing before commit: " + str(staged)
+                )
+            if (
+                clean_cell_value(record.get("sha256"))
+                and file_sha256(staged) != record.get("sha256")
+            ):
+                raise EditSessionFileConflictError(
+                    "stashed file changed outside edit session: " + str(staged)
                 )
         else:
             raise EditSessionFileConflictError(

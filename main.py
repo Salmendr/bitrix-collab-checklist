@@ -66,7 +66,6 @@ from app.checklists.yandex_warmup_queue import (
 
 from app.checklists.yandex_mirror_queue import (
     start_yandex_mirror_workers,
-    recover_yandex_mirror_state_on_startup,
 )
 from app.checklists.yandex_mirror_reconciliation import (
     start_yandex_mirror_reconciliation,
@@ -177,15 +176,15 @@ def startup_event():
     start_yandex_warmup_workers()
     enqueue_all_saved_project_contexts(source="startup")
 
-    recover_yandex_mirror_state_on_startup(
-        source="startup"
-    )
-    start_yandex_mirror_workers()
-
     recover_yandex_structure_state_on_startup(
         source="startup"
     )
     start_yandex_structure_workers()
+
+    # Mirror workers start with an empty in-memory queue. Reconciliation first
+    # reconstructs custom/standard folder dependencies and only then performs
+    # the general durable queue recovery.
+    start_yandex_mirror_workers()
 
     # Stage 8.15.4: one asynchronous pass per process startup restores
     # legacy/skipped/failed current-document uploads without duplicating synced jobs.
