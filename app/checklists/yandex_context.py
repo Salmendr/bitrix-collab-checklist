@@ -275,6 +275,18 @@ def build_config_yandex_folders(context: dict) -> dict:
 
     result = deepcopy(existing_folders)
 
+    # A standard item keeps the configured folder alias after a user rename.
+    # The stored mapping is therefore the authoritative signal that an alias
+    # now belongs to a different visible item name.  Without this index the
+    # config hydration below restored the original path/name on every read.
+    stored_mapping_by_alias: dict[str, dict] = {}
+    for raw_mapping in context.get("itemMappings") or []:
+        if not isinstance(raw_mapping, dict):
+            continue
+        mapping_alias = clean_cell_value(raw_mapping.get("folderAlias"))
+        if mapping_alias:
+            stored_mapping_by_alias[mapping_alias] = dict(raw_mapping)
+
     for config in list_checklist_configs():
         root_record = build_root_folder_record(context, config, existing_folders)
         if root_record:
@@ -306,8 +318,41 @@ def build_config_yandex_folders(context: dict) -> dict:
             folder_path = join_yandex_path(root_path, relative_path)
             folder_name = normalize_folder_spec_name(spec_item_name, spec, folder_path)
 
+            existing_record = result.get(folder_alias, {}) or {}
+            stored_mapping = stored_mapping_by_alias.get(folder_alias) or {}
+            stored_mapping_key = normalize_checklist_key(
+                stored_mapping.get("checklistKey")
+            )
+            stored_mapping_name = clean_cell_value(
+                stored_mapping.get("itemName")
+            )
+            stored_mapping_group = normalize_folder_spec_group_id(
+                stored_mapping
+            )
+            user_renamed = bool(
+                existing_record
+                and clean_cell_value(existing_record.get("path"))
+                and stored_mapping_key == config.key
+                and stored_mapping_group == spec_group_id
+                and stored_mapping_name
+                and stored_mapping_name.casefold() != spec_item_name.casefold()
+            ) or bool(existing_record.get("userRenamed"))
+
+            if user_renamed:
+                result[folder_alias] = {
+                    **existing_record,
+                    "checklistKey": config.key,
+                    "itemName": stored_mapping_name
+                    or clean_cell_value(existing_record.get("itemName"))
+                    or spec_item_name,
+                    "groupId": stored_mapping_group or spec_group_id,
+                    "isStageRoot": False,
+                    "userRenamed": True,
+                }
+                continue
+
             result[folder_alias] = {
-                **result.get(folder_alias, {}),
+                **existing_record,
                 "name": folder_name,
                 "path": folder_path,
                 "url": get_folder_public_url(existing_folders, folder_alias),
@@ -374,28 +419,51 @@ def mapping_identity(mapping: dict) -> tuple[str, int, str]:
 def merge_item_mappings(existing_mappings: list, generated_mappings: list) -> list[dict]:
     result = []
     seen = set()
+    seen_aliases = set()
 
-    for mapping in existing_mappings or []:
+    # The newest stored record for an alias wins.  Rename operations append the
+    # replacement mapping, so walking backwards also repairs older contexts
+    # that accidentally contain both the original and renamed item mappings.
+    stored = []
+    for mapping in reversed(existing_mappings or []):
         if not isinstance(mapping, dict):
             continue
 
         identity = mapping_identity(mapping)
-        if not identity[0] or not identity[1] or identity in seen:
+        alias = clean_cell_value(mapping.get("folderAlias"))
+        if (
+            not identity[0]
+            or not identity[1]
+            or identity in seen
+            or (alias and alias in seen_aliases)
+        ):
             continue
 
-        result.append(dict(mapping))
+        stored.append(dict(mapping))
         seen.add(identity)
+        if alias:
+            seen_aliases.add(alias)
+
+    result.extend(reversed(stored))
 
     for mapping in generated_mappings or []:
         if not isinstance(mapping, dict):
             continue
 
         identity = mapping_identity(mapping)
-        if not identity[0] or not identity[1] or identity in seen:
+        alias = clean_cell_value(mapping.get("folderAlias"))
+        if (
+            not identity[0]
+            or not identity[1]
+            or identity in seen
+            or (alias and alias in seen_aliases)
+        ):
             continue
 
         result.append(dict(mapping))
         seen.add(identity)
+        if alias:
+            seen_aliases.add(alias)
 
     return result
 

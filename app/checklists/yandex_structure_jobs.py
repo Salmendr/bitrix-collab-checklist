@@ -300,6 +300,43 @@ def get_latest_yandex_structure_job_for_item(
         conn.close()
 
 
+def get_blocking_yandex_structure_job_for_item(
+    *,
+    dialog_id: str,
+    checklist_key: str,
+    item_id: str,
+) -> dict | None:
+    """Return an unfinished folder mutation that must precede file upload."""
+    ensure_yandex_structure_jobs_table()
+    conn = get_conn()
+    try:
+        row = conn.execute(
+            """
+            SELECT *
+            FROM yandex_structure_jobs
+            WHERE dialog_id = ?
+              AND checklist_key = ?
+              AND item_id = ?
+              AND action IN (
+                  'create_item_folder',
+                  'rename_item_folder',
+                  'move_item_folder'
+              )
+              AND status IN ('queued', 'running')
+            ORDER BY created_at ASC, job_id ASC
+            LIMIT 1
+            """,
+            (
+                normalize_dialog_id(dialog_id),
+                normalize_checklist_key(checklist_key),
+                clean_cell_value(item_id),
+            ),
+        ).fetchone()
+        return _normalize_job_record(row)
+    finally:
+        conn.close()
+
+
 def list_latest_yandex_structure_jobs_for_checklist(
     *,
     dialog_id: str,

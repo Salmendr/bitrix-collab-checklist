@@ -861,22 +861,23 @@ def _dispatch_committed_edit_session_jobs(
     )
 
     try:
-        enqueue_committed_edit_session_yandex_jobs(
-            session_id,
-            source="edit_session_commit_background",
-        )
-    except Exception:
-        # Jobs are already durable in SQLite. Startup recovery or a repeated
-        # commit will dispatch them again without losing local data.
-        pass
-
-    try:
         enqueue_committed_edit_session_structure_jobs(
             session_id,
             source="edit_session_commit_background",
         )
     except Exception:
-        # Structural jobs are durable for the same reason.
+        # Structural jobs are durable in SQLite. Startup recovery or a repeated
+        # commit will dispatch them again without losing local data.
+        pass
+
+    try:
+        enqueue_committed_edit_session_yandex_jobs(
+            session_id,
+            source="edit_session_commit_background",
+        )
+    except Exception:
+        # File jobs are durable as well. The mirror queue additionally checks
+        # the persisted structure dependency before claiming an upload.
         pass
 
 

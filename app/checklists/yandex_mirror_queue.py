@@ -30,12 +30,20 @@ from app.checklists.documents import (
 from app.checklists.upload_jobs import (
     get_upload_job,
     list_pending_yandex_job_ids,
+    list_pending_yandex_job_ids_for_item,
+    list_yandex_folder_resolution_error_job_ids,
+    retry_failed_yandex_upload_job,
     claim_upload_job,
     update_upload_job_progress,
     finish_upload_job,
     fail_upload_job,
     is_job_cancelled,
     requeue_interrupted_yandex_jobs,
+)
+
+from app.checklists.yandex_structure_jobs import (
+    get_blocking_yandex_structure_job_for_item,
+    get_latest_yandex_structure_job_for_item,
 )
 
 from app.checklists.replacement_sync import (
@@ -169,6 +177,16 @@ def document_still_exists(
     ) is not None
 
 
+def get_upload_job_blocking_structure_job(job: dict) -> dict | None:
+    if clean_cell_value((job or {}).get("job_type")) != "upload":
+        return None
+    return get_blocking_yandex_structure_job_for_item(
+        dialog_id=(job or {}).get("dialog_id"),
+        checklist_key=(job or {}).get("checklist_key"),
+        item_id=(job or {}).get("item_id"),
+    )
+
+
 def enqueue_yandex_mirror_job(job_id: str, source: str = "") -> dict:
     job_id = clean_cell_value(job_id)
 
@@ -195,6 +213,34 @@ def enqueue_yandex_mirror_job(job_id: str, source: str = "") -> dict:
             "skipped": True,
             "reason": f"job status is {job.get('status')}",
             "jobId": job_id,
+        }
+
+    blocking_structure_job = get_upload_job_blocking_structure_job(job)
+    if blocking_structure_job:
+        write_debug_log("yandex_mirror_job_deferred_for_structure", {
+            "jobId": job_id,
+            "source": source,
+            "dialogId": job.get("dialog_id") or "",
+            "checklistKey": job.get("checklist_key") or "",
+            "itemId": job.get("item_id") or "",
+            "structureJobId": blocking_structure_job.get("job_id") or "",
+            "structureAction": blocking_structure_job.get("action") or "",
+            "structureStatus": blocking_structure_job.get("status") or "",
+        })
+        return {
+            "ok": True,
+            "queued": False,
+            "deferred": True,
+            "jobId": job_id,
+            "blockingStructureJobId": (
+                blocking_structure_job.get("job_id") or ""
+            ),
+            "blockingStructureAction": (
+                blocking_structure_job.get("action") or ""
+            ),
+            "blockingStructureStatus": (
+                blocking_structure_job.get("status") or ""
+            ),
         }
 
     with YANDEX_MIRROR_GUARD:
@@ -235,6 +281,150 @@ def enqueue_yandex_mirror_job(job_id: str, source: str = "") -> dict:
         "jobId": job_id,
         "queueSize": YANDEX_MIRROR_QUEUE.qsize(),
     }
+
+
+def enqueue_pending_yandex_mirror_jobs_for_item(
+    *,
+    dialog_id: str,
+    checklist_key: str,
+    item_id: str,
+    source: str = "structure_completed",
+) -> dict:
+    job_ids = list_pending_yandex_job_ids_for_item(
+        dialog_id=dialog_id,
+        checklist_key=checklist_key,
+        item_id=item_id,
+        limit=500,
+    )
+    results = [
+        enqueue_yandex_mirror_job(job_id, source=source)
+        for job_id in job_ids
+    ]
+    result = {
+        "ok": True,
+        "source": source,
+        "dialogId": normalize_dialog_id(dialog_id),
+        "checklistKey": normalize_checklist_key(checklist_key),
+        "itemId": clean_cell_value(item_id),
+        "found": len(job_ids),
+        "queued": sum(1 for value in results if value.get("queued")),
+        "deferred": sum(1 for value in results if value.get("deferred")),
+        "alreadyQueued": sum(
+            1 for value in results if value.get("alreadyQueued")
+        ),
+        "results": results,
+    }
+    write_debug_log("yandex_mirror_item_pending_jobs_enqueued", result)
+    return result
+
+
+def requeue_yandex_folder_resolution_failures(
+    *,
+    dialog_id: str = "",
+    checklist_key: str = "",
+    item_id: str = "",
+    source: str = "structure_completed",
+) -> dict:
+    job_ids = list_yandex_folder_resolution_error_job_ids(
+        dialog_id=dialog_id,
+        checklist_key=checklist_key,
+        item_id=item_id,
+        limit=500,
+    )
+    requeued = 0
+    queued = 0
+    skipped = 0
+    results = []
+
+    for job_id in job_ids:
+        job = get_upload_job(job_id) or {}
+        latest_structure = get_latest_yandex_structure_job_for_item(
+            dialog_id=job.get("dialog_id"),
+            checklist_key=job.get("checklist_key"),
+            item_id=job.get("item_id"),
+        ) or {}
+        if clean_cell_value(latest_structure.get("status")) != "completed":
+            skipped += 1
+            results.append({
+                "jobId": job_id,
+                "skipped": True,
+                "reason": "latest structure job is not completed",
+                "structureJobId": latest_structure.get("job_id") or "",
+                "structureStatus": latest_structure.get("status") or "",
+            })
+            continue
+
+        found = find_document_in_checklist(
+            job.get("dialog_id"),
+            job.get("checklist_key"),
+            job.get("item_id"),
+            job.get("document_id"),
+        )
+        if not found:
+            skipped += 1
+            results.append({
+                "jobId": job_id,
+                "skipped": True,
+                "reason": "document no longer exists",
+            })
+            continue
+
+        _, _, document = found
+        if clean_cell_value(document.get("mirrorStatus")) == "synced":
+            skipped += 1
+            results.append({
+                "jobId": job_id,
+                "skipped": True,
+                "reason": "document is already synced",
+            })
+            continue
+
+        retried = retry_failed_yandex_upload_job(job_id) or {}
+        if clean_cell_value(retried.get("status")) != "queued":
+            skipped += 1
+            results.append({
+                "jobId": job_id,
+                "skipped": True,
+                "reason": "job could not be returned to queued state",
+                "jobStatus": retried.get("status") or "",
+            })
+            continue
+
+        update_document_mirror_fields(
+            job.get("dialog_id"),
+            job.get("checklist_key"),
+            job.get("item_id"),
+            job.get("document_id"),
+            {
+                "mirrorStatus": "queued",
+                "mirrorError": "",
+            },
+        )
+        requeued += 1
+        enqueue_result = enqueue_yandex_mirror_job(
+            job_id,
+            source=f"{source}_folder_resolution_retry",
+        )
+        if enqueue_result.get("queued"):
+            queued += 1
+        results.append({
+            "jobId": job_id,
+            "requeued": True,
+            "enqueueResult": enqueue_result,
+            "structureJobId": latest_structure.get("job_id") or "",
+        })
+
+    result = {
+        "ok": True,
+        "source": source,
+        "found": len(job_ids),
+        "requeued": requeued,
+        "queued": queued,
+        "skipped": skipped,
+        "results": results,
+    }
+    write_debug_log("yandex_folder_resolution_failures_requeued", result)
+    return result
 
 
 def enqueue_pending_yandex_mirror_jobs(source: str = "startup") -> dict:
@@ -513,6 +703,12 @@ def recover_yandex_mirror_state_on_startup(
         requeue_interrupted_yandex_jobs()
     )
 
+    folder_resolution_recovery = (
+        requeue_yandex_folder_resolution_failures(
+            source=f"{source}_completed_structure_recovery"
+        )
+    )
+
     pending_jobs_result = (
         enqueue_pending_yandex_mirror_jobs(
             source=source
@@ -537,6 +733,7 @@ def recover_yandex_mirror_state_on_startup(
         "interruptedJobsRequeued": (
             interrupted_jobs
         ),
+        "folderResolutionRecovery": folder_resolution_recovery,
         "pendingJobs": pending_jobs_result,
         "replacements": replacements_result,
     }
@@ -642,6 +839,9 @@ def process_upload_job(job: dict):
         item_id=item_id,
         item_group=int(item.get("group") or 0),
         is_custom=bool(item.get("isCustom", False)),
+        item_folder_path=clean_cell_value(item.get("yandexFolderPath")),
+        item_folder_url=clean_cell_value(item.get("yandexFolderUrl")),
+        item_folder_alias=clean_cell_value(item.get("yandexFolderAlias")),
         progress_callback=on_upload_progress,
     )
 
@@ -716,6 +916,22 @@ def process_delete_job(job: dict):
 
 
 def process_yandex_mirror_job(job_id: str):
+    current_job = get_upload_job(job_id) or {}
+    blocking_structure_job = get_upload_job_blocking_structure_job(
+        current_job
+    )
+    if blocking_structure_job:
+        write_debug_log("yandex_mirror_job_worker_deferred_for_structure", {
+            "jobId": clean_cell_value(job_id),
+            "dialogId": current_job.get("dialog_id") or "",
+            "checklistKey": current_job.get("checklist_key") or "",
+            "itemId": current_job.get("item_id") or "",
+            "structureJobId": blocking_structure_job.get("job_id") or "",
+            "structureAction": blocking_structure_job.get("action") or "",
+            "structureStatus": blocking_structure_job.get("status") or "",
+        })
+        return
+
     job = claim_upload_job(job_id)
 
     if not job:

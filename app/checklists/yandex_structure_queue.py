@@ -176,6 +176,44 @@ def process_yandex_structure_job(job_id: str) -> dict:
             item_id=item_id,
             job=completed,
         )
+
+        # File uploads for the same item are durable but deliberately kept out
+        # of the in-memory mirror queue until the folder mutation completes.
+        # A folder-not-found failure that raced with an older build is also
+        # returned to the queue only after this successful structure result.
+        recovery_result = {}
+        pending_result = {}
+        mirror_release_error = ""
+        try:
+            from app.checklists.yandex_mirror_queue import (
+                enqueue_pending_yandex_mirror_jobs_for_item,
+                requeue_yandex_folder_resolution_failures,
+            )
+            recovery_result = requeue_yandex_folder_resolution_failures(
+                dialog_id=dialog_id,
+                checklist_key=checklist_key,
+                item_id=item_id,
+                source="yandex_structure_completed",
+            )
+            pending_result = enqueue_pending_yandex_mirror_jobs_for_item(
+                dialog_id=dialog_id,
+                checklist_key=checklist_key,
+                item_id=item_id,
+                source="yandex_structure_completed",
+            )
+        except Exception as release_exc:
+            # The folder mutation is already durably completed. A temporary
+            # mirror-dispatch failure must not rewrite that successful
+            # structure job as failed; startup recovery can dispatch it later.
+            mirror_release_error = str(release_exc)
+            write_debug_log("yandex_structure_mirror_release_failed", {
+                "jobId": job_id,
+                "dialogId": dialog_id,
+                "checklistKey": checklist_key,
+                "itemId": item_id,
+                "error": mirror_release_error,
+            })
+
         write_debug_log("yandex_structure_job_completed", {
             "jobId": job_id,
             "action": action,
@@ -184,12 +222,18 @@ def process_yandex_structure_job(job_id: str) -> dict:
             "itemId": item_id,
             "folderPath": result.get("folderPath") or "",
             "folderUrlExists": bool(result.get("folderUrl")),
+            "folderResolutionRecovery": recovery_result,
+            "pendingMirrorJobs": pending_result,
+            "mirrorReleaseError": mirror_release_error,
         })
         return {
             "ok": True,
             "completed": True,
             "job": completed or {},
             "result": result,
+            "folderResolutionRecovery": recovery_result,
+            "pendingMirrorJobs": pending_result,
+            "mirrorReleaseError": mirror_release_error,
         }
     except Exception as exc:
         failed = fail_yandex_structure_job(job_id, str(exc))

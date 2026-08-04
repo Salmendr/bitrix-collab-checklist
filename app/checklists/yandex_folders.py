@@ -328,14 +328,24 @@ def ensure_project_yandex_root_folder(dialog_id: str) -> dict:
         yandex_disk["projectRootPrepared"] = True
         yandex_disk["projectRootPreparedAt"] = datetime.now().isoformat()
 
+        latest_context = get_project_storage_context(dialog_id) or context
+        latest_yandex = dict(latest_context.get("yandexDisk") or {})
+        latest_yandex.update({
+            "projectRootPath": yandex_disk.get("projectRootPath") or "",
+            "projectRootUrl": yandex_disk.get("projectRootUrl") or "",
+            "projectRootPrepared": True,
+            "projectRootPreparedAt": yandex_disk.get("projectRootPreparedAt") or "",
+        })
         save_project_storage_context(dialog_id, {
             "dialogId": dialog_id,
-            "projectId": context.get("projectId") or "",
-            "projectName": context.get("projectName") or "",
-            "storageMode": context.get("storageMode") or {},
-            "yandexDisk": yandex_disk,
-            "itemMappings": context.get("itemMappings") or [],
+            "projectId": latest_context.get("projectId") or "",
+            "projectName": latest_context.get("projectName") or "",
+            "storageMode": latest_context.get("storageMode") or {},
+            "yandexDisk": latest_yandex,
+            "itemMappings": latest_context.get("itemMappings") or [],
+            "bitrix": latest_context.get("bitrix") or {},
         })
+        yandex_disk = latest_yandex
 
         write_debug_log("yandex_root_prepare_completed", {
             "dialogId": dialog_id,
@@ -437,6 +447,85 @@ def run_project_yandex_folder_warmup(dialog_id: str) -> dict:
 
     finally:
         ACTIVE_YANDEX_WARMUPS.discard(dialog_id)
+
+def _save_yandex_warmup_progress(
+    *,
+    dialog_id: str,
+    fallback_context: dict,
+    warmed_folders: dict,
+    prepared: bool,
+    prepared_at: str,
+) -> dict:
+    """Persist warmup results without overwriting concurrent item mutations."""
+    latest_context = get_project_storage_context(dialog_id) or dict(
+        fallback_context or {}
+    )
+    latest_yandex = dict(latest_context.get("yandexDisk") or {})
+    latest_folders = dict(latest_yandex.get("folders") or {})
+
+    for alias, raw_warmed in (warmed_folders or {}).items():
+        warmed = raw_warmed if isinstance(raw_warmed, dict) else {}
+        current = latest_folders.get(alias)
+        if not isinstance(current, dict):
+            latest_folders[alias] = dict(warmed)
+            continue
+
+        current_path = clean_cell_value(current.get("path"))
+        warmed_path = clean_cell_value(warmed.get("path"))
+        normalized_current_path = (
+            normalize_yandex_disk_path(current_path)
+            if current_path
+            else ""
+        )
+        normalized_warmed_path = (
+            normalize_yandex_disk_path(warmed_path)
+            if warmed_path
+            else ""
+        )
+
+        # A rename/move may finish while warmup is still processing the old
+        # folder path.  Never put that stale path back into the context.
+        if (
+            normalized_current_path
+            and normalized_warmed_path
+            and normalized_current_path != normalized_warmed_path
+        ):
+            continue
+
+        merged = {
+            **warmed,
+            **current,
+        }
+        if not clean_cell_value(current.get("url")):
+            merged["url"] = clean_cell_value(warmed.get("url"))
+        if clean_cell_value(warmed.get("preparedAt")):
+            merged["preparedAt"] = clean_cell_value(
+                warmed.get("preparedAt")
+            )
+        latest_folders[alias] = merged
+
+    latest_yandex["folders"] = latest_folders
+    latest_yandex["standardFoldersPrepared"] = bool(prepared)
+    latest_yandex["standardFoldersPreparedAt"] = clean_cell_value(
+        prepared_at
+    )
+    latest_yandex["standardFoldersPreparedCount"] = len(latest_folders)
+
+    save_project_storage_context(dialog_id, {
+        "dialogId": dialog_id,
+        "projectId": latest_context.get("projectId") or "",
+        "projectName": latest_context.get("projectName") or "",
+        "storageMode": latest_context.get("storageMode") or {},
+        "yandexDisk": latest_yandex,
+        "itemMappings": latest_context.get("itemMappings") or [],
+        "bitrix": latest_context.get("bitrix") or {},
+    })
+    return {
+        "context": latest_context,
+        "yandexDisk": latest_yandex,
+        "folders": latest_folders,
+    }
+
 
 def ensure_project_standard_yandex_folder_structure(dialog_id: str) -> dict:
     write_debug_log("yandex_warmup_started", {
@@ -547,14 +636,13 @@ def ensure_project_standard_yandex_folder_structure(dialog_id: str) -> dict:
         yandex_disk["standardFoldersPreparedAt"] = prepared_at
         yandex_disk["standardFoldersPreparedCount"] = len(updated_folders)
 
-        save_project_storage_context(dialog_id, {
-            "dialogId": dialog_id,
-            "projectId": context.get("projectId") or "",
-            "projectName": context.get("projectName") or "",
-            "storageMode": context.get("storageMode") or {},
-            "yandexDisk": yandex_disk,
-            "itemMappings": context.get("itemMappings") or [],
-        })
+        _save_yandex_warmup_progress(
+            dialog_id=dialog_id,
+            fallback_context=context,
+            warmed_folders=updated_folders,
+            prepared=False,
+            prepared_at=prepared_at,
+        )
 
         write_debug_log("yandex_warmup_cancelled", {
             "dialogId": dialog_id,
@@ -657,14 +745,15 @@ def ensure_project_standard_yandex_folder_structure(dialog_id: str) -> dict:
     yandex_disk["standardFoldersPreparedAt"] = prepared_at
     yandex_disk["standardFoldersPreparedCount"] = len(updated_folders)
 
-    save_project_storage_context(dialog_id, {
-        "dialogId": dialog_id,
-        "projectId": context.get("projectId") or "",
-        "projectName": context.get("projectName") or "",
-        "storageMode": context.get("storageMode") or {},
-        "yandexDisk": yandex_disk,
-        "itemMappings": context.get("itemMappings") or [],
-    })
+    persisted_warmup = _save_yandex_warmup_progress(
+        dialog_id=dialog_id,
+        fallback_context=context,
+        warmed_folders=updated_folders,
+        prepared=failed == 0,
+        prepared_at=prepared_at,
+    )
+    yandex_disk = persisted_warmup.get("yandexDisk") or yandex_disk
+    updated_folders = persisted_warmup.get("folders") or updated_folders
     write_debug_log("yandex_warmup_finished", {
         "dialogId": dialog_id,
         "ok": failed == 0,
@@ -719,13 +808,21 @@ def upsert_item_yandex_mapping(
     folders = yandex_disk.get("folders") or {}
     item_mappings = context.get("itemMappings") or []
 
+    existing_folder = folders.get(folder_alias) or {}
+    existing_item_name = clean_cell_value(existing_folder.get("itemName"))
     folders[folder_alias] = {
+        **existing_folder,
         "name": folder_name,
         "path": folder_path,
         "url": folder_url,
         "checklistKey": checklist_key,
         "groupId": group_id,
         "itemName": item_name,
+        "userRenamed": bool(existing_folder.get("userRenamed"))
+        or bool(
+            existing_item_name
+            and existing_item_name.casefold() != item_name.casefold()
+        ),
     }
 
     yandex_disk["folders"] = folders
@@ -745,10 +842,17 @@ def upsert_item_yandex_mapping(
         except (TypeError, ValueError):
             mapping_group_id = 0
 
+        mapping_alias = clean_cell_value(mapping.get("folderAlias"))
         same_item = (
             mapping_key == checklist_key
-            and mapping_name.lower() == item_name.lower()
             and mapping_group_id == group_id
+            and (
+                mapping_name.lower() == item_name.lower()
+                or (
+                    clean_cell_value(folder_alias)
+                    and mapping_alias == clean_cell_value(folder_alias)
+                )
+            )
         )
 
         if same_item:
@@ -778,6 +882,7 @@ def upsert_item_yandex_mapping(
         "storageMode": context.get("storageMode") or {},
         "yandexDisk": yandex_disk,
         "itemMappings": updated_mappings,
+        "bitrix": context.get("bitrix") or {},
     })
 
 
@@ -1094,11 +1199,26 @@ def build_item_yandex_relocation_spec(
             f"{checklist_key}_{slugify_folder_part(item_id or source_name)}"
         )
 
-    target_parent = resolve_item_group_parent_yandex_path(
-        dialog_id=dialog_id,
-        checklist_key=checklist_key,
-        group_id=int(target_group_id or 0),
+    normalized_source_path = (
+        normalize_yandex_disk_path(source_path)
+        if source_path
+        else ""
     )
+    same_group = int(source_group_id or 0) == int(target_group_id or 0)
+    if same_group and normalized_source_path:
+        # A pure rename must keep the exact current parent directory.  Standard
+        # items can live one or more levels below the common group root (for
+        # example 02_Стадия П/05_ИОС/ИОС_1).  Re-resolving the group root here
+        # used to drop 05_ИОС and move the folder to the wrong level.
+        target_parent, _ = _split_yandex_parent_and_name(
+            normalized_source_path
+        )
+    else:
+        target_parent = resolve_item_group_parent_yandex_path(
+            dialog_id=dialog_id,
+            checklist_key=checklist_key,
+            group_id=int(target_group_id or 0),
+        )
     source_folder_name = (
         normalize_yandex_disk_path(source_path)
         .rstrip("/")
@@ -1119,11 +1239,6 @@ def build_item_yandex_relocation_spec(
             f"{target_parent.rstrip('/')}/{target_folder_name}"
         )
         if target_parent and target_folder_name
-        else ""
-    )
-    normalized_source_path = (
-        normalize_yandex_disk_path(source_path)
-        if source_path
         else ""
     )
     enabled = bool(
@@ -1318,6 +1433,7 @@ def rename_item_yandex_mapping(
         "checklistKey": checklist_key,
         "groupId": int(group_id or 0),
         "itemName": clean_cell_value(new_name),
+        "userRenamed": True,
     }
     yandex_disk["folders"] = folders
     save_project_storage_context(dialog_id, {
@@ -1327,6 +1443,7 @@ def rename_item_yandex_mapping(
         "storageMode": context.get("storageMode") or {},
         "yandexDisk": yandex_disk,
         "itemMappings": mappings,
+        "bitrix": context.get("bitrix") or {},
     })
 
 
@@ -1742,6 +1859,9 @@ def mirror_document_file_to_yandex(
     item_id: str = "",
     item_group: int = 0,
     is_custom: bool = False,
+    item_folder_path: str = "",
+    item_folder_url: str = "",
+    item_folder_alias: str = "",
     progress_callback=None,
 ) -> dict:
     if not is_yandex_disk_enabled():
@@ -1753,14 +1873,47 @@ def mirror_document_file_to_yandex(
     checklist_key = normalize_checklist_key(checklist_key)
 
     try:
-        folder_info = ensure_item_yandex_folder_for_upload(
-            dialog_id=dialog_id,
-            checklist_key=checklist_key,
-            item_name=item_name,
-            item_id=item_id,
-            item_group=item_group,
-            is_custom=is_custom,
-        )
+        explicit_folder_path = clean_cell_value(item_folder_path)
+        explicit_folder_alias = clean_cell_value(item_folder_alias)
+        explicit_folder_url = clean_cell_value(item_folder_url)
+        if explicit_folder_path:
+            normalized_explicit_path = normalize_yandex_disk_path(
+                explicit_folder_path
+            )
+            folder_info = {
+                "folderAlias": explicit_folder_alias,
+                "folder": {
+                    "name": normalized_explicit_path.rstrip("/").rsplit("/", 1)[-1],
+                    "path": normalized_explicit_path,
+                    "url": explicit_folder_url,
+                },
+                "mapping": {
+                    "checklistKey": checklist_key,
+                    "groupId": int(item_group or 0),
+                    "itemName": item_name,
+                    "folderAlias": explicit_folder_alias,
+                },
+            }
+            if explicit_folder_alias:
+                upsert_item_yandex_mapping(
+                    dialog_id=dialog_id,
+                    checklist_key=checklist_key,
+                    item_name=item_name,
+                    folder_alias=explicit_folder_alias,
+                    folder_name=normalized_explicit_path.rstrip("/").rsplit("/", 1)[-1],
+                    folder_path=normalized_explicit_path,
+                    folder_url=explicit_folder_url,
+                    group_id=int(item_group or 0),
+                )
+        else:
+            folder_info = ensure_item_yandex_folder_for_upload(
+                dialog_id=dialog_id,
+                checklist_key=checklist_key,
+                item_name=item_name,
+                item_id=item_id,
+                item_group=item_group,
+                is_custom=is_custom,
+            )
 
         if not folder_info:
             return {

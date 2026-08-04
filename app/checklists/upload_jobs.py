@@ -309,6 +309,137 @@ def list_pending_yandex_job_ids(limit: int = 100) -> list[str]:
     return [clean_cell_value(row["job_id"]) for row in rows]
 
 
+def list_pending_yandex_job_ids_for_item(
+    *,
+    dialog_id: str,
+    checklist_key: str,
+    item_id: str,
+    limit: int = 500,
+) -> list[str]:
+    ensure_upload_jobs_table()
+    conn = get_conn()
+    try:
+        rows = conn.execute(
+            """
+            SELECT job_id
+            FROM upload_jobs
+            WHERE status = 'queued'
+              AND job_type = 'upload'
+              AND dialog_id = ?
+              AND checklist_key = ?
+              AND item_id = ?
+            ORDER BY created_at ASC, job_id ASC
+            LIMIT ?
+            """,
+            (
+                normalize_dialog_id(dialog_id),
+                normalize_checklist_key(checklist_key),
+                clean_cell_value(item_id),
+                max(1, int(limit or 500)),
+            ),
+        ).fetchall()
+        return [clean_cell_value(row["job_id"]) for row in rows]
+    finally:
+        conn.close()
+
+
+def list_yandex_folder_resolution_error_job_ids(
+    *,
+    dialog_id: str = "",
+    checklist_key: str = "",
+    item_id: str = "",
+    limit: int = 500,
+) -> list[str]:
+    """List only upload failures caused by resolving an item folder."""
+    ensure_upload_jobs_table()
+    clauses = [
+        "status = 'error'",
+        "job_type = 'upload'",
+        "stage = 'mirror_failed'",
+        "LOWER(COALESCE(error, '')) IN (?, ?)",
+    ]
+    params: list[object] = [
+        "yandex folder not found",
+        "yandex folder path is empty",
+    ]
+    normalized_dialog_id = (
+        normalize_dialog_id(dialog_id)
+        if clean_cell_value(dialog_id)
+        else ""
+    )
+    normalized_checklist_key = (
+        normalize_checklist_key(checklist_key)
+        if clean_cell_value(checklist_key)
+        else ""
+    )
+    normalized_item_id = clean_cell_value(item_id)
+    if normalized_dialog_id:
+        clauses.append("dialog_id = ?")
+        params.append(normalized_dialog_id)
+    if normalized_checklist_key:
+        clauses.append("checklist_key = ?")
+        params.append(normalized_checklist_key)
+    if normalized_item_id:
+        clauses.append("item_id = ?")
+        params.append(normalized_item_id)
+    params.append(max(1, int(limit or 500)))
+
+    conn = get_conn()
+    try:
+        rows = conn.execute(
+            f"""
+            SELECT job_id
+            FROM upload_jobs
+            WHERE {' AND '.join(clauses)}
+            ORDER BY created_at ASC, job_id ASC
+            LIMIT ?
+            """,
+            tuple(params),
+        ).fetchall()
+        return [clean_cell_value(row["job_id"]) for row in rows]
+    finally:
+        conn.close()
+
+
+def retry_failed_yandex_upload_job(job_id: str) -> dict | None:
+    """Return a folder-resolution upload failure to the durable queue."""
+    ensure_upload_jobs_table()
+    normalized_job_id = clean_cell_value(job_id)
+    now = utc_now()
+    conn = get_conn()
+    try:
+        cur = conn.execute(
+            """
+            UPDATE upload_jobs
+            SET status = 'queued',
+                stage = 'mirror_queued',
+                progress_percent = 0,
+                uploaded_bytes = 0,
+                error = '',
+                started_at = '',
+                finished_at = '',
+                updated_at = ?
+            WHERE job_id = ?
+              AND status = 'error'
+              AND job_type = 'upload'
+              AND stage = 'mirror_failed'
+              AND LOWER(COALESCE(error, '')) IN (?, ?)
+            """,
+            (
+                now,
+                normalized_job_id,
+                "yandex folder not found",
+                "yandex folder path is empty",
+            ),
+        )
+        conn.commit()
+        if int(cur.rowcount or 0) != 1:
+            return get_upload_job(normalized_job_id)
+    finally:
+        conn.close()
+    return get_upload_job(normalized_job_id)
+
+
 def list_recent_jobs(limit: int = 20) -> list[dict]:
     ensure_upload_jobs_table()
 
