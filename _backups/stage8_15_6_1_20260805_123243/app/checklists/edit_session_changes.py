@@ -31,40 +31,11 @@ ROLLED_BACK_OPERATION_STATUS = "rolled_back"
 
 CHANGE_SCHEMA_COLUMNS = {
     "last_state_hash": "TEXT",
-    "last_state_json": "TEXT",
-    "last_business_state_hash": "TEXT",
     "last_operation_id": "TEXT",
     "mutation_count": "INTEGER DEFAULT 0",
     "rollback_restored_at": "TEXT",
     "commit_finalized_at": "TEXT",
 }
-
-
-BACKGROUND_ITEM_FIELDS = frozenset({
-    "yandexFolderStatus",
-    "yandexFolderError",
-    "yandexFolderPath",
-    "yandexFolderUrl",
-    "yandexFolderTargetPath",
-    "yandexStructureJobId",
-    "yandexStructureAction",
-    "yandexStructureUpdatedAt",
-})
-
-BACKGROUND_DOCUMENT_FIELDS = frozenset({
-    "mirrorStatus",
-    "mirrorError",
-    "mirrorJobId",
-    "yandexPath",
-    "yandexFileUrl",
-    "yandexFolderAlias",
-})
-
-BACKGROUND_ARCHIVE_FIELDS = frozenset({
-    "yandexDeleteStatus",
-    "yandexDeleteJobId",
-    "yandexDeleteError",
-})
 
 
 def ensure_edit_session_change_schema() -> None:
@@ -137,195 +108,6 @@ def checklist_state_hash(
     return hashlib.sha256(
         stable_json_dumps(canonical).encode("utf-8")
     ).hexdigest()
-
-
-def rollback_business_checklist_data(
-    data: dict,
-    checklist_key: str,
-) -> dict:
-    """Return checklist state without background Yandex bookkeeping.
-
-    Mirror and structure workers are allowed to finish while an edit session is
-    open. Their status/path fields are not user edits and therefore must not
-    create a false concurrent-edit conflict when the user explicitly cancels.
-    """
-    canonical = canonical_checklist_data(data, checklist_key)
-
-    for item in canonical.get("items", []) or []:
-        for field in BACKGROUND_ITEM_FIELDS:
-            item.pop(field, None)
-
-        for document in item.get("documents", []) or []:
-            for field in BACKGROUND_DOCUMENT_FIELDS:
-                document.pop(field, None)
-            for version in document.get("archiveVersions", []) or []:
-                for field in BACKGROUND_ARCHIVE_FIELDS:
-                    version.pop(field, None)
-
-        for series in item.get("archivedDocumentSeries", []) or []:
-            for version in series.get("archiveVersions", []) or []:
-                for field in BACKGROUND_ARCHIVE_FIELDS:
-                    version.pop(field, None)
-
-    return canonical
-
-
-def rollback_business_state_hash(
-    data: dict,
-    checklist_key: str,
-) -> str:
-    return hashlib.sha256(
-        stable_json_dumps(
-            rollback_business_checklist_data(data, checklist_key)
-        ).encode("utf-8")
-    ).hexdigest()
-
-
-def _copy_background_fields(
-    target: dict,
-    current: dict,
-    expected: dict | None,
-    fields: frozenset[str],
-) -> None:
-    expected_record = expected if isinstance(expected, dict) else None
-    for field in fields:
-        # With a v2 expected-state snapshot, preserve only values changed by a
-        # worker after the user's last operation. For a legacy live session the
-        # exact expected JSON was never recorded, so retaining current Yandex
-        # bookkeeping is the safest non-destructive fallback.
-        if (
-            expected_record is None
-            or current.get(field) != expected_record.get(field)
-        ):
-            target[field] = copy.deepcopy(current.get(field, ""))
-
-
-def _merge_archive_background_state(
-    target_versions: list,
-    current_versions: list,
-    expected_versions: list | None,
-) -> None:
-    current_by_id = {
-        clean_cell_value(version.get("id")): version
-        for version in current_versions or []
-        if isinstance(version, dict)
-        and clean_cell_value(version.get("id"))
-    }
-    expected_by_id = {
-        clean_cell_value(version.get("id")): version
-        for version in expected_versions or []
-        if isinstance(version, dict)
-        and clean_cell_value(version.get("id"))
-    }
-
-    for target in target_versions or []:
-        version_id = clean_cell_value(target.get("id"))
-        current = current_by_id.get(version_id)
-        if not current:
-            continue
-        _copy_background_fields(
-            target,
-            current,
-            expected_by_id.get(version_id),
-            BACKGROUND_ARCHIVE_FIELDS,
-        )
-
-
-def merge_background_yandex_state(
-    snapshot_data: dict,
-    current_data: dict,
-    expected_data: dict | None,
-    checklist_key: str,
-) -> dict:
-    """Restore user data while retaining worker changes made after it."""
-    restored = canonical_checklist_data(snapshot_data, checklist_key)
-    current = canonical_checklist_data(current_data, checklist_key)
-    expected = (
-        canonical_checklist_data(expected_data, checklist_key)
-        if isinstance(expected_data, dict)
-        else None
-    )
-
-    current_items = {
-        clean_cell_value(item.get("id")): item
-        for item in current.get("items", []) or []
-        if clean_cell_value(item.get("id"))
-    }
-    expected_items = {
-        clean_cell_value(item.get("id")): item
-        for item in (expected or {}).get("items", []) or []
-        if clean_cell_value(item.get("id"))
-    }
-
-    for target_item in restored.get("items", []) or []:
-        item_id = clean_cell_value(target_item.get("id"))
-        current_item = current_items.get(item_id)
-        if not current_item:
-            continue
-        expected_item = expected_items.get(item_id)
-
-        _copy_background_fields(
-            target_item,
-            current_item,
-            expected_item,
-            BACKGROUND_ITEM_FIELDS,
-        )
-
-        current_documents = {
-            clean_cell_value(document.get("id")): document
-            for document in current_item.get("documents", []) or []
-            if clean_cell_value(document.get("id"))
-        }
-        expected_documents = {
-            clean_cell_value(document.get("id")): document
-            for document in (expected_item or {}).get("documents", []) or []
-            if clean_cell_value(document.get("id"))
-        }
-
-        for target_document in target_item.get("documents", []) or []:
-            document_id = clean_cell_value(target_document.get("id"))
-            current_document = current_documents.get(document_id)
-            if not current_document:
-                continue
-            expected_document = expected_documents.get(document_id)
-            _copy_background_fields(
-                target_document,
-                current_document,
-                expected_document,
-                BACKGROUND_DOCUMENT_FIELDS,
-            )
-            _merge_archive_background_state(
-                target_document.get("archiveVersions", []) or [],
-                current_document.get("archiveVersions", []) or [],
-                (expected_document or {}).get("archiveVersions", []) or [],
-            )
-
-        current_series = {
-            clean_cell_value(series.get("seriesId")): series
-            for series in current_item.get("archivedDocumentSeries", []) or []
-            if clean_cell_value(series.get("seriesId"))
-        }
-        expected_series = {
-            clean_cell_value(series.get("seriesId")): series
-            for series in (expected_item or {}).get(
-                "archivedDocumentSeries", []
-            ) or []
-            if clean_cell_value(series.get("seriesId"))
-        }
-        for target_series in target_item.get("archivedDocumentSeries", []) or []:
-            series_id = clean_cell_value(target_series.get("seriesId"))
-            current_record = current_series.get(series_id)
-            if not current_record:
-                continue
-            _merge_archive_background_state(
-                target_series.get("archiveVersions", []) or [],
-                current_record.get("archiveVersions", []) or [],
-                (expected_series.get(series_id) or {}).get(
-                    "archiveVersions", []
-                ) or [],
-            )
-
-    return canonical_checklist_data(restored, checklist_key)
 
 
 def acquire_checklist_for_edit_session(
@@ -483,26 +265,9 @@ def record_checklist_operation(
         raise EditSessionConflictError(
             "operation can be recorded only for active session"
         )
-    if (
-        clean_cell_value(session.get("rollback_started_at"))
-        and not clean_cell_value(session.get("rolled_back_at"))
-    ):
-        raise EditSessionConflictError(
-            "edit session has an interrupted cancel; repeat the confirmed "
-            "Cancel action before editing"
-        )
 
-    canonical_final = canonical_checklist_data(
-        final_checklist_data,
-        normalized_checklist_key,
-    )
     final_hash = checklist_state_hash(
-        canonical_final,
-        normalized_checklist_key,
-    )
-    final_state_json = stable_json_dumps(canonical_final)
-    final_business_hash = rollback_business_state_hash(
-        canonical_final,
+        final_checklist_data,
         normalized_checklist_key,
     )
     now = utc_now_iso()
@@ -580,8 +345,6 @@ def record_checklist_operation(
         conn.execute("""
             UPDATE edit_session_checklists
             SET last_state_hash = ?,
-                last_state_json = ?,
-                last_business_state_hash = ?,
                 last_operation_id = ?,
                 mutation_count = COALESCE(mutation_count, 0) + 1,
                 updated_at = ?
@@ -590,8 +353,6 @@ def record_checklist_operation(
               AND checklist_key = ?
         """, (
             final_hash,
-            final_state_json,
-            final_business_hash,
             effective_operation_id,
             now,
             normalized_session_id,
@@ -694,8 +455,6 @@ def _load_stage3_snapshots(session_id: str) -> list[dict]:
                 s.snapshot_json,
                 s.snapshot_hash,
                 c.last_state_hash,
-                c.last_state_json,
-                c.last_business_state_hash,
                 c.last_operation_id,
                 c.mutation_count,
                 c.rollback_restored_at
@@ -738,219 +497,13 @@ def _load_stage3_snapshots(session_id: str) -> list[dict]:
     return result
 
 
-def refresh_edit_session_expected_state(
-    session_id: str,
-    *,
-    only_missing: bool = True,
-) -> dict:
-    """Backfill the exact expected state for live pre-hotfix sessions.
-
-    Stage 8.15.6 stored only a full hash. A background Yandex worker could
-    legitimately change mirror fields afterwards, leaving no JSON with which
-    to prove that the business data itself was untouched. On the first resume
-    after this hotfix we capture that missing baseline. Rows already written by
-    the new operation recorder are never replaced.
-    """
-    ensure_edit_session_change_schema()
-    normalized_session_id = clean_cell_value(session_id)
-    conn = get_conn()
-    try:
-        rows = conn.execute("""
-            SELECT session_id, dialog_id, checklist_key,
-                   last_state_json, last_business_state_hash
-            FROM edit_session_checklists
-            WHERE session_id = ?
-              AND status IN ('active', 'locked')
-            ORDER BY checklist_key ASC
-        """, (normalized_session_id,)).fetchall()
-    finally:
-        conn.close()
-
-    from app.checklists.storage import get_checklist
-
-    refreshed: list[dict] = []
-    for source_row in rows:
-        row = dict(source_row)
-        existing_json = clean_cell_value(row.get("last_state_json"))
-        existing_business_hash = clean_cell_value(
-            row.get("last_business_state_hash")
-        )
-        if only_missing and existing_json and existing_business_hash:
-            continue
-
-        dialog_id = normalize_dialog_id(row.get("dialog_id"))
-        checklist_key = normalize_checklist_key(row.get("checklist_key"))
-        expected_data = json_loads(existing_json, None)
-        if not isinstance(expected_data, dict):
-            expected_data = get_checklist(dialog_id, checklist_key)
-        canonical = canonical_checklist_data(expected_data, checklist_key)
-        state_json = stable_json_dumps(canonical)
-        state_hash = checklist_state_hash(canonical, checklist_key)
-        business_hash = rollback_business_state_hash(
-            canonical,
-            checklist_key,
-        )
-        now = utc_now_iso()
-        conn = get_conn()
-        try:
-            if only_missing:
-                conn.execute("""
-                    UPDATE edit_session_checklists
-                    SET last_state_hash = ?,
-                        last_state_json = ?,
-                        last_business_state_hash = ?,
-                        updated_at = ?
-                    WHERE session_id = ?
-                      AND dialog_id = ?
-                      AND checklist_key = ?
-                      AND (
-                          COALESCE(last_state_json, '') = ''
-                          OR COALESCE(last_business_state_hash, '') = ''
-                      )
-                """, (
-                    state_hash,
-                    state_json,
-                    business_hash,
-                    now,
-                    normalized_session_id,
-                    dialog_id,
-                    checklist_key,
-                ))
-            else:
-                conn.execute("""
-                    UPDATE edit_session_checklists
-                    SET last_state_hash = ?,
-                        last_state_json = ?,
-                        last_business_state_hash = ?,
-                        updated_at = ?
-                    WHERE session_id = ?
-                      AND dialog_id = ?
-                      AND checklist_key = ?
-                """, (
-                    state_hash,
-                    state_json,
-                    business_hash,
-                    now,
-                    normalized_session_id,
-                    dialog_id,
-                    checklist_key,
-                ))
-            conn.commit()
-        finally:
-            conn.close()
-
-        refreshed.append({
-            "dialogId": dialog_id,
-            "checklistKey": checklist_key,
-        })
-
-    return {
-        "ok": True,
-        "sessionId": normalized_session_id,
-        "refreshedCount": len(refreshed),
-        "refreshed": refreshed,
-    }
-
-
-def prepare_edit_session_checklist_restore(
-    session_id: str,
-) -> list[dict]:
-    """Validate every checklist before rollback mutates any durable state."""
-    snapshots = _load_stage3_snapshots(session_id)
-    if not snapshots:
-        return []
-
-    from app.checklists.storage import get_checklist
-
-    prepared: list[dict] = []
-    for row in snapshots:
-        dialog_id = normalize_dialog_id(row.get("dialog_id"))
-        checklist_key = normalize_checklist_key(row.get("checklist_key"))
-        snapshot_data = canonical_checklist_data(
-            row["snapshot"]["data"],
-            checklist_key,
-        )
-        current_data = canonical_checklist_data(
-            get_checklist(dialog_id, checklist_key),
-            checklist_key,
-        )
-        snapshot_business_hash = rollback_business_state_hash(
-            snapshot_data,
-            checklist_key,
-        )
-        current_state_hash = checklist_state_hash(
-            current_data,
-            checklist_key,
-        )
-        current_business_hash = rollback_business_state_hash(
-            current_data,
-            checklist_key,
-        )
-        expected_state_hash = clean_cell_value(row.get("last_state_hash"))
-        expected_business_hash = clean_cell_value(
-            row.get("last_business_state_hash")
-        )
-        expected_data = json_loads(
-            row.get("last_state_json") or "",
-            None,
-        )
-        if not isinstance(expected_data, dict):
-            expected_data = None
-
-        if (
-            row.get("rollback_restored_at")
-            and current_business_hash == snapshot_business_hash
-        ):
-            prepared.append({
-                "dialogId": dialog_id,
-                "checklistKey": checklist_key,
-                "alreadyRestored": True,
-                "restoredData": current_data,
-            })
-            continue
-
-        if expected_business_hash:
-            has_conflict = current_business_hash != expected_business_hash
-        elif expected_state_hash:
-            has_conflict = current_state_hash != expected_state_hash
-        else:
-            has_conflict = bool(int(row.get("mutation_count") or 0))
-
-        if has_conflict:
-            raise EditSessionConflictError(
-                "checklist business data changed outside edit session; "
-                "automatic rollback was stopped: "
-                f"{dialog_id}/{checklist_key}"
-            )
-
-        restored_data = merge_background_yandex_state(
-            snapshot_data,
-            current_data,
-            expected_data,
-            checklist_key,
-        )
-        prepared.append({
-            "dialogId": dialog_id,
-            "checklistKey": checklist_key,
-            "alreadyRestored": False,
-            "restoredData": restored_data,
-        })
-
-    return prepared
-
-
 def restore_edit_session_checklists(
     session_id: str,
-    prepared: list[dict] | None = None,
 ) -> dict:
-    plans = (
-        prepared
-        if prepared is not None
-        else prepare_edit_session_checklist_restore(session_id)
-    )
+    snapshots = _load_stage3_snapshots(session_id)
     restored = []
 
-    if not plans:
+    if not snapshots:
         return {
             "ok": True,
             "sessionId": clean_cell_value(session_id),
@@ -958,13 +511,37 @@ def restore_edit_session_checklists(
             "restored": [],
         }
 
-    from app.checklists.storage import save_checklist
+    from app.checklists.storage import get_checklist, save_checklist
 
-    for plan in plans:
-        dialog_id = normalize_dialog_id(plan.get("dialogId"))
-        checklist_key = normalize_checklist_key(plan.get("checklistKey"))
+    for row in snapshots:
+        dialog_id = normalize_dialog_id(row.get("dialog_id"))
+        checklist_key = normalize_checklist_key(
+            row.get("checklist_key")
+        )
+        snapshot_data = canonical_checklist_data(
+            row["snapshot"]["data"],
+            checklist_key,
+        )
+        snapshot_state_hash = checklist_state_hash(
+            snapshot_data,
+            checklist_key,
+        )
+        current_data = get_checklist(
+            dialog_id,
+            checklist_key,
+        )
+        current_state_hash = checklist_state_hash(
+            current_data,
+            checklist_key,
+        )
+        expected_state_hash = clean_cell_value(
+            row.get("last_state_hash")
+        )
 
-        if plan.get("alreadyRestored"):
+        if (
+            row.get("rollback_restored_at")
+            and current_state_hash == snapshot_state_hash
+        ):
             restored.append({
                 "dialogId": dialog_id,
                 "checklistKey": checklist_key,
@@ -972,19 +549,23 @@ def restore_edit_session_checklists(
             })
             continue
 
+        if (
+            expected_state_hash
+            and current_state_hash != expected_state_hash
+        ):
+            raise EditSessionConflictError(
+                "checklist changed outside edit session; "
+                "automatic rollback was stopped: "
+                f"{dialog_id}/{checklist_key}"
+            )
+
         saved = save_checklist(
             dialog_id,
-            plan.get("restoredData") or {},
+            snapshot_data,
             checklist_key,
         )
-        canonical_saved = canonical_checklist_data(saved, checklist_key)
         restored_hash = checklist_state_hash(
-            canonical_saved,
-            checklist_key,
-        )
-        restored_json = stable_json_dumps(canonical_saved)
-        restored_business_hash = rollback_business_state_hash(
-            canonical_saved,
+            saved,
             checklist_key,
         )
         now = utc_now_iso()
@@ -994,8 +575,6 @@ def restore_edit_session_checklists(
             conn.execute("""
                 UPDATE edit_session_checklists
                 SET last_state_hash = ?,
-                    last_state_json = ?,
-                    last_business_state_hash = ?,
                     rollback_restored_at = ?,
                     updated_at = ?
                 WHERE session_id = ?
@@ -1003,8 +582,6 @@ def restore_edit_session_checklists(
                   AND checklist_key = ?
             """, (
                 restored_hash,
-                restored_json,
-                restored_business_hash,
                 now,
                 now,
                 clean_cell_value(session_id),
@@ -1161,17 +738,8 @@ def finalize_deferred_checklist_changes(
                         data,
                         checklist_key,
                     )
-                    canonical_saved = canonical_checklist_data(
-                        saved,
-                        checklist_key,
-                    )
                     final_hash = checklist_state_hash(
-                        canonical_saved,
-                        checklist_key,
-                    )
-                    final_state_json = stable_json_dumps(canonical_saved)
-                    final_business_hash = rollback_business_state_hash(
-                        canonical_saved,
+                        saved,
                         checklist_key,
                     )
                     conn = get_conn()
@@ -1180,8 +748,6 @@ def finalize_deferred_checklist_changes(
                         conn.execute("""
                             UPDATE edit_session_checklists
                             SET last_state_hash = ?,
-                                last_state_json = ?,
-                                last_business_state_hash = ?,
                                 commit_finalized_at = ?,
                                 updated_at = ?
                             WHERE session_id = ?
@@ -1189,8 +755,6 @@ def finalize_deferred_checklist_changes(
                               AND checklist_key = ?
                         """, (
                             final_hash,
-                            final_state_json,
-                            final_business_hash,
                             utc_now_iso(),
                             utc_now_iso(),
                             clean_cell_value(session_id),

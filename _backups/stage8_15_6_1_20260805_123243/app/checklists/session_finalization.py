@@ -951,14 +951,6 @@ def finalize_edit_session_payload(payload: dict) -> dict:
         raise EditSessionConflictError(
             "rolled back session cannot be finalized"
         )
-    if (
-        clean_cell_value(session.get("rollback_started_at"))
-        and not clean_cell_value(session.get("rolled_back_at"))
-    ):
-        raise EditSessionConflictError(
-            "edit session has an interrupted cancel; repeat the confirmed "
-            "Cancel action before saving"
-        )
 
     payload_hash = build_finalization_payload_hash(payload)
     reservation, cached_row = _reserve_finalization(

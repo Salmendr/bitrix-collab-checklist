@@ -29,7 +29,7 @@ def _recovery_candidates() -> list[dict]:
             FROM edit_sessions
             WHERE status IN ('committing', 'rolling_back')
                OR (
-                    status IN ('active', 'error')
+                    status = 'error'
                     AND (
                         (
                             COALESCE(rollback_started_at, '') <> ''
@@ -65,7 +65,6 @@ def _restart_active_session_candidates() -> list[dict]:
             SELECT *
             FROM edit_sessions
             WHERE status = 'active'
-              AND COALESCE(rollback_started_at, '') = ''
             ORDER BY updated_at ASC, created_at ASC
             """
         ).fetchall()
@@ -251,64 +250,6 @@ def _convert_nonexplicit_rollback_to_commit(
         conn.close()
 
 
-def _has_partially_applied_file_rollback(session_id: str) -> bool:
-    conn = get_conn()
-    try:
-        row = conn.execute(
-            """
-            SELECT EXISTS (
-                SELECT 1
-                FROM edit_session_file_entries
-                WHERE session_id = ?
-                  AND status IN ('rolling_back', 'error')
-            ) AS found
-            """,
-            (clean_cell_value(session_id),),
-        ).fetchone()
-        return bool(row and int(row["found"] or 0))
-    finally:
-        conn.close()
-
-
-def _pause_interrupted_rollback_for_confirmation(
-    *,
-    session_id: str,
-    source: str,
-    now: str,
-) -> None:
-    """Keep a partially applied cancel safe until the user confirms again."""
-    message = (
-        "interrupted cancel requires a repeated explicit confirmed Cancel "
-        "action before editing or saving"
-    )
-    conn = get_conn()
-    try:
-        conn.execute(
-            """
-            UPDATE edit_sessions
-            SET status = 'error',
-                error = ?,
-                last_recovery_at = ?,
-                last_recovery_source = ?,
-                last_recovery_action = 'await_explicit_cancel',
-                last_recovery_error = '',
-                updated_at = ?
-            WHERE session_id = ?
-              AND status NOT IN ('committed', 'rolled_back')
-            """,
-            (
-                message,
-                now,
-                clean_cell_value(source),
-                now,
-                clean_cell_value(session_id),
-            ),
-        )
-        conn.commit()
-    finally:
-        conn.close()
-
-
 def _record_terminal_cleanup_result(
     *,
     session_id: str,
@@ -366,7 +307,7 @@ def _resume_transition_status(
                 error = '',
                 updated_at = ?
             WHERE session_id = ?
-              AND status IN ('active', 'error')
+              AND status = 'error'
             """,
             (
                 clean_cell_value(target_status),
@@ -406,7 +347,6 @@ def recover_edit_session_lifecycle(
 
     completed_commits: list[dict] = []
     completed_rollbacks: list[dict] = []
-    paused_rollbacks: list[dict] = []
     transition_errors: list[dict] = []
 
     candidates = _recovery_candidates()
@@ -426,28 +366,6 @@ def recover_edit_session_lifecycle(
                 or candidate.get("status") == "rolling_back"
             )
         )
-        partial_file_rollback = bool(
-            rollback_started
-            and _has_partially_applied_file_rollback(session_id)
-        )
-        if partial_file_rollback and not explicit_cancel:
-            now = utc_now_iso()
-            _record_attempt(
-                session_id=session_id,
-                source=normalized_source,
-                action="await_explicit_cancel",
-                now=now,
-            )
-            _pause_interrupted_rollback_for_confirmation(
-                session_id=session_id,
-                source=normalized_source,
-                now=now,
-            )
-            paused_rollbacks.append({
-                "sessionId": session_id,
-                "action": "await_explicit_cancel",
-            })
-            continue
         action = (
             "resume_rollback"
             if explicit_cancel
@@ -614,7 +532,6 @@ def recover_edit_session_lifecycle(
         "candidateCount": len(candidates),
         "completedCommitCount": len(completed_commits),
         "completedRollbackCount": len(completed_rollbacks),
-        "pausedRollbackCount": len(paused_rollbacks),
         "transitionErrorCount": len(transition_errors),
         "restartCommitCount": len(
             restart_commit_results
@@ -634,7 +551,6 @@ def recover_edit_session_lifecycle(
         "expiredResult": expired_result,
         "completedCommits": completed_commits,
         "completedRollbacks": completed_rollbacks,
-        "pausedRollbacks": paused_rollbacks,
         "transitionErrors": transition_errors,
         "restartCommitResults": restart_commit_results,
         "restartCommitErrors": restart_commit_errors,

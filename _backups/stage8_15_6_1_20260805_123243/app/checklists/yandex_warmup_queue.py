@@ -269,43 +269,12 @@ def yandex_warmup_worker(worker_index: int):
             ):
                 result = run_project_yandex_folder_warmup(dialog_id)
 
-            file_reconciliation = {}
-            if (
-                isinstance(result, dict)
-                and result.get("ok") is not False
-                and not result.get("cancelled")
-            ):
-                try:
-                    from app.checklists.yandex_mirror_reconciliation import (
-                        start_yandex_project_file_reconciliation,
-                    )
-                    file_reconciliation = (
-                        start_yandex_project_file_reconciliation(
-                            dialog_id,
-                            source="yandex_warmup_completed",
-                        )
-                    )
-                except Exception as reconcile_exc:
-                    file_reconciliation = {
-                        "ok": False,
-                        "error": str(reconcile_exc),
-                    }
-                    write_debug_log(
-                        "yandex_warmup_file_reconciliation_start_failed",
-                        {
-                            "dialogId": dialog_id,
-                            "workerIndex": worker_index,
-                            "error": str(reconcile_exc),
-                        },
-                    )
-
             write_debug_log("yandex_warmup_queue_item_finished", {
                 "dialogId": dialog_id,
                 "workerIndex": worker_index,
                 "startedAt": started_at,
                 "finishedAt": datetime.now().isoformat(),
                 "result": result,
-                "fileReconciliation": file_reconciliation,
                 "queueSize": YANDEX_WARMUP_QUEUE.qsize(),
             })
 

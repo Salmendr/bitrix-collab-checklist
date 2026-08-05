@@ -6,10 +6,7 @@ from pathlib import Path
 
 from app.db import get_conn
 from app.logging_utils import write_debug_log
-from app.yandex_disk.client import (
-    is_yandex_disk_enabled,
-    yandex_disk_try_get_resource_meta,
-)
+from app.yandex_disk.client import is_yandex_disk_enabled
 from app.checklists.documents import (
     get_upload_file_path_from_url,
     migrate_legacy_document_fields,
@@ -38,7 +35,6 @@ from app.checklists.yandex_structure_jobs import (
 )
 from app.checklists.yandex_resource_locks import (
     is_yandex_resource_locked_error,
-    yandex_project_resource_guard,
 )
 from app.checklists.yandex_structure_queue import (
     enqueue_yandex_structure_job,
@@ -49,8 +45,6 @@ from app.checklists.yandex_custom_recovery import (
 
 _RECONCILIATION_GUARD = threading.Lock()
 _RECONCILIATION_RUNNING = False
-_PROJECT_RECONCILIATION_GUARD = threading.Lock()
-_PROJECT_RECONCILIATION_RUNNING: set[str] = set()
 
 
 def _split_storage_key(storage_id: str, data: dict) -> tuple[str, str]:
@@ -108,26 +102,12 @@ def _record_error(
     })
 
 
-def reconcile_yandex_mirror_documents(
-    source: str = "startup",
-    *,
-    dialog_id: str = "",
-    checklist_key: str = "",
-    item_id: str = "",
-) -> dict:
-    """Verify and restore current-document mirrors from local primary files.
+def reconcile_yandex_mirror_documents(source: str = "startup") -> dict:
+    """Restore only missing/retriable current-document mirror jobs.
 
-    The pass never scans or deletes remote Yandex content. It probes only the
-    exact persisted file path and uploads the local primary copy when that path
-    is confirmed absent (or when no remote path was ever saved).
+    The pass is intentionally local-first: it reads SQLite and local files,
+    never scans or deletes remote Yandex content, and never touches archives.
     """
-    requested_dialog_id = normalize_dialog_id(dialog_id)
-    requested_checklist_key = (
-        normalize_checklist_key(checklist_key)
-        if clean_cell_value(checklist_key)
-        else ""
-    )
-    requested_item_id = clean_cell_value(item_id)
     if not is_yandex_disk_enabled():
         return {
             "ok": True,
@@ -151,9 +131,6 @@ def reconcile_yandex_mirror_documents(
         "documents": 0,
         "queued": 0,
         "existing": 0,
-        "remoteVerified": 0,
-        "remoteMissing": 0,
-        "remotePathMissing": 0,
         "missingLocal": 0,
         "skippedProjects": 0,
         "unrecoverable": 0,
@@ -178,13 +155,6 @@ def reconcile_yandex_mirror_documents(
             )
             if not dialog_id:
                 continue
-            if requested_dialog_id and dialog_id != requested_dialog_id:
-                continue
-            if (
-                requested_checklist_key
-                and checklist_key != requested_checklist_key
-            ):
-                continue
 
             if dialog_id not in context_cache:
                 context = get_project_storage_context(dialog_id) or {}
@@ -200,8 +170,6 @@ def reconcile_yandex_mirror_documents(
             for raw_item in raw_data.get("items") or []:
                 item = migrate_legacy_document_fields(raw_item)
                 item_id = clean_cell_value(item.get("id"))
-                if requested_item_id and item_id != requested_item_id:
-                    continue
 
                 if bool(item.get("isCustom", False)):
                     try:
@@ -318,58 +286,21 @@ def reconcile_yandex_mirror_documents(
                     stats["documents"] += 1
                     document_id = clean_cell_value(document.get("id"))
                     try:
+                        # A persisted successful path is sufficient evidence for
+                        # local startup reconciliation. This pass does not query
+                        # or overwrite Yandex merely to verify remote existence.
+                        if (
+                            clean_cell_value(document.get("mirrorStatus")).lower()
+                            == "synced"
+                            and clean_cell_value(document.get("yandexPath"))
+                        ):
+                            stats["existing"] += 1
+                            continue
+
                         local_path = _document_local_path(document)
                         if local_path is None:
                             stats["missingLocal"] += 1
                             continue
-
-                        stored_yandex_path = clean_cell_value(
-                            document.get("yandexPath")
-                        )
-                        force_requeue = not stored_yandex_path
-                        if stored_yandex_path:
-                            with yandex_project_resource_guard(
-                                dialog_id,
-                                checklist_key=checklist_key,
-                                item_id=item_id,
-                                operation="reconcile_file_probe",
-                            ):
-                                remote_meta = yandex_disk_try_get_resource_meta(
-                                    stored_yandex_path
-                                )
-                            if remote_meta is not None:
-                                if clean_cell_value(
-                                    remote_meta.get("type")
-                                ).lower() != "file":
-                                    raise RuntimeError(
-                                        "persisted Yandex file path points to a "
-                                        "non-file resource: " + stored_yandex_path
-                                    )
-                                stats["existing"] += 1
-                                stats["remoteVerified"] += 1
-                                if (
-                                    clean_cell_value(
-                                        document.get("mirrorStatus")
-                                    ).lower() != "synced"
-                                    or clean_cell_value(
-                                        document.get("mirrorError")
-                                    )
-                                ):
-                                    update_document_mirror_fields(
-                                        dialog_id,
-                                        checklist_key,
-                                        item_id,
-                                        document_id,
-                                        {
-                                            "mirrorStatus": "synced",
-                                            "mirrorError": "",
-                                        },
-                                    )
-                                continue
-                            force_requeue = True
-                            stats["remoteMissing"] += 1
-                        else:
-                            stats["remotePathMissing"] += 1
 
                         job = ensure_yandex_upload_job_for_reconciliation(
                             dialog_id=dialog_id,
@@ -382,7 +313,6 @@ def reconcile_yandex_mirror_documents(
                                 or local_path.name
                             ),
                             file_size=int(local_path.stat().st_size),
-                            force_requeue_synced=force_requeue,
                         )
                         status = clean_cell_value(job.get("status")).lower()
                         action = clean_cell_value(job.get("reconciledAction"))
@@ -435,17 +365,13 @@ def reconcile_yandex_mirror_documents(
                                 "mirrorStatus": status,
                                 "mirrorError": "",
                                 "mirrorJobId": job_id,
-                                **({
-                                    "yandexPath": "",
-                                    "yandexFileUrl": "",
-                                } if force_requeue else {}),
                             },
                         )
 
                         if status == "queued":
                             enqueue_result = enqueue_yandex_mirror_job(
                                 job_id,
-                                source=f"{source}_reconciliation",
+                                source="startup_reconciliation",
                             )
                             if enqueue_result.get("queued"):
                                 stats["queued"] += 1
@@ -464,7 +390,7 @@ def reconcile_yandex_mirror_documents(
                 error=exc,
             )
 
-    write_debug_log("yandex_mirror_reconciliation_finished", stats)
+    write_debug_log("yandex_mirror_startup_reconciliation_finished", stats)
     return stats
 
 
@@ -507,62 +433,3 @@ def start_yandex_mirror_reconciliation(source: str = "startup") -> dict:
     )
     thread.start()
     return {"ok": True, "started": True, "source": source}
-
-
-def _run_project_file_reconciliation(
-    dialog_id: str,
-    source: str,
-) -> None:
-    try:
-        reconcile_yandex_mirror_documents(
-            source=source,
-            dialog_id=dialog_id,
-        )
-    except Exception as exc:
-        write_debug_log("yandex_project_file_reconciliation_failed", {
-            "dialogId": dialog_id,
-            "source": source,
-            "error": str(exc),
-        })
-    finally:
-        with _PROJECT_RECONCILIATION_GUARD:
-            _PROJECT_RECONCILIATION_RUNNING.discard(dialog_id)
-
-
-def start_yandex_project_file_reconciliation(
-    dialog_id: str,
-    *,
-    source: str = "project_context_ready",
-) -> dict:
-    """Start one idempotent local-to-Yandex backfill for a ready project."""
-    normalized_dialog_id = normalize_dialog_id(dialog_id)
-    if not normalized_dialog_id:
-        return {
-            "ok": False,
-            "started": False,
-            "error": "dialogId is required",
-        }
-
-    with _PROJECT_RECONCILIATION_GUARD:
-        if normalized_dialog_id in _PROJECT_RECONCILIATION_RUNNING:
-            return {
-                "ok": True,
-                "started": False,
-                "alreadyRunning": True,
-                "dialogId": normalized_dialog_id,
-            }
-        _PROJECT_RECONCILIATION_RUNNING.add(normalized_dialog_id)
-
-    thread = threading.Thread(
-        target=_run_project_file_reconciliation,
-        args=(normalized_dialog_id, clean_cell_value(source) or "project_ready"),
-        daemon=True,
-        name=f"yandex-file-reconcile-{normalized_dialog_id[-20:]}",
-    )
-    thread.start()
-    return {
-        "ok": True,
-        "started": True,
-        "dialogId": normalized_dialog_id,
-        "source": clean_cell_value(source) or "project_ready",
-    }

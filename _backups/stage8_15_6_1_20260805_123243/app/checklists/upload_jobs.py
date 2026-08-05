@@ -174,7 +174,6 @@ def ensure_yandex_upload_job_for_reconciliation(
     local_path: str,
     file_name: str,
     file_size: int,
-    force_requeue_synced: bool = False,
 ) -> dict:
     """Idempotently restore/create one upload job for a current document."""
     ensure_upload_jobs_table()
@@ -209,48 +208,6 @@ def ensure_yandex_upload_job_for_reconciliation(
         if row:
             record = dict(row)
             status = clean_cell_value(record.get("status")).lower()
-            if force_requeue_synced and status != "running":
-                conn.execute(
-                    """
-                    UPDATE upload_jobs
-                    SET local_path = ?,
-                        file_name = ?,
-                        file_size = ?,
-                        yandex_path = '',
-                        status = 'queued',
-                        stage = 'mirror_queued',
-                        progress_percent = 0,
-                        uploaded_bytes = 0,
-                        total_bytes = ?,
-                        error = '',
-                        started_at = '',
-                        finished_at = '',
-                        updated_at = ?
-                    WHERE job_id = ?
-                    """,
-                    (
-                        clean_cell_value(local_path),
-                        clean_cell_value(file_name),
-                        int(file_size or 0),
-                        int(file_size or 0),
-                        now,
-                        record["job_id"],
-                    ),
-                )
-                conn.commit()
-                restored = dict(record)
-                restored.update({
-                    "status": "queued",
-                    "stage": "mirror_queued",
-                    "local_path": clean_cell_value(local_path),
-                    "file_name": clean_cell_value(file_name),
-                    "file_size": int(file_size or 0),
-                    "yandex_path": "",
-                    "error": "",
-                    "reconciledAction": "requeued_remote_missing",
-                })
-                return restored
-
             if status == "synced":
                 conn.commit()
                 return {**record, "reconciledAction": "existing_synced"}

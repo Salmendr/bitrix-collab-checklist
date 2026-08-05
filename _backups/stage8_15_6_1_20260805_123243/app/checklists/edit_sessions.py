@@ -623,19 +623,12 @@ def start_edit_session(
             recovered_stale_session = bool(existing)
 
         if existing:
-            interrupted_rollback = bool(
-                clean_cell_value(existing["rollback_started_at"])
-                and not clean_cell_value(existing["rolled_back_at"])
-            )
             conn.execute("""
                 UPDATE edit_sessions
                 SET user_name = ?,
                     client_session_id = ?,
                     status = 'active',
-                    close_reason = CASE
-                        WHEN ? THEN COALESCE(close_reason, '')
-                        ELSE ''
-                    END,
+                    close_reason = '',
                     heartbeat_at = ?,
                     expires_at = ?,
                     last_activity_at = ?,
@@ -646,7 +639,6 @@ def start_edit_session(
             """, (
                 normalized_user_name,
                 normalized_client_session_id,
-                int(interrupted_rollback),
                 now,
                 expires_at,
                 now,
@@ -656,15 +648,6 @@ def start_edit_session(
             ))
 
             conn.commit()
-
-            from app.checklists.edit_session_changes import (
-                refresh_edit_session_expected_state,
-            )
-
-            refresh_edit_session_expected_state(
-                existing["session_id"],
-                only_missing=True,
-            )
 
             return {
                 "created": False,
@@ -902,15 +885,6 @@ def begin_edit_session_commit(
 
     if status == "committed":
         return record
-
-    if (
-        clean_cell_value(record.get("rollback_started_at"))
-        and not clean_cell_value(record.get("rolled_back_at"))
-    ):
-        raise EditSessionConflictError(
-            "edit session has an interrupted cancel; repeat the confirmed "
-            "Cancel action before saving"
-        )
 
     if status in {"rolling_back", "rolled_back"}:
         raise EditSessionConflictError(
@@ -1312,35 +1286,21 @@ def complete_edit_session_rollback(
     )
     from app.checklists.edit_session_changes import (
         mark_edit_session_operations_rolled_back_in_transaction,
-        prepare_edit_session_checklist_restore,
-        refresh_edit_session_expected_state,
         restore_edit_session_checklists,
     )
     from app.checklists.edit_session_files import (
         mark_edit_session_file_entries_rolled_back_in_transaction,
         rollback_edit_session_files,
-        validate_edit_session_files_for_rollback,
     )
     from app.checklists.notification_drafts import (
         mark_notification_drafts_cancelled_in_transaction,
     )
 
     try:
-        refresh_edit_session_expected_state(
-            record["session_id"],
-            only_missing=True,
-        )
-        checklist_restore_plan = prepare_edit_session_checklist_restore(
-            record["session_id"]
-        )
-        validate_edit_session_files_for_rollback(
+        rollback_edit_session_files(
             record["session_id"]
         )
         restore_edit_session_checklists(
-            record["session_id"],
-            prepared=checklist_restore_plan,
-        )
-        rollback_edit_session_files(
             record["session_id"]
         )
     except Exception as exc:

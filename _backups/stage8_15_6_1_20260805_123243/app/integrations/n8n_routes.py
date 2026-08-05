@@ -121,22 +121,6 @@ def api_save_project_storage_context(
     })
 
     queue_result = enqueue_yandex_warmup(dialog_id, source="n8n_context_saved")
-    file_reconciliation = {}
-    skip_reason = clean_cell_value(queue_result.get("reason")).lower()
-    if (
-        queue_result.get("skipped")
-        and (
-            "already prepared" in skip_reason
-            or "no missing yandex folders" in skip_reason
-        )
-    ):
-        from app.checklists.yandex_mirror_reconciliation import (
-            start_yandex_project_file_reconciliation,
-        )
-        file_reconciliation = start_yandex_project_file_reconciliation(
-            dialog_id,
-            source="n8n_context_already_prepared",
-        )
 
     context = get_project_storage_context(dialog_id)
 
@@ -147,7 +131,6 @@ def api_save_project_storage_context(
         "projectName": project_name,
         "yandexWarmupQueued": bool(queue_result.get("queued")),
         "yandexWarmupQueue": queue_result,
-        "yandexFileReconciliation": file_reconciliation,
         "foldersCount": len((context.get("yandexDisk") or {}).get("folders") or {}) if context else 0,
         "itemMappingsCount": len(context.get("itemMappings") or []) if context else 0,
         "bitrix": (context or {}).get("bitrix") or {},

@@ -242,14 +242,6 @@ def _validate_active_session(
         raise EditSessionConflictError(
             "file operation requires active edit session"
         )
-    if (
-        clean_cell_value(session.get("rollback_started_at"))
-        and not clean_cell_value(session.get("rolled_back_at"))
-    ):
-        raise EditSessionConflictError(
-            "edit session has an interrupted cancel; repeat the confirmed "
-            "Cancel action before editing files"
-        )
     return session
 
 
@@ -790,139 +782,9 @@ def _restore_stashed_file(record: dict) -> None:
         )
 
 
-def validate_edit_session_files_for_rollback(session_id: str) -> dict:
-    """Preflight the complete reverse operation without touching files.
-
-    The virtual state follows the same newest-to-oldest order as rollback. It
-    therefore understands create -> replace chains while still guaranteeing
-    that a checksum/path conflict is found before the first real deletion.
-    """
-    ensure_edit_session_file_schema()
-    normalized_session_id = clean_cell_value(session_id)
-    conn = get_conn()
-    try:
-        rows = conn.execute("""
-            SELECT * FROM edit_session_file_entries
-            WHERE session_id = ? AND status <> 'committed'
-            ORDER BY sequence_no DESC
-        """, (normalized_session_id,)).fetchall()
-    finally:
-        conn.close()
-
-    records = [
-        dict(row)
-        for row in rows
-        if row["status"] != FILE_ENTRY_STATUS_ROLLED_BACK
-    ]
-    virtual_state: dict[str, str | None] = {}
-
-    def state_key(path: Path) -> str:
-        return os.path.normcase(str(normalized_absolute_path(path)))
-
-    def read_state(path: Path) -> str | None:
-        key = state_key(path)
-        if key in virtual_state:
-            return virtual_state[key]
-        if not path.exists():
-            value = None
-        elif not path.is_file():
-            value = "__directory__"
-        else:
-            value = file_sha256(path)
-        virtual_state[key] = value
-        return value
-
-    def write_state(path: Path, value: str | None) -> None:
-        virtual_state[state_key(path)] = value
-
-    prepared: list[str] = []
-    for record in records:
-        entry_id = clean_cell_value(record.get("entry_id"))
-        kind = clean_cell_value(record.get("entry_kind"))
-        expected_hash = clean_cell_value(record.get("sha256"))
-        original = require_upload_path(record.get("original_path") or "")
-        original_state = read_state(original)
-
-        if kind == FILE_ENTRY_KIND_CREATED:
-            # Missing is valid after an interrupted rollback: deletion is
-            # idempotent. An existing file must still be the one this session
-            # created before the virtual reverse step removes it.
-            if original_state == "__directory__":
-                raise EditSessionFileConflictError(
-                    "rollback destination is a directory: " + str(original)
-                )
-            if (
-                original_state is not None
-                and expected_hash
-                and original_state != expected_hash
-            ):
-                raise EditSessionFileConflictError(
-                    "created file changed outside edit session: " + str(original)
-                )
-            write_state(original, None)
-
-        elif kind == FILE_ENTRY_KIND_STASHED:
-            staged = require_session_file_path(
-                record.get("staged_path") or ""
-            )
-            staged_state = read_state(staged)
-            if original_state == "__directory__":
-                raise EditSessionFileConflictError(
-                    "restore destination is not a file: " + str(original)
-                )
-            if staged_state == "__directory__":
-                raise EditSessionFileConflictError(
-                    "staged rollback path is a directory: " + str(staged)
-                )
-            if (
-                staged_state is not None
-                and expected_hash
-                and staged_state != expected_hash
-            ):
-                raise EditSessionFileConflictError(
-                    "stashed file changed outside edit session: " + str(staged)
-                )
-
-            if staged_state is not None:
-                if original_state not in {None, staged_state}:
-                    raise EditSessionFileConflictError(
-                        "restore destination already contains another file: "
-                        + str(original)
-                    )
-                write_state(original, staged_state)
-                write_state(staged, None)
-            elif original_state is None:
-                raise EditSessionFileConflictError(
-                    "both staged and original files are missing: "
-                    + str(original)
-                )
-            elif (
-                expected_hash
-                and original_state != expected_hash
-            ):
-                raise EditSessionFileConflictError(
-                    "restored file checksum mismatch: " + str(original)
-                )
-
-        else:
-            raise EditSessionFileConflictError(
-                "unknown edit session file entry kind: " + kind
-            )
-
-        prepared.append(entry_id)
-
-    return {
-        "ok": True,
-        "sessionId": normalized_session_id,
-        "preparedCount": len(prepared),
-        "entryIds": prepared,
-    }
-
-
 def rollback_edit_session_files(session_id: str) -> dict:
     ensure_edit_session_file_schema()
     normalized_session_id = clean_cell_value(session_id)
-    validate_edit_session_files_for_rollback(normalized_session_id)
     conn = get_conn()
     try:
         rows = conn.execute("""
