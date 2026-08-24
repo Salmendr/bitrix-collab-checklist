@@ -385,7 +385,7 @@
                                     ${escapeHtml(version.name || 'Архивный файл')}
                                 </a>
                                 <div class="public-file-meta">
-                                    ${escapeHtml(formatBytes(version.size))} · ${escapeHtml(formatDate(version.uploadedAt || version.archivedAt))}
+                                    ${escapeHtml(formatBytes(version.size))} · ${escapeHtml(formatDate(version.archivedAt || version.uploadedAt))}
                                     · ${escapeHtml(version.uploadedByName || '—')}
                                 </div>
                             </div>

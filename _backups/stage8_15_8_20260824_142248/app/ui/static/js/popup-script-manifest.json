@@ -1,6 +1,6 @@
 {
-  "stage": "8.15.8-staged-upload",
-  "generatedAt": "2026-08-24T03:05:47.575167+00:00",
+  "stage": "8.15.7.1-folder-download",
+  "generatedAt": "2026-08-13T07:39:32.454435+00:00",
   "loadOrder": [
     "popup-bootstrap.js",
     "checklist-action-icons.js",
@@ -13,7 +13,6 @@
     "popup-document-list.js",
     "document-assignment-history.js",
     "public-folder-share.js",
-    "upload-staging.js",
     "popup-document-actions.js",
     "popup-window-channel.js",
     "popup-upload-progress.js",
@@ -48,8 +47,8 @@
   ],
   "extractedModules": {
     "popup-bootstrap.js": {
-      "sha256": "79ea9dc579d40fe407a868f22577efeced5236e4a6a28244f36d589281fe41c1",
-      "bytes": 1514
+      "sha256": "81dff06dbfb85941cda360a92ebabba411a144d3ab84a548d6d96269c8e8c2d7",
+      "bytes": 1488
     },
     "checklist-action-icons.js": {
       "sha256": "82c147a2d3f3ed639712cfb51ca4291490890eee345f8e9d78463ddc88584b0f",
@@ -80,8 +79,8 @@
       "bytes": 103464
     },
     "popup-document-list.js": {
-      "sha256": "e74d38adc05ca2c34f4774e16d5063603e3d7dfd034318f3ed30819203fed7ee",
-      "bytes": 15275
+      "sha256": "ac29a6dae4f8258985f5fa0ebbd56583a8aef8f102c1f0c612321cdc07470fdb",
+      "bytes": 15308
     },
     "document-assignment-history.js": {
       "sha256": "8ca593270b9e1e0170187046f5480c5fc8a7237c8dc62d1a89677e4f17d65e62",
@@ -91,13 +90,9 @@
       "sha256": "0a76ada593bbad042556d0cf528f0f167681694c523f8a652cac9b7737325338",
       "bytes": 12564
     },
-    "upload-staging.js": {
-      "sha256": "b963077085f916aadd7fce4018336de4db638822e4a8fe6544f2a47f03538fad",
-      "bytes": 16034
-    },
     "popup-document-actions.js": {
-      "sha256": "8919f53e54c98e7e1666b53df0bddeefc80a1d8c927581cba0b7e65a1761c37d",
-      "bytes": 25445
+      "sha256": "acbff936b75bda1f1ad6f4b76ac7067efac5c36eeea5e453b6f57a0ce802b5b4",
+      "bytes": 28297
     },
     "popup-window-channel.js": {
       "sha256": "5b9abaff9f29705db8745e4737f28bfb449fc23b4ae3ef2cf47050607f2f5723",
@@ -116,8 +111,8 @@
       "bytes": 25202
     },
     "popup-session-enhancements.js": {
-      "sha256": "534cbd2f8b1699f68791c872c157e5f17e7a833c05748f109b870dac260201ad",
-      "bytes": 48980
+      "sha256": "d7a69806176b1faad882ba82dda293b921f59ebaa2d8e1191772858cc06eb510",
+      "bytes": 47985
     },
     "popup-edit-session.js": {
       "sha256": "8cd402644dc0c9724b46b22c725e19a572232fa81d7105a8d3c094de9d6c7c42",
@@ -282,11 +277,7 @@
     "Stage 8.15.5 exposes ChecklistPopupNavigation so item-folder return always restores the originating checklist stage and scrolls to the exact item.",
     "Stage 8.15.6 adds conflict-aware custom-folder recovery, bounded Yandex lock retry and separate folder/file error controls.",
     "Stage 8.15.7 adds the labeled public-folder share control and drag-and-drop upload targets without exposing file deletion to public-link visitors.",
-    "Stage 8.15.7.1 restores icon-only download controls for current and archived item-folder files and uses one upward arrow touching a top line.",
-    "Stage 8.15.8 keeps files in a local pre-upload area until the user presses the explicit Upload confirmation button.",
-    "The popup upload area expands above the remaining item actions and grows by file-card rows.",
-    "The public-link action is icon-only and disabled in the application interface while its backend remains unchanged.",
-    "Archive rows display the preserved original uploader and upload time rather than the later replacement actor and archive time."
+    "Stage 8.15.7.1 restores icon-only download controls for current and archived item-folder files and uses one upward arrow touching a top line."
   ],
   "hashMode": "actual-file-bytes",
   "lineEndingNote": "Hashes are calculated from bytes written to disk. This is stable for Windows CRLF and Unix LF.",

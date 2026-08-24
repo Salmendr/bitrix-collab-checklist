@@ -159,16 +159,16 @@ def build_archive_series_rows_html(
         )
 
         date_text = format_datetime(
-            version.get("uploadedAt")
-            or version.get("archivedAt")
+            version.get("archivedAt")
+            or version.get("uploadedAt")
         )
 
         user_text = (
             clean_cell_value(
-                version.get("uploadedByName")
+                version.get("archivedByName")
             )
             or clean_cell_value(
-                version.get("archivedByName")
+                version.get("uploadedByName")
             )
             or "—"
         )

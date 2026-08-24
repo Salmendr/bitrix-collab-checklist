@@ -1,5 +1,5 @@
 {
-  "stage": "8.15.8-staged-upload",
+  "stage": "8.15.7.1-folder-download",
   "hashMode": "actual-file-bytes",
   "modules": {
     "checklist-window-channel.js": {
@@ -11,8 +11,8 @@
       "bytes": 5819
     },
     "folder-core.js": {
-      "sha256": "0cc4ebadfc95ed976782b6dde435b13ad987c3e3763749f37c5e01b4ecad551d",
-      "bytes": 18019
+      "sha256": "81947496694f3158fa1eff60983a49f0b3a07c94daf11c8e13d8c8d4ac4faaf1",
+      "bytes": 17815
     },
     "public-folder-share.js": {
       "sha256": "0a76ada593bbad042556d0cf528f0f167681694c523f8a652cac9b7737325338",
@@ -42,13 +42,9 @@
       "sha256": "318d9e4ac147fb7f3efbc05a7176b1028927f4e289cd731033487ec1d5a75435",
       "bytes": 15324
     },
-    "upload-staging.js": {
-      "sha256": "b963077085f916aadd7fce4018336de4db638822e4a8fe6544f2a47f03538fad",
-      "bytes": 16034
-    },
     "folder-uploads.js": {
-      "sha256": "073f4d5c86000841d80298ed25224e049bf0c8e8a0ab893871172140e5daf308",
-      "bytes": 27244
+      "sha256": "ff48af08fc51e94943d4b884cdfb6aea8f1fb8090139ee168cbf1cae926a5797",
+      "bytes": 29014
     },
     "folder-replacement.js": {
       "sha256": "f268582ac9d4455855215d1bbed8f9b865717da3048b21f440bde02ab526c352",
@@ -70,7 +66,6 @@
     "folder-notification-drafts.js",
     "document-assignment-history.js",
     "folder-upload-progress.js",
-    "upload-staging.js",
     "folder-uploads.js",
     "folder-replacement.js",
     "folder-archive-ui.js"
@@ -106,10 +101,7 @@
     "Stage 8.15.5 makes the folder back button call the opener navigation API and falls back to a stage-and-item popup URL if the opener cannot be restored.",
     "Hotfix 8.15.5.1 starts opener navigation without awaiting it, calls window.close() synchronously inside the trusted back-button click, and always replaces the surviving folder tab with the exact popup URL when the host refuses to close it.",
     "Stage 8.15.7 adds the permanent public-folder link dialog and makes the folder upload button a drag-and-drop target with the same six-pixel toolbar gap.",
-    "Stage 8.15.7.1 restores an icon-only current-file download control immediately after Replace and an equivalent control for every archive version.",
-    "Stage 8.15.8 renders the item-folder pre-upload area below the file table and scrolls it into view from the header Upload action.",
-    "Dropped and selected files remain local file cards until explicit confirmation; failed files stay staged for retry.",
-    "The folder public-link action is icon-only, permanently disabled in the current interface and cannot be re-enabled by edit-session refresh."
+    "Stage 8.15.7.1 restores an icon-only current-file download control immediately after Replace and an equivalent control for every archive version."
   ],
-  "generatedAt": "2026-08-24T03:05:47.575167+00:00"
+  "generatedAt": "2026-08-13T07:39:32.454435+00:00"
 }

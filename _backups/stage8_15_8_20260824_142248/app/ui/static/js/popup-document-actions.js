@@ -2,6 +2,61 @@
 
 const yandexStructurePollers = new Map();
 
+function bindUploadDropTarget(button) {
+    if (!button || button.dataset.uploadDropBound === '1') return;
+    button.dataset.uploadDropBound = '1';
+
+    const canAcceptDrop = () => (
+        !button.disabled
+        && (
+            typeof isEditingAllowed !== 'function'
+            || isEditingAllowed()
+        )
+    );
+
+    ['dragenter', 'dragover'].forEach(eventName => {
+        button.addEventListener(eventName, event => {
+            if (!canAcceptDrop()) return;
+            event.preventDefault();
+            event.stopPropagation();
+            if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
+            button.classList.add('is-drop-target');
+        });
+    });
+
+    button.addEventListener('dragleave', event => {
+        event.preventDefault();
+        event.stopPropagation();
+        button.classList.remove('is-drop-target');
+    });
+
+    button.addEventListener('drop', event => {
+        if (!canAcceptDrop()) return;
+        event.preventDefault();
+        event.stopPropagation();
+        button.classList.remove('is-drop-target');
+
+        const droppedFiles = event.dataTransfer && event.dataTransfer.files;
+        if (!droppedFiles || !droppedFiles.length) return;
+        const targetItemId = String(button.dataset.itemId || '');
+        const input = Array.from(document.querySelectorAll(
+            '[data-role="file-input"]'
+        )).find(candidate => (
+            String(candidate.dataset.itemId || '') === targetItemId
+        ));
+        if (!input) return;
+
+        try {
+            input.files = droppedFiles;
+        } catch (error) {
+            const transfer = new DataTransfer();
+            Array.from(droppedFiles).forEach(file => transfer.items.add(file));
+            input.files = transfer.files;
+        }
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+}
+
 function getLocalChecklistItem(itemId) {
     const targetId = String(itemId || '').trim();
     return (Array.isArray(items) ? items : []).find(item => (
@@ -313,242 +368,23 @@ async function retryYandexRecovery(itemId) {
     return result;
 }
 
-async function uploadPopupStagedFiles(
-    inputElement,
-    files,
-    stagingController
-) {
-    const itemId = String(
-        inputElement && inputElement.dataset.itemId || ''
-    );
-    const selectedFiles = Array.from(files || []);
-
-    if (!selectedFiles.length) {
-        return { keepState: true };
-    }
-
-    const editSessionId = await requireEditingSession(
-        'загрузка файлов'
-    );
-
-    const selectedChecklistKey = String(
-        currentChecklistKey || 'id'
-    ).trim() || 'id';
-
-    const selectedItem = items.find(item => (
-        String(item && item.id || '')
-        === itemId
-    ));
-
-    const batchContext = Object.freeze({
-        dialogId: String(dialogId || ''),
-        checklistKey: selectedChecklistKey,
-        itemId,
-        itemName: String(
-            selectedItem
-            && selectedItem.name
-            || ''
-        ),
-        initialStatus: normalizeStatus(
-            selectedItem
-            && selectedItem.status
-        )
-    });
-
-    const uploadPlans = selectedFiles.map(file => {
-        const context = captureUploadContext(
-            itemId,
-            file,
-            selectedChecklistKey,
-            editSessionId
-        );
-
-        return {
-            context,
-            file,
-            promise: uploadDocument(
-                itemId,
-                file,
-                context
-            )
-        };
-    });
-
-    debugLog(
-        'upload_frontend_batch_enqueued',
-        {
-            dialogId: batchContext.dialogId,
-            checklistKey: batchContext.checklistKey,
-            itemId: batchContext.itemId,
-            itemName: batchContext.itemName,
-            filesCount: uploadPlans.length,
-            uploadIds: uploadPlans.map(
-                plan => plan.context.uploadId
-            ),
-            files: uploadPlans.map(plan => ({
-                name: plan.context.fileName,
-                size: plan.context.fileSize,
-                type: plan.context.fileType
-            }))
-        }
-    );
-
-    try {
-        const settled = await Promise.allSettled(
-            uploadPlans.map(plan => (
-                plan.promise.then(result => ({
-                    context: plan.context,
-                    file: plan.file,
-                    result
-                }))
-            ))
-        );
-
-        const successfulUploads = settled
-            .filter(entry => entry.status === 'fulfilled')
-            .map(entry => entry.value);
-        const failedUploads = settled.filter(
-            entry => entry.status === 'rejected'
-        );
-        const failedFiles = settled
-            .map((entry, index) => (
-                entry.status === 'rejected'
-                    ? uploadPlans[index].file
-                    : null
-            ))
-            .filter(Boolean);
-
-        stagingController.replaceFiles(
-            failedFiles,
-            { expanded: failedFiles.length > 0 }
-        );
-
-        if (successfulUploads.length) {
-            const refreshedChecklist = (
-                await loadChecklistSnapshotForUpload(
-                    batchContext
-                )
-            );
-
-            recordCompletedUploadBatch(
-                batchContext,
-                successfulUploads,
-                refreshedChecklist
-            );
-        }
-
-        debugLog(
-            'upload_frontend_batch_completed',
-            {
-                dialogId: batchContext.dialogId,
-                checklistKey: batchContext.checklistKey,
-                itemId: batchContext.itemId,
-                filesCount: uploadPlans.length,
-                successfulCount: successfulUploads.length,
-                failedCount: failedUploads.length,
-                currentChecklistKey
-            }
-        );
-
-        if (failedUploads.length) {
-            const firstError = failedUploads[0].reason;
-
-            setSaveState(
-                'error',
-                (
-                    failedUploads.length === 1
-                        ? 'Ошибка загрузки файла'
-                        : (
-                            'Не загружено файлов: '
-                            + failedUploads.length
-                        )
-                )
-            );
-
-            console.log('upload batch error:', firstError);
-        } else if (
-            typeof updateSaveStateBySession === 'function'
-        ) {
-            updateSaveStateBySession();
-        } else {
-            setSaveState('', 'Сохранено');
-        }
-
-        return { keepState: true };
-    } catch (error) {
-        debugLog(
-            'upload_frontend_batch_exception',
-            {
-                dialogId: batchContext.dialogId,
-                checklistKey: batchContext.checklistKey,
-                itemId: batchContext.itemId,
-                filesCount: uploadPlans.length,
-                error: String(
-                    error
-                    && error.message
-                    || error
-                )
-            }
-        );
-        throw error;
-    }
-}
-
 // Stage 7.1.1: document DOM actions and unified item toolbar.
 function bindDocumentActions() {
     document.querySelectorAll('[data-role="upload"]').forEach(btn => {
-        const itemId = String(btn.dataset.itemId || '');
-        const input = Array.from(document.querySelectorAll(
-            '[data-role="file-input"]'
-        )).find(candidate => (
-            String(candidate.dataset.itemId || '') === itemId
-        ));
-        const toolbar = btn.closest('.doc-actions');
-        const staging = window.ChecklistUploadStaging;
-
-        if (
-            !input
-            || !toolbar
-            || !staging
-            || typeof staging.create !== 'function'
-        ) {
-            return;
-        }
-
-        staging.create({
-            trigger: btn,
-            input,
-            mount: toolbar,
-            prepend: true,
-            hideTriggerWhenExpanded: true,
-            stateKey: [
-                'popup',
-                String(dialogId || ''),
-                String(currentChecklistKey || 'id'),
-                itemId
-            ].join(':'),
-            canInteract() {
-                return (
-                    typeof isEditingAllowed !== 'function'
-                    || isEditingAllowed()
-                );
-            },
-            onConfirm(files, controller) {
-                return uploadPopupStagedFiles(
-                    input,
-                    files,
-                    controller
-                );
-            },
-            onError(error) {
-                console.log('upload staging error:', error);
-                setSaveState(
-                    'error',
-                    error && error.message
-                        ? error.message
-                        : 'Ошибка загрузки файлов'
-                );
+        bindUploadDropTarget(btn);
+        btn.addEventListener('click', function() {
+            if (
+                this.disabled
+                || (
+                    typeof isEditingAllowed === 'function'
+                    && !isEditingAllowed()
+                )
+            ) {
+                return;
             }
+
+            const input = document.querySelector('[data-role="file-input"][data-item-id="' + this.dataset.itemId + '"]');
+            if (input) input.click();
         });
     });
 
@@ -711,6 +547,222 @@ function bindDocumentActions() {
             } catch (e) {
                 console.log('open file error:', e);
                 setSaveState('error', 'Ошибка открытия файла');
+            }
+        });
+    });
+
+    document.querySelectorAll('[data-role="file-input"]').forEach(input => {
+        input.addEventListener('change', async function() {
+            const inputElement = this;
+            const itemId = String(
+                inputElement.dataset.itemId || ''
+            );
+            const files = Array.from(
+                inputElement.files || []
+            );
+
+            if (!files.length) {
+                debugLog(
+                    'upload_frontend_input_empty',
+                    {
+                        dialogId,
+                        checklistKey: currentChecklistKey,
+                        itemId
+                    }
+                );
+                return;
+            }
+
+            let editSessionId = '';
+
+            try {
+                editSessionId = await requireEditingSession(
+                    'загрузка файлов'
+                );
+            } catch (error) {
+                inputElement.value = '';
+                setSaveState(
+                    'error',
+                    error && error.message
+                        ? error.message
+                        : 'Сессия редактирования не готова'
+                );
+                return;
+            }
+
+            const selectedChecklistKey = String(
+                currentChecklistKey || 'id'
+            ).trim() || 'id';
+
+            const selectedItem = items.find(item => (
+                String(item && item.id || '')
+                === itemId
+            ));
+
+            const batchContext = Object.freeze({
+                dialogId: String(dialogId || ''),
+                checklistKey: selectedChecklistKey,
+                itemId,
+                itemName: String(
+                    selectedItem
+                    && selectedItem.name
+                    || ''
+                ),
+                initialStatus: normalizeStatus(
+                    selectedItem
+                    && selectedItem.status
+                )
+            });
+
+            const uploadPlans = files.map(file => {
+                const context = captureUploadContext(
+                    itemId,
+                    file,
+                    selectedChecklistKey,
+                    editSessionId
+                );
+
+                return {
+                    context,
+                    file,
+                    promise: uploadDocument(
+                        itemId,
+                        file,
+                        context
+                    )
+                };
+            });
+
+            debugLog(
+                'upload_frontend_batch_enqueued',
+                {
+                    dialogId: batchContext.dialogId,
+                    checklistKey: (
+                        batchContext.checklistKey
+                    ),
+                    itemId: batchContext.itemId,
+                    itemName: batchContext.itemName,
+                    filesCount: uploadPlans.length,
+                    uploadIds: uploadPlans.map(
+                        plan => plan.context.uploadId
+                    ),
+                    files: uploadPlans.map(plan => ({
+                        name: plan.context.fileName,
+                        size: plan.context.fileSize,
+                        type: plan.context.fileType
+                    }))
+                }
+            );
+
+            try {
+                const settled = await Promise.allSettled(
+                    uploadPlans.map(plan => (
+                        plan.promise.then(result => ({
+                            context: plan.context,
+                            file: plan.file,
+                            result
+                        }))
+                    ))
+                );
+
+                const successfulUploads = settled
+                    .filter(entry => (
+                        entry.status === 'fulfilled'
+                    ))
+                    .map(entry => entry.value);
+
+                const failedUploads = settled.filter(
+                    entry => entry.status === 'rejected'
+                );
+
+                if (successfulUploads.length) {
+                    const refreshedChecklist = (
+                        await loadChecklistSnapshotForUpload(
+                            batchContext
+                        )
+                    );
+
+                    recordCompletedUploadBatch(
+                        batchContext,
+                        successfulUploads,
+                        refreshedChecklist
+                    );
+                }
+
+                debugLog(
+                    'upload_frontend_batch_completed',
+                    {
+                        dialogId: batchContext.dialogId,
+                        checklistKey: (
+                            batchContext.checklistKey
+                        ),
+                        itemId: batchContext.itemId,
+                        filesCount: uploadPlans.length,
+                        successfulCount: (
+                            successfulUploads.length
+                        ),
+                        failedCount: failedUploads.length,
+                        currentChecklistKey
+                    }
+                );
+
+                if (failedUploads.length) {
+                    const firstError = (
+                        failedUploads[0].reason
+                    );
+
+                    setSaveState(
+                        'error',
+                        (
+                            failedUploads.length === 1
+                                ? 'Ошибка загрузки файла'
+                                : (
+                                    'Не загружено файлов: '
+                                    + failedUploads.length
+                                )
+                        )
+                    );
+
+                    console.log(
+                        'upload batch error:',
+                        firstError
+                    );
+                } else if (
+                    typeof updateSaveStateBySession
+                    === 'function'
+                ) {
+                    updateSaveStateBySession();
+                } else {
+                    setSaveState('', 'Сохранено');
+                }
+
+            } catch (error) {
+                console.log(error);
+
+                debugLog(
+                    'upload_frontend_batch_exception',
+                    {
+                        dialogId: batchContext.dialogId,
+                        checklistKey: (
+                            batchContext.checklistKey
+                        ),
+                        itemId: batchContext.itemId,
+                        filesCount: uploadPlans.length,
+                        error: String(
+                            error
+                            && error.message
+                            || error
+                        )
+                    }
+                );
+
+                setSaveState(
+                    'error',
+                    'Ошибка загрузки файлов'
+                );
+
+            } finally {
+                inputElement.value = '';
             }
         });
     });

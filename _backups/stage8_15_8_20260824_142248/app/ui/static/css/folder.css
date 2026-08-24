@@ -87,7 +87,7 @@
 }
 
 .folder-actions .checklist-action-button-share {
-    flex-basis: 34px;
+    flex-basis: auto;
 }
 
 .folder-hidden-input {
@@ -96,19 +96,6 @@
 
 .folder-content {
     padding: 18px;
-}
-
-.folder-upload-staging-mount {
-    width: 100%;
-    margin-top: 14px;
-}
-
-.folder-upload-staging-mount:empty {
-    display: none;
-}
-
-.folder-upload-staging-mount .upload-staging-zone {
-    width: 100%;
 }
 
 .folder-table-scroll {

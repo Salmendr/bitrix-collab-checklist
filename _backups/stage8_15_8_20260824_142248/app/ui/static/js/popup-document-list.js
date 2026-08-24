@@ -243,12 +243,12 @@ function buildDocumentCell(item) {
                     data-role="share-folder"
                     data-item-id="${esc(itemId)}"
                     data-item-name="${esc(String(item && item.name || 'Пункт'))}"
-                    title="Поделиться ссылкой — временно недоступно"
-                    aria-label="Поделиться ссылкой — временно недоступно"
-                    aria-disabled="true"
-                    disabled
+                    title="Поделиться папкой"
+                    aria-label="Поделиться папкой"
+                    ${typeof disabledAttr === 'function' ? disabledAttr() : ''}
                 >
                     ${iconSvg('share')}
+                    <span class="checklist-action-button-share-label">Поделиться папкой</span>
                 </button>
 
                 ${showViewFolder ? `

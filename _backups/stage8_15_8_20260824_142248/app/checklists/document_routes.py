@@ -2020,20 +2020,17 @@ def _build_folder_actions_html(
                 type="button"
                 id="folderShareBtn"
                 data-role="share-folder"
-                data-permanent-disabled="1"
-                title="Поделиться ссылкой — временно недоступно"
-                aria-label="Поделиться ссылкой — временно недоступно"
-                aria-disabled="true"
-                disabled
+                title="Поделиться папкой"
+                aria-label="Поделиться папкой"
             >
                 <span data-checklist-icon="share"></span>
+                <span class="checklist-action-button-share-label">Поделиться папкой</span>
             </button>
             <button
                 class="folder-action-button checklist-action-button checklist-action-button-bell"
                 type="button"
                 id="folderNotificationBtn"
                 data-role="notify-documents-disabled"
-                data-permanent-disabled="1"
                 title="Оповещения временно недоступны"
                 aria-label="Оповещения временно недоступны"
                 aria-disabled="true"
@@ -2154,7 +2151,7 @@ def api_checklist_folder(
     ui_static_base_url = (
         f"{app_base_path}/ui-static"
     )
-    ui_asset_version = "8.15.8-staged-upload"
+    ui_asset_version = "8.15.7.1-folder-download"
     popup_url = (
         f"{app_base_path}/popup"
         f"?dialogId={quote(dialog_id, safe='')}"
@@ -2283,9 +2280,6 @@ def api_checklist_folder(
             ),
             "FOLDER_UPLOAD_PROGRESS_JS_URL": html.escape(
                 f"{ui_static_base_url}/js/folder-upload-progress.js?v={ui_asset_version}"
-            ),
-            "FOLDER_UPLOAD_STAGING_JS_URL": html.escape(
-                f"{ui_static_base_url}/js/upload-staging.js?v={ui_asset_version}"
             ),
             "FOLDER_UPLOADS_JS_URL": html.escape(
                 f"{ui_static_base_url}/js/folder-uploads.js?v={ui_asset_version}"

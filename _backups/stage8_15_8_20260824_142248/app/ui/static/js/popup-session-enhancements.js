@@ -1318,25 +1318,6 @@ async function waitForPopupUploadsBeforeFinalize(
     saveChanges
 ) {
     const manager = window.popupUploadManager;
-    const staging = window.ChecklistUploadStaging;
-    const hasStagedFiles = Boolean(
-        staging
-        && typeof staging.hasPendingFiles === 'function'
-        && staging.hasPendingFiles()
-    );
-
-    if (hasStagedFiles) {
-        if (!saveChanges) {
-            if (typeof staging.clearAll === 'function') {
-                staging.clearAll();
-            }
-        } else {
-            throw new Error(
-                'В области загрузки остались неподтверждённые файлы. '
-                + 'Нажмите «Загрузить» или удалите их из списка.'
-            );
-        }
-    }
 
     if (
         !manager
@@ -1384,19 +1365,11 @@ async function waitForPopupUploadsBeforeFinalize(
 
 function popupHasPendingUploads() {
     const manager = window.popupUploadManager;
-    const staging = window.ChecklistUploadStaging;
 
     return Boolean(
-        (
-            manager
-            && typeof manager.hasPending === 'function'
-            && manager.hasPending()
-        )
-        || (
-            staging
-            && typeof staging.hasPendingFiles === 'function'
-            && staging.hasPendingFiles()
-        )
+        manager
+        && typeof manager.hasPending === 'function'
+        && manager.hasPending()
     );
 }
 
@@ -1447,9 +1420,7 @@ async function finalizePopupSession(saveChanges, options = {}) {
         if (cancelBtn) cancelBtn.disabled = false;
         setSaveState(
             'error',
-            uploadWaitError && uploadWaitError.message
-                ? uploadWaitError.message
-                : 'Не удалось завершить очередь загрузки'
+            'Не удалось завершить очередь загрузки'
         );
         return false;
     }

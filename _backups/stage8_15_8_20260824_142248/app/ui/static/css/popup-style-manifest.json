@@ -1,5 +1,5 @@
 {
-  "version": "8.15.8-staged-upload",
+  "version": "8.15.7.1-folder-download",
   "orderedFiles": [
     "popup.css",
     "uploads.css",
@@ -22,16 +22,16 @@
     "notifications.css",
     "assignment-history.css"
   ],
-  "sourceSha256": "162376c5fff15473b87ea3da51097f18be90c18312da01eb99f0978a87ac0f9b",
-  "sourceLength": 59395,
-  "sourceLineCount": 2697,
+  "sourceSha256": "afeeab351203189104a0842ff7806e066a0336c74eecad771e13216f7e03af3b",
+  "sourceLength": 53313,
+  "sourceLineCount": 2386,
   "boundaries": {
     "uploads": ".upload-progress-cards {",
     "checklist": ".content {",
     "documents": ".doc-cell {",
     "checklistOverrides": ".add-item-row {"
   },
-  "assetVersion": "8.15.8-staged-upload",
+  "assetVersion": "8.15.7.1-folder-download",
   "modules": {
     "popup.css": {
       "sha256": "6e8b8a6714fb2cf5357271a748c7676206ed924c7f8ee3090e66f143f69253f8",
@@ -46,12 +46,12 @@
       "bytes": 7209
     },
     "action-controls.css": {
-      "sha256": "15bfd4214bb9c6be75291caf7bcdafd9ba567441e63f50a231e43f571643c5fd",
-      "bytes": 13103
+      "sha256": "6cc4286583cb6c4958498a6594ea878fe1a69230bf5da5aabb043cbc08ea0f2b",
+      "bytes": 7144
     },
     "documents.css": {
-      "sha256": "dc2671dae5cd97bc18bd2d3f8d903eef15add1406c775f3360015bcda766ef88",
-      "bytes": 9695
+      "sha256": "cdd178807546853a26e534302ad64419e49aa392332426523ce5de32319980fb",
+      "bytes": 9572
     },
     "checklist-overrides.css": {
       "sha256": "e973250044cb058101787ee202808d9020043de46645e764bc422ebf9361d979",
@@ -89,9 +89,6 @@
     "Stage 8.15.5 highlights the exact checklist row briefly after returning from an item folder.",
     "Stage 8.15.6 renders separate folder conflicts and per-file Yandex mirror errors.",
     "Stage 8.15.7 adds equal-gap document toolbars, the labeled share action, drag-over feedback and the public-link management dialog.",
-    "Stage 8.15.7.1 reserves stable inline space for Replace and Download and keeps archive download controls aligned with their file names.",
-    "Stage 8.15.8 adds a responsive pre-upload file-card grid that grows downward one row at a time.",
-    "Each staged file has a hover/focus red remove control, and the confirmation action appears only after the first file is staged.",
-    "Stage 8.15.8 returns the disabled share action to the standard icon-only button width."
+    "Stage 8.15.7.1 reserves stable inline space for Replace and Download and keeps archive download controls aligned with their file names."
   ]
 }

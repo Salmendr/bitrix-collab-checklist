@@ -394,7 +394,7 @@ def public_folder_page(request: Request, token: str):
         ))
 
     base_path = get_public_app_base_path(request)
-    asset_version = "8.15.8-archive-metadata"
+    asset_version = "8.15.7-public-folder-dnd"
     response = HTMLResponse(render_ui_template(
         "public_folder.html",
         {

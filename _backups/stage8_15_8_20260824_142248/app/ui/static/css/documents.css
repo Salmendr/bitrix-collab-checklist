@@ -21,15 +21,7 @@
 }
 
 .doc-actions .checklist-action-button-share {
-    flex-basis: 34px;
-}
-
-.doc-actions > .upload-staging-zone {
-    order: -1;
-}
-
-.doc-actions.upload-staging-open {
-    align-items: flex-start;
+    flex-basis: auto;
 }
 
 .doc-files {

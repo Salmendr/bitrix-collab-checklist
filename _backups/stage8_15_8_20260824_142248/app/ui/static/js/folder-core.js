@@ -272,12 +272,6 @@
         global.document.querySelectorAll(
             selector
         ).forEach(element => {
-            if (element.dataset.permanentDisabled === '1') {
-                element.disabled = true;
-                element.setAttribute('aria-disabled', 'true');
-                return;
-            }
-
             if (!sessionReady) {
                 if (
                     element.dataset.sessionDisabled

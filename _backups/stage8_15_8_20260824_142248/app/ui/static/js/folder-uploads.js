@@ -653,201 +653,240 @@
 
     const folderUploadBtn = document.getElementById('folderUploadBtn');
     const folderUploadInput = document.getElementById('folderUploadInput');
-    const folderUploadStagingMount = document.getElementById(
-        'folderUploadStagingMount'
-    );
 
-    async function uploadFolderStagedFiles(
-        files,
-        stagingController
-    ) {
-        const selectedFiles = Array.from(files || []);
-        if (!selectedFiles.length) {
-            return { keepState: true };
-        }
-
-        const editSessionId = requireFolderEditSession(
-            'загрузка файлов'
-        );
-        const openerManager = getFolderOpenerUploadManager();
-        const uploadManager = (
-            openerManager
-            || folderFallbackUploadManager
-        );
-        const managedByUploadManager = !!openerManager;
-
-        if (
-            actionIcons
-            && typeof actionIcons.setBusy === 'function'
-        ) {
-            actionIcons.setBusy(folderUploadBtn, true);
-        }
-
-        const uploadPlans = selectedFiles.map(file => {
-            const context = buildFolderUploadTaskContext(
-                file,
-                'upload',
-                { sessionId: editSessionId }
-            );
-
-            return {
-                file,
-                context,
-                promise: uploadManager.enqueue(
-                    context,
-                    function (
-                        immutableContext,
-                        progressControl
-                    ) {
-                        return sendFolderUploadRequest(
-                            file,
-                            immutableContext,
-                            progressControl
-                        );
-                    }
-                )
-            };
-        });
-
-        try {
-            const settled = await Promise.allSettled(
-                uploadPlans.map(plan => (
-                    plan.promise.then(result => ({
-                        file: plan.file,
-                        context: plan.context,
-                        result
-                    }))
-                ))
-            );
-
-            const successful = [];
-            const failed = [];
-            const failedFiles = [];
-
-            settled.forEach((entry, index) => {
-                const plan = uploadPlans[index];
-
-                if (entry.status === 'fulfilled') {
-                    successful.push({
-                        ...entry.value,
-                        fileName: String(
-                            plan.file.name || 'Файл'
-                        )
-                    });
-                } else {
-                    failedFiles.push(plan.file);
-                    failed.push({
-                        fileName: String(
-                            plan.file.name || 'Файл'
-                        ),
-                        error: String(
-                            entry.reason
-                            && entry.reason.message
-                            || entry.reason
-                            || 'Ошибка загрузки'
-                        )
-                    });
-                }
-            });
-
-            stagingController.replaceFiles(
-                failedFiles,
-                { expanded: failedFiles.length > 0 }
-            );
-
-            if (successful.length) {
-                notifyParentChecklistDocumentChanged(
-                    'checklist-document-uploaded',
-                    {
-                        itemName: folderItemName,
-                        fileNames: successful.map(
-                            entry => entry.fileName
-                        ),
-                        managedByUploadManager
-                    }
-                );
-            }
-
-            if (failed.length) {
-                const failedText = failed
-                    .map(entry => (
-                        entry.fileName
-                        + ': '
-                        + entry.error
-                    ))
-                    .join('\\n');
-
-                alert(
-                    'Не удалось загрузить часть файлов:\\n\\n'
-                    + failedText
-                );
-            }
-
-            if (successful.length && !failed.length) {
-                stagingController.clear({ collapse: true });
-                window.location.reload();
-            }
-
-            return { keepState: true };
-        } finally {
-            if (
-                actionIcons
-                && typeof actionIcons.setBusy === 'function'
-            ) {
-                actionIcons.setBusy(folderUploadBtn, false);
-            }
-            if (
-                global.ChecklistFolderCore
-                && typeof global.ChecklistFolderCore
-                    .applySessionState === 'function'
-            ) {
-                global.ChecklistFolderCore.applySessionState();
-            }
-        }
-    }
-
-    if (
-        folderUploadBtn
-        && folderUploadInput
-        && folderUploadStagingMount
-        && global.ChecklistUploadStaging
-        && typeof global.ChecklistUploadStaging.create === 'function'
-    ) {
-        global.ChecklistUploadStaging.create({
-            trigger: folderUploadBtn,
-            input: folderUploadInput,
-            mount: folderUploadStagingMount,
-            scrollOnExpand: true,
-            stateKey: [
-                'folder',
-                String(folderDialogId || ''),
-                String(folderChecklistKey || 'id'),
-                String(folderItemId || '')
-            ].join(':'),
-            canInteract() {
+    if (folderUploadBtn && folderUploadInput) {
+        const canAcceptFolderDrop = function () {
+            if (folderUploadBtn.disabled) return false;
+            try {
                 requireFolderEditSession('загрузка файлов');
                 return true;
-            },
-            onBlocked(error) {
+            } catch (error) {
+                return false;
+            }
+        };
+
+        ['dragenter', 'dragover'].forEach(function (eventName) {
+            folderUploadBtn.addEventListener(eventName, function (event) {
+                if (!canAcceptFolderDrop()) return;
+                event.preventDefault();
+                event.stopPropagation();
+                if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
+                folderUploadBtn.classList.add('is-drop-target');
+            });
+        });
+
+        folderUploadBtn.addEventListener('dragleave', function (event) {
+            event.preventDefault();
+            event.stopPropagation();
+            folderUploadBtn.classList.remove('is-drop-target');
+        });
+
+        folderUploadBtn.addEventListener('drop', function (event) {
+            if (!canAcceptFolderDrop()) return;
+            event.preventDefault();
+            event.stopPropagation();
+            folderUploadBtn.classList.remove('is-drop-target');
+            const droppedFiles = event.dataTransfer && event.dataTransfer.files;
+            if (!droppedFiles || !droppedFiles.length) return;
+
+            try {
+                folderUploadInput.files = droppedFiles;
+            } catch (error) {
+                const transfer = new DataTransfer();
+                Array.from(droppedFiles).forEach(function (file) {
+                    transfer.items.add(file);
+                });
+                folderUploadInput.files = transfer.files;
+            }
+            folderUploadInput.dispatchEvent(
+                new Event('change', { bubbles: true })
+            );
+        });
+
+        folderUploadBtn.addEventListener('click', function () {
+            try {
+                requireFolderEditSession(
+                    'загрузка файлов'
+                );
+            } catch (error) {
                 alert(
                     error && error.message
                         ? error.message
                         : 'Сессия редактирования не готова'
                 );
-            },
-            onConfirm(files, controller) {
-                return uploadFolderStagedFiles(
-                    files,
-                    controller
+                return;
+            }
+
+            folderUploadInput.click();
+        });
+
+        folderUploadInput.addEventListener('change', async function () {
+            const files = Array.from(this.files || []);
+
+            if (!files.length) {
+                return;
+            }
+
+            let editSessionId = '';
+
+            try {
+                editSessionId = requireFolderEditSession(
+                    'загрузка файлов'
                 );
-            },
-            onError(error) {
-                console.log('folder upload error:', error);
+            } catch (error) {
+                this.value = '';
                 alert(
                     error && error.message
                         ? error.message
+                        : 'Сессия редактирования не готова'
+                );
+                return;
+            }
+
+            const openerManager = (
+                getFolderOpenerUploadManager()
+            );
+
+            const uploadManager = (
+                openerManager
+                || folderFallbackUploadManager
+            );
+
+            const managedByUploadManager = !!openerManager;
+
+            folderUploadBtn.disabled = true;
+            if (
+                actionIcons
+                && typeof actionIcons.setBusy === 'function'
+            ) {
+                actionIcons.setBusy(folderUploadBtn, true);
+            }
+
+            const uploadPlans = files.map(file => {
+                const context = buildFolderUploadTaskContext(
+                    file,
+                    'upload',
+                    {
+                        sessionId: editSessionId
+                    }
+                );
+
+                return {
+                    file,
+                    context,
+                    promise: uploadManager.enqueue(
+                        context,
+                        function (
+                            immutableContext,
+                            progressControl
+                        ) {
+                            return sendFolderUploadRequest(
+                                file,
+                                immutableContext,
+                                progressControl
+                            );
+                        }
+                    )
+                };
+            });
+
+            try {
+                const settled = await Promise.allSettled(
+                    uploadPlans.map(plan => (
+                        plan.promise.then(result => ({
+                            file: plan.file,
+                            context: plan.context,
+                            result
+                        }))
+                    ))
+                );
+
+                const successful = [];
+                const failed = [];
+
+                settled.forEach((entry, index) => {
+                    const plan = uploadPlans[index];
+
+                    if (entry.status === 'fulfilled') {
+                        successful.push({
+                            ...entry.value,
+                            fileName: String(
+                                plan.file.name || 'Файл'
+                            )
+                        });
+                    } else {
+                        failed.push({
+                            fileName: String(
+                                plan.file.name || 'Файл'
+                            ),
+                            error: String(
+                                entry.reason
+                                && entry.reason.message
+                                || entry.reason
+                                || 'Ошибка загрузки'
+                            )
+                        });
+                    }
+                });
+
+                if (successful.length) {
+                    notifyParentChecklistDocumentChanged(
+                        'checklist-document-uploaded',
+                        {
+                            itemName: folderItemName,
+                            fileNames: successful.map(
+                                entry => entry.fileName
+                            ),
+                            managedByUploadManager
+                        }
+                    );
+                }
+
+                if (failed.length) {
+                    const failedText = failed
+                        .map(entry => (
+                            entry.fileName
+                            + ': '
+                            + entry.error
+                        ))
+                        .join('\\n');
+
+                    alert(
+                        'Не удалось загрузить часть файлов:\\n\\n'
+                        + failedText
+                    );
+                }
+
+                if (successful.length) {
+                    window.location.reload();
+                }
+
+            } catch (e) {
+                console.log('folder upload error:', e);
+
+                alert(
+                    e && e.message
+                        ? e.message
                         : 'Ошибка загрузки файлов'
                 );
+
+            } finally {
+                this.value = '';
+                folderUploadBtn.disabled = false;
+                if (
+                    actionIcons
+                    && typeof actionIcons.setBusy === 'function'
+                ) {
+                    actionIcons.setBusy(folderUploadBtn, false);
+                }
+                if (
+                    global.ChecklistFolderCore
+                    && typeof global.ChecklistFolderCore
+                        .applySessionState === 'function'
+                ) {
+                    global.ChecklistFolderCore
+                        .applySessionState();
+                }
             }
         });
     }
