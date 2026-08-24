@@ -261,6 +261,7 @@
         const selector = [
             '#folderUploadBtn',
             '#folderUploadInput',
+            '#folderShareBtn',
             '#folderReplaceInput',
             '#folderNotificationBtn',
             '[data-role="folder-remove-file"]',

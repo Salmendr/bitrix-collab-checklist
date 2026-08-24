@@ -74,17 +74,20 @@
 }
 
 .folder-actions {
-    display: grid;
-    grid-auto-flow: column;
-    grid-auto-columns: 34px;
+    display: flex;
+    flex-wrap: wrap;
     align-items: center;
     justify-content: end;
-    gap: 10px;
+    gap: 6px;
 }
 
 .folder-action-button,
 .folder-yandex-link {
-    justify-self: center;
+    flex: 0 0 34px;
+}
+
+.folder-actions .checklist-action-button-share {
+    flex-basis: auto;
 }
 
 .folder-hidden-input {
@@ -158,16 +161,28 @@
 }
 
 .folder-document-name-layout {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) max-content 34px;
+    display: flex;
     align-items: center;
     gap: 8px;
     width: 100%;
     min-width: 0;
 }
 
+.folder-mirror-status-slot,
+.folder-document-inline-actions {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+}
+
+.folder-document-inline-actions {
+    gap: 8px;
+    white-space: nowrap;
+}
+
 .folder-document-name {
     display: block;
+    flex: 1 1 auto;
     min-width: 0;
     color: #175cd3;
     text-decoration: none;
@@ -224,8 +239,9 @@
     color: #b42318;
 }
 
-.folder-replace-upload-button {
-    justify-self: end;
+.folder-replace-upload-button,
+.folder-download-button {
+    vertical-align: middle;
 }
 
 .folder-document-actions {

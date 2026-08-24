@@ -358,6 +358,22 @@ def acquire_checklist_for_edit_session(
             "edit session is not active"
         )
 
+    # A public-folder upload/replacement is applied only outside user edit
+    # sessions. If it claimed the checklist immediately before this mutation,
+    # wait for its short local commit instead of taking a snapshot that could
+    # later overwrite the external file.
+    from app.checklists.public_folder_operations import (
+        has_processing_public_folder_operation,
+    )
+
+    if has_processing_public_folder_operation(
+        normalized_dialog_id,
+        normalized_checklist_key,
+    ):
+        raise EditSessionConflictError(
+            "Внешний файл сейчас добавляется в чек-лист; повторите действие через несколько секунд"
+        )
+
     lock_result = acquire_edit_session_lock(
         session_id=normalized_session_id,
         dialog_id=normalized_dialog_id,

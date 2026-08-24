@@ -291,6 +291,38 @@ def list_pending_document_replacements(
     ]
 
 
+def list_recoverable_failed_document_replacements(
+    limit: int = 500,
+) -> list[dict]:
+    """Find failed old-file deletes that can safely be retried after restart."""
+    ensure_document_replacements_table()
+    from app.checklists.upload_jobs import ensure_upload_jobs_table
+
+    ensure_upload_jobs_table()
+    safe_limit = max(1, min(int(limit or 500), 5000))
+    conn = get_conn()
+    try:
+        rows = conn.execute(
+            """
+            SELECT replacement.*
+            FROM document_replacements AS replacement
+            JOIN upload_jobs AS job
+              ON job.job_id = replacement.delete_job_id
+            WHERE replacement.status = 'error'
+              AND COALESCE(replacement.delete_job_id, '') <> ''
+              AND job.job_type = 'delete'
+              AND job.status = 'error'
+              AND COALESCE(job.attempts, 0) < 3
+            ORDER BY replacement.created_at ASC
+            LIMIT ?
+            """,
+            (safe_limit,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        conn.close()
+
+
 def update_document_replacement(
     operation_id: str,
     **updates,

@@ -25,6 +25,12 @@ from app.checklists.archive_routes import router as archive_router
 from app.checklists.version_link_routes import (
     router as version_link_router,
 )
+from app.checklists.public_folder_routes import (
+    router as public_folder_router,
+)
+from app.checklists.public_folder_operations import (
+    start_public_folder_operation_worker,
+)
 from app.checklists.notification_routes import (
     router as notification_router,
 )
@@ -145,6 +151,7 @@ app.include_router(checklist_router)
 app.include_router(document_router)
 app.include_router(archive_router)
 app.include_router(version_link_router)
+app.include_router(public_folder_router)
 app.include_router(notification_router)
 app.include_router(assignment_part_router)
 app.include_router(bitrix_user_router)
@@ -172,6 +179,10 @@ def startup_event():
     recover_pending_finalization_deliveries(
         source="startup"
     )
+
+    # External public-folder uploads/replacements are durable operations.
+    # They are applied only after every active checklist edit session ends.
+    start_public_folder_operation_worker()
 
     start_yandex_warmup_workers()
     enqueue_all_saved_project_contexts(source="startup")

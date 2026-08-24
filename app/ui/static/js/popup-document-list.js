@@ -237,6 +237,20 @@ function buildDocumentCell(item) {
                     ${iconSvg('upload')}
                 </button>
 
+                <button
+                    class="doc-share-btn checklist-action-button checklist-action-button-share"
+                    type="button"
+                    data-role="share-folder"
+                    data-item-id="${esc(itemId)}"
+                    data-item-name="${esc(String(item && item.name || 'Пункт'))}"
+                    title="Поделиться папкой"
+                    aria-label="Поделиться папкой"
+                    ${typeof disabledAttr === 'function' ? disabledAttr() : ''}
+                >
+                    ${iconSvg('share')}
+                    <span class="checklist-action-button-share-label">Поделиться папкой</span>
+                </button>
+
                 ${showViewFolder ? `
                     <button
                         class="doc-btn doc-icon-btn checklist-action-button checklist-action-button-folder"

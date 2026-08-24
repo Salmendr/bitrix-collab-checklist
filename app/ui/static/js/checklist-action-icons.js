@@ -10,15 +10,22 @@
         folder: `
             <path d="M3.5 7.5v9.25A2.25 2.25 0 0 0 5.75 19h12.5a2.25 2.25 0 0 0 2.25-2.25v-7A2.25 2.25 0 0 0 18.25 7.5H11l-2-2H5.75A2.25 2.25 0 0 0 3.5 7.75"></path>
         `,
+        share: `
+            <circle cx="18" cy="5" r="2.5"></circle>
+            <circle cx="6" cy="12" r="2.5"></circle>
+            <circle cx="18" cy="19" r="2.5"></circle>
+            <path d="m8.2 10.8 7.6-4.5"></path>
+            <path d="m8.2 13.2 7.6 4.5"></path>
+        `,
         open: `
             <path d="M14 3h7v7"></path>
             <path d="M10 14 21 3"></path>
             <path d="M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5"></path>
         `,
         download: `
-            <path d="M12 3v12"></path>
-            <path d="m7 10 5 5 5-5"></path>
-            <path d="M5 21h14"></path>
+            <path d="M5 4h14"></path>
+            <path d="M12 20V4"></path>
+            <path d="m7 9 5-5 5 5"></path>
         `,
         bell: `
             <path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"></path>

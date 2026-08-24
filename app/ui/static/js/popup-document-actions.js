@@ -2,6 +2,61 @@
 
 const yandexStructurePollers = new Map();
 
+function bindUploadDropTarget(button) {
+    if (!button || button.dataset.uploadDropBound === '1') return;
+    button.dataset.uploadDropBound = '1';
+
+    const canAcceptDrop = () => (
+        !button.disabled
+        && (
+            typeof isEditingAllowed !== 'function'
+            || isEditingAllowed()
+        )
+    );
+
+    ['dragenter', 'dragover'].forEach(eventName => {
+        button.addEventListener(eventName, event => {
+            if (!canAcceptDrop()) return;
+            event.preventDefault();
+            event.stopPropagation();
+            if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
+            button.classList.add('is-drop-target');
+        });
+    });
+
+    button.addEventListener('dragleave', event => {
+        event.preventDefault();
+        event.stopPropagation();
+        button.classList.remove('is-drop-target');
+    });
+
+    button.addEventListener('drop', event => {
+        if (!canAcceptDrop()) return;
+        event.preventDefault();
+        event.stopPropagation();
+        button.classList.remove('is-drop-target');
+
+        const droppedFiles = event.dataTransfer && event.dataTransfer.files;
+        if (!droppedFiles || !droppedFiles.length) return;
+        const targetItemId = String(button.dataset.itemId || '');
+        const input = Array.from(document.querySelectorAll(
+            '[data-role="file-input"]'
+        )).find(candidate => (
+            String(candidate.dataset.itemId || '') === targetItemId
+        ));
+        if (!input) return;
+
+        try {
+            input.files = droppedFiles;
+        } catch (error) {
+            const transfer = new DataTransfer();
+            Array.from(droppedFiles).forEach(file => transfer.items.add(file));
+            input.files = transfer.files;
+        }
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+}
+
 function getLocalChecklistItem(itemId) {
     const targetId = String(itemId || '').trim();
     return (Array.isArray(items) ? items : []).find(item => (
@@ -316,6 +371,7 @@ async function retryYandexRecovery(itemId) {
 // Stage 7.1.1: document DOM actions and unified item toolbar.
 function bindDocumentActions() {
     document.querySelectorAll('[data-role="upload"]').forEach(btn => {
+        bindUploadDropTarget(btn);
         btn.addEventListener('click', function() {
             if (
                 this.disabled
@@ -718,6 +774,13 @@ function bindDocumentActions() {
             .bind === 'function'
     ) {
         window.ChecklistPopupDocumentReplacement.bind();
+    }
+
+    if (
+        window.PublicFolderShare
+        && typeof window.PublicFolderShare.bind === 'function'
+    ) {
+        window.PublicFolderShare.bind(document);
     }
 }
 

@@ -282,6 +282,19 @@ def build_archive_series_rows_html(
                         >
                             {html.escape(original_name)}
                         </a>
+
+                        <a
+                            class="folder-archive-download-button checklist-action-button checklist-action-button-download"
+                            href="{html.escape(download_url)}"
+                            data-role="folder-download-archive-version"
+                            data-archive-version-id="{html.escape(archive_version_id)}"
+                            data-series-id="{html.escape(series_id)}"
+                            download
+                            title="Скачать файл"
+                            aria-label="Скачать архивную версию {html.escape(original_name)}"
+                        >
+                            <span data-checklist-icon="download"></span>
+                        </a>
                     </div>
 
                     {secondary_name_html}

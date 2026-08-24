@@ -133,10 +133,16 @@
 }
 
 .folder-archive-version-name {
+    flex: 1 1 auto;
     color: #175cd3;
     font-weight: 600;
     text-decoration: none;
     cursor: pointer;
+}
+
+.folder-archive-download-button {
+    flex: 0 0 34px;
+    margin-left: 1px;
 }
 
 .folder-archive-version-name:hover {

@@ -1,5 +1,5 @@
 {
-  "version": "8.15.6-yandex-recovery",
+  "version": "8.15.7.1-folder-download",
   "orderedFiles": [
     "popup.css",
     "uploads.css",
@@ -22,16 +22,16 @@
     "notifications.css",
     "assignment-history.css"
   ],
-  "sourceSha256": "99389aada750e0c4c262822b153a10e834aa479179fe19313a87e0339eab7f51",
-  "sourceLength": 48509,
-  "sourceLineCount": 2139,
+  "sourceSha256": "afeeab351203189104a0842ff7806e066a0336c74eecad771e13216f7e03af3b",
+  "sourceLength": 53313,
+  "sourceLineCount": 2386,
   "boundaries": {
     "uploads": ".upload-progress-cards {",
     "checklist": ".content {",
     "documents": ".doc-cell {",
     "checklistOverrides": ".add-item-row {"
   },
-  "assetVersion": "8.15.6-yandex-recovery",
+  "assetVersion": "8.15.7.1-folder-download",
   "modules": {
     "popup.css": {
       "sha256": "6e8b8a6714fb2cf5357271a748c7676206ed924c7f8ee3090e66f143f69253f8",
@@ -46,20 +46,20 @@
       "bytes": 7209
     },
     "action-controls.css": {
-      "sha256": "733ab12942f7935c0c20f79e343ae702e987fe19b940fa5f0ac29025eb46a40d",
-      "bytes": 3925
+      "sha256": "6cc4286583cb6c4958498a6594ea878fe1a69230bf5da5aabb043cbc08ea0f2b",
+      "bytes": 7144
     },
     "documents.css": {
-      "sha256": "d031a8fcbd926f2a0e5a1cb2e60a34bed96d2182d1b1f7d21d3c3032607cf3d2",
-      "bytes": 9531
+      "sha256": "cdd178807546853a26e534302ad64419e49aa392332426523ce5de32319980fb",
+      "bytes": 9572
     },
     "checklist-overrides.css": {
       "sha256": "e973250044cb058101787ee202808d9020043de46645e764bc422ebf9361d979",
       "bytes": 2645
     },
     "archive.css": {
-      "sha256": "1497b1da945fa7c28a15f647081d4cb391ca0c24755226497f34fd793771105d",
-      "bytes": 4671
+      "sha256": "0ed32daeb6ab988726c48f2b4e9c4f8e2ab8e04d252d88c1320e859e7c9cf483",
+      "bytes": 4770
     },
     "notifications.css": {
       "sha256": "55b6392fad45868d21de7173348cbbd34d4fac173c5a531126eaa71dcce79fb7",
@@ -87,6 +87,8 @@
     "Bitrix hotfix 8.15.1 uses a new asset version for the production iframe regression fixes.",
     "Stage 8.15.4 adds the separated ID Not Required card and the fixed inactivity warning banner.",
     "Stage 8.15.5 highlights the exact checklist row briefly after returning from an item folder.",
-    "Stage 8.15.6 renders separate folder conflicts and per-file Yandex mirror errors."
+    "Stage 8.15.6 renders separate folder conflicts and per-file Yandex mirror errors.",
+    "Stage 8.15.7 adds equal-gap document toolbars, the labeled share action, drag-over feedback and the public-link management dialog.",
+    "Stage 8.15.7.1 reserves stable inline space for Replace and Download and keeps archive download controls aligned with their file names."
   ]
 }

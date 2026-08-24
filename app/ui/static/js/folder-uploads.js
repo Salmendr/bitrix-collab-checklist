@@ -655,6 +655,54 @@
     const folderUploadInput = document.getElementById('folderUploadInput');
 
     if (folderUploadBtn && folderUploadInput) {
+        const canAcceptFolderDrop = function () {
+            if (folderUploadBtn.disabled) return false;
+            try {
+                requireFolderEditSession('загрузка файлов');
+                return true;
+            } catch (error) {
+                return false;
+            }
+        };
+
+        ['dragenter', 'dragover'].forEach(function (eventName) {
+            folderUploadBtn.addEventListener(eventName, function (event) {
+                if (!canAcceptFolderDrop()) return;
+                event.preventDefault();
+                event.stopPropagation();
+                if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
+                folderUploadBtn.classList.add('is-drop-target');
+            });
+        });
+
+        folderUploadBtn.addEventListener('dragleave', function (event) {
+            event.preventDefault();
+            event.stopPropagation();
+            folderUploadBtn.classList.remove('is-drop-target');
+        });
+
+        folderUploadBtn.addEventListener('drop', function (event) {
+            if (!canAcceptFolderDrop()) return;
+            event.preventDefault();
+            event.stopPropagation();
+            folderUploadBtn.classList.remove('is-drop-target');
+            const droppedFiles = event.dataTransfer && event.dataTransfer.files;
+            if (!droppedFiles || !droppedFiles.length) return;
+
+            try {
+                folderUploadInput.files = droppedFiles;
+            } catch (error) {
+                const transfer = new DataTransfer();
+                Array.from(droppedFiles).forEach(function (file) {
+                    transfer.items.add(file);
+                });
+                folderUploadInput.files = transfer.files;
+            }
+            folderUploadInput.dispatchEvent(
+                new Event('change', { bubbles: true })
+            );
+        });
+
         folderUploadBtn.addEventListener('click', function () {
             try {
                 requireFolderEditSession(

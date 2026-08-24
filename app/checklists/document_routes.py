@@ -1738,6 +1738,15 @@ def _build_folder_document_rows_html(
                             {html.escape(mirror_status_text)}
                         </span>
             """
+        mirror_status_slot_html = (
+            f'''
+                        <span class="folder-mirror-status-slot">
+                            {mirror_status_html}
+                        </span>
+            '''
+            if mirror_status_html
+            else ""
+        )
 
         assignment_history_count = int(
             doc.get("assignmentHistoryCount") or 0
@@ -1777,21 +1786,35 @@ def _build_folder_document_rows_html(
                             {doc_name}
                         </a>
 
-                        {mirror_status_html}
+                        {mirror_status_slot_html}
 
-                        <button
-                            class="folder-replace-upload-button checklist-action-button checklist-action-button-replace"
-                            type="button"
-                            data-role="folder-replace-upload"
-                            data-document-id="{escaped_doc_id}"
-                            data-document-name="{doc_name}"
-                            data-mirror-status="{html.escape(mirror_status)}"
-                            {replacement_disabled_attr}
-                            title="{html.escape(replacement_title)}"
-                            aria-label="Заменить файл"
-                        >
-                            <span data-checklist-icon="replace"></span>
-                        </button>
+                        <span class="folder-document-inline-actions">
+                            <button
+                                class="folder-replace-upload-button checklist-action-button checklist-action-button-replace"
+                                type="button"
+                                data-role="folder-replace-upload"
+                                data-document-id="{escaped_doc_id}"
+                                data-document-name="{doc_name}"
+                                data-mirror-status="{html.escape(mirror_status)}"
+                                {replacement_disabled_attr}
+                                title="{html.escape(replacement_title)}"
+                                aria-label="Заменить файл"
+                            >
+                                <span data-checklist-icon="replace"></span>
+                            </button>
+
+                            <a
+                                class="folder-download-button checklist-action-button checklist-action-button-download"
+                                href="{html.escape(download_url)}"
+                                data-role="folder-download-file"
+                                data-document-id="{escaped_doc_id}"
+                                download
+                                title="Скачать файл"
+                                aria-label="Скачать файл {doc_name}"
+                            >
+                                <span data-checklist-icon="download"></span>
+                            </a>
+                        </span>
                     </div>
                 </td>
                 <td>{doc_size}</td>
@@ -1993,6 +2016,17 @@ def _build_folder_actions_html(
                 multiple
             >
             <button
+                class="folder-action-button checklist-action-button checklist-action-button-share"
+                type="button"
+                id="folderShareBtn"
+                data-role="share-folder"
+                title="Поделиться папкой"
+                aria-label="Поделиться папкой"
+            >
+                <span data-checklist-icon="share"></span>
+                <span class="checklist-action-button-share-label">Поделиться папкой</span>
+            </button>
+            <button
                 class="folder-action-button checklist-action-button checklist-action-button-bell"
                 type="button"
                 id="folderNotificationBtn"
@@ -2117,7 +2151,7 @@ def api_checklist_folder(
     ui_static_base_url = (
         f"{app_base_path}/ui-static"
     )
-    ui_asset_version = "8.15.5.1-folder-return-close"
+    ui_asset_version = "8.15.7.1-folder-download"
     popup_url = (
         f"{app_base_path}/popup"
         f"?dialogId={quote(dialog_id, safe='')}"
@@ -2145,6 +2179,14 @@ def api_checklist_folder(
         "archiveDeleteApiUrl": (
             f"{app_base_path}"
             "/api/checklist/delete-archive-version"
+        ),
+        "publicFolderLinkApiUrl": (
+            f"{app_base_path}"
+            "/api/checklist/public-folder-link"
+        ),
+        "publicFolderReissueApiUrl": (
+            f"{app_base_path}"
+            "/api/checklist/public-folder-link/reissue"
         ),
         "notificationDraftsApiUrl": (
             f"{app_base_path}"
@@ -2217,6 +2259,9 @@ def api_checklist_folder(
             ),
             "FOLDER_CORE_JS_URL": html.escape(
                 f"{ui_static_base_url}/js/folder-core.js?v={ui_asset_version}"
+            ),
+            "FOLDER_PUBLIC_SHARE_JS_URL": html.escape(
+                f"{ui_static_base_url}/js/public-folder-share.js?v={ui_asset_version}"
             ),
             "FOLDER_BITRIX_USER_PICKER_JS_URL": html.escape(
                 f"{ui_static_base_url}/js/bitrix-user-picker.js?v={ui_asset_version}"

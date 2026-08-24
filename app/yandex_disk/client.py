@@ -188,10 +188,17 @@ def yandex_disk_upload_file(
         "size": total_bytes,
     }
 
-def yandex_disk_delete_path(target_path: str, permanently: bool = True):
+def yandex_disk_delete_path(
+    target_path: str,
+    permanently: bool = True,
+    wait_timeout: int = 45,
+) -> dict:
     normalized_path = normalize_yandex_disk_path(target_path)
 
-    _request_with_resource_retry(
+    if not normalized_path:
+        raise RuntimeError("Yandex Disk delete path is required")
+
+    response = _request_with_resource_retry(
         lambda: requests.delete(
             f"{YANDEX_DISK_API_BASE}/resources",
             headers=get_yandex_disk_headers(),
@@ -202,8 +209,58 @@ def yandex_disk_delete_path(target_path: str, permanently: bool = True):
             timeout=30,
         ),
         operation_name="delete",
-        accepted_statuses=(200, 202, 204),
+        # Delete is idempotent: a stale replacement path that is already absent
+        # is the same successful end state and must not leave a red archive
+        # error forever.
+        accepted_statuses=(200, 202, 204, 404),
     )
+
+    if response.status_code == 404:
+        return {
+            "ok": True,
+            "path": normalized_path,
+            "deleted": False,
+            "alreadyMissing": True,
+            "async": False,
+        }
+
+    operation_href = ""
+    if response.status_code == 202:
+        try:
+            operation_href = clean_disk_value((response.json() or {}).get("href"))
+        except Exception:
+            operation_href = ""
+
+    if operation_href:
+        deadline = time.monotonic() + max(1, int(wait_timeout or 45))
+        while time.monotonic() < deadline:
+            operation_response = _request_with_resource_retry(
+                lambda: requests.get(
+                    operation_href,
+                    headers=get_yandex_disk_headers(),
+                    timeout=30,
+                ),
+                operation_name="poll delete operation",
+            )
+            operation = operation_response.json() or {}
+            status = clean_disk_value(operation.get("status")).lower()
+            if status == "success":
+                break
+            if status == "failed":
+                raise RuntimeError(
+                    f"Yandex Disk delete operation failed: {operation}"
+                )
+            time.sleep(0.5)
+        else:
+            raise RuntimeError("Yandex Disk delete operation timed out")
+
+    return {
+        "ok": True,
+        "path": normalized_path,
+        "deleted": True,
+        "alreadyMissing": False,
+        "async": bool(operation_href),
+    }
 
 
 def yandex_disk_ensure_folder(target_path: str) -> dict:
@@ -331,7 +388,7 @@ def yandex_disk_get_resource_meta(target_path: str) -> dict:
             headers=get_yandex_disk_headers(),
             params={
                 "path": normalized_path,
-                "fields": "name,path,type,public_url",
+                "fields": "name,path,type,public_url,size,sha256,md5",
             },
             timeout=30,
         ),
@@ -344,6 +401,9 @@ def yandex_disk_get_resource_meta(target_path: str) -> dict:
         "path": clean_disk_value(data.get("path")) or normalized_path,
         "type": clean_disk_value(data.get("type")),
         "public_url": clean_disk_value(data.get("public_url")),
+        "size": data.get("size"),
+        "sha256": clean_disk_value(data.get("sha256")),
+        "md5": clean_disk_value(data.get("md5")),
     }
 
 
@@ -357,7 +417,7 @@ def yandex_disk_try_get_resource_meta(target_path: str) -> dict | None:
             headers=get_yandex_disk_headers(),
             params={
                 "path": normalized_path,
-                "fields": "name,path,type,public_url",
+                "fields": "name,path,type,public_url,size,sha256,md5",
             },
             timeout=30,
         ),
@@ -372,6 +432,9 @@ def yandex_disk_try_get_resource_meta(target_path: str) -> dict | None:
         "path": clean_disk_value(data.get("path")) or normalized_path,
         "type": clean_disk_value(data.get("type")),
         "public_url": clean_disk_value(data.get("public_url")),
+        "size": data.get("size"),
+        "sha256": clean_disk_value(data.get("sha256")),
+        "md5": clean_disk_value(data.get("md5")),
     }
 
 

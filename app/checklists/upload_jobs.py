@@ -308,8 +308,17 @@ def ensure_yandex_upload_job_for_reconciliation(
                 status == "skipped" and permanent_stage == "yandex_disabled"
             ) or (
                 status == "error"
-                and permanent_stage in {"mirror_failed", "exception", "folder_prepare"}
-                and any(marker in error_text for marker in retry_markers)
+                and (
+                    permanent_stage == "remote_conflict"
+                    or (
+                        permanent_stage in {
+                            "mirror_failed",
+                            "exception",
+                            "folder_prepare",
+                        }
+                        and any(marker in error_text for marker in retry_markers)
+                    )
+                )
             )
 
             if permanent_stage in {
@@ -533,6 +542,170 @@ def get_latest_document_job(
     return row_to_dict(row)
 
 
+def finish_document_upload_job_from_remote_match(
+    *,
+    dialog_id: str,
+    checklist_key: str,
+    item_id: str,
+    document_id: str,
+    yandex_path: str,
+) -> dict:
+    """Stop a queued recovery upload after the remote copy was verified."""
+    ensure_upload_jobs_table()
+    now = utc_now()
+    conn = get_conn()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute(
+            """
+            SELECT *
+            FROM upload_jobs
+            WHERE job_type = 'upload'
+              AND dialog_id = ?
+              AND checklist_key = ?
+              AND item_id = ?
+              AND document_id = ?
+            ORDER BY created_at DESC, job_id DESC
+            LIMIT 1
+            """,
+            (
+                normalize_dialog_id(dialog_id),
+                normalize_checklist_key(checklist_key),
+                clean_cell_value(item_id),
+                clean_cell_value(document_id),
+            ),
+        ).fetchone()
+        if not row:
+            conn.commit()
+            return {"ok": True, "updated": False, "reason": "job_not_found"}
+        record = dict(row)
+        if clean_cell_value(record.get("status")).lower() == "running":
+            conn.commit()
+            return {
+                "ok": True,
+                "updated": False,
+                "reason": "job_running",
+                "job": record,
+            }
+        conn.execute(
+            """
+            UPDATE upload_jobs
+            SET yandex_path = ?,
+                status = 'synced',
+                stage = 'remote_verified',
+                progress_percent = 100,
+                uploaded_bytes = file_size,
+                total_bytes = file_size,
+                error = '',
+                updated_at = ?,
+                finished_at = ?
+            WHERE job_id = ?
+            """,
+            (
+                clean_cell_value(yandex_path),
+                now,
+                now,
+                record["job_id"],
+            ),
+        )
+        conn.commit()
+        updated = conn.execute(
+            "SELECT * FROM upload_jobs WHERE job_id = ?",
+            (record["job_id"],),
+        ).fetchone()
+        return {
+            "ok": True,
+            "updated": True,
+            "job": dict(updated) if updated else record,
+        }
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def fail_document_upload_job_for_remote_conflict(
+    *,
+    dialog_id: str,
+    checklist_key: str,
+    item_id: str,
+    document_id: str,
+    error: str,
+) -> dict:
+    """Prevent an already-created recovery job from overwriting a conflict."""
+    ensure_upload_jobs_table()
+    now = utc_now()
+    conn = get_conn()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute(
+            """
+            SELECT *
+            FROM upload_jobs
+            WHERE job_type = 'upload'
+              AND dialog_id = ?
+              AND checklist_key = ?
+              AND item_id = ?
+              AND document_id = ?
+            ORDER BY created_at DESC, job_id DESC
+            LIMIT 1
+            """,
+            (
+                normalize_dialog_id(dialog_id),
+                normalize_checklist_key(checklist_key),
+                clean_cell_value(item_id),
+                clean_cell_value(document_id),
+            ),
+        ).fetchone()
+        if not row:
+            conn.commit()
+            return {"ok": True, "updated": False, "reason": "job_not_found"}
+        record = dict(row)
+        if clean_cell_value(record.get("status")).lower() == "running":
+            conn.commit()
+            return {
+                "ok": True,
+                "updated": False,
+                "reason": "job_running",
+                "job": record,
+            }
+        conn.execute(
+            """
+            UPDATE upload_jobs
+            SET status = 'error',
+                stage = 'remote_conflict',
+                progress_percent = 0,
+                uploaded_bytes = 0,
+                error = ?,
+                updated_at = ?,
+                finished_at = ?
+            WHERE job_id = ?
+            """,
+            (
+                clean_cell_value(error) or "remote file conflict",
+                now,
+                now,
+                record["job_id"],
+            ),
+        )
+        conn.commit()
+        updated = conn.execute(
+            "SELECT * FROM upload_jobs WHERE job_id = ?",
+            (record["job_id"],),
+        ).fetchone()
+        return {
+            "ok": True,
+            "updated": True,
+            "job": dict(updated) if updated else record,
+        }
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
 def list_pending_yandex_job_ids(limit: int = 100) -> list[str]:
     ensure_upload_jobs_table()
 
@@ -705,6 +878,41 @@ def retry_failed_yandex_upload_job(job_id: str) -> dict | None:
               AND status = 'error'
               AND job_type = 'upload'
               AND stage IN ('mirror_failed', 'exception', 'folder_prepare')
+            """,
+            (
+                now,
+                normalized_job_id,
+            ),
+        )
+        conn.commit()
+        if int(cur.rowcount or 0) != 1:
+            return get_upload_job(normalized_job_id)
+    finally:
+        conn.close()
+    return get_upload_job(normalized_job_id)
+
+
+def retry_failed_yandex_delete_job(job_id: str) -> dict | None:
+    """Return one failed delete to the queue for bounded replacement recovery."""
+    ensure_upload_jobs_table()
+    normalized_job_id = clean_cell_value(job_id)
+    now = utc_now()
+    conn = get_conn()
+    try:
+        cur = conn.execute(
+            """
+            UPDATE upload_jobs
+            SET status = 'queued',
+                stage = 'delete_queued',
+                progress_percent = 0,
+                error = '',
+                started_at = '',
+                finished_at = '',
+                updated_at = ?
+            WHERE job_id = ?
+              AND status = 'error'
+              AND job_type = 'delete'
+              AND attempts < 3
             """,
             (
                 now,

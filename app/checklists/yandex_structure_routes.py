@@ -22,8 +22,8 @@ from app.checklists.yandex_structure_state import (
 from app.checklists.yandex_custom_recovery import (
     reconcile_custom_item_yandex_folder,
 )
-from app.checklists.yandex_mirror_queue import (
-    requeue_current_yandex_file_failures,
+from app.checklists.yandex_mirror_reconciliation import (
+    reconcile_yandex_mirror_documents,
 )
 
 
@@ -269,12 +269,15 @@ async def api_retry_yandex_recovery(request: Request):
         })
 
     files = await run_in_threadpool(
-        requeue_current_yandex_file_failures,
+        reconcile_yandex_mirror_documents,
+        source="manual_combined_recovery",
         dialog_id=dialog_id,
         checklist_key=checklist_key,
         item_id=item_id,
-        source="manual_combined_recovery",
     )
+    # Keep the existing frontend refresh contract while retry now performs a
+    # full remote verification instead of blindly requeueing an upload.
+    files["requeued"] = int(files.get("queued") or 0)
     latest = (
         get_latest_yandex_structure_job_for_item(
             dialog_id=dialog_id,

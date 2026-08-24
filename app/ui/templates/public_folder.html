@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="referrer" content="no-referrer">
+    <title>[[PUBLIC_FOLDER_PAGE_TITLE]]</title>
+    <link rel="stylesheet" href="[[PUBLIC_FOLDER_CSS_URL]]">
+</head>
+<body class="public-folder-page">
+    <main class="public-folder-shell">
+        <header class="public-folder-header">
+            <div class="public-folder-eyebrow" id="publicChecklistTitle">
+                Общая папка чек-листа
+            </div>
+            <h1 class="public-folder-title" id="publicItemName">
+                [[PUBLIC_FOLDER_PAGE_TITLE]]
+            </h1>
+            <p class="public-folder-lead">
+                Здесь можно просматривать и скачивать файлы, добавлять новые
+                и заменять текущие версии. Удаление по общей ссылке недоступно.
+            </p>
+        </header>
+
+        <section class="public-folder-card public-identity-card" aria-labelledby="identityTitle">
+            <div class="public-section-heading">
+                <div>
+                    <h2 id="identityTitle">Данные отправителя</h2>
+                    <p>Заполните имя и фамилию перед загрузкой или заменой файла.</p>
+                </div>
+                <span class="public-required-note">Обязательные поля</span>
+            </div>
+            <div class="public-identity-grid">
+                <label class="public-field">
+                    <span>Имя</span>
+                    <input
+                        id="publicFirstName"
+                        name="firstName"
+                        type="text"
+                        maxlength="80"
+                        autocomplete="given-name"
+                        required
+                    >
+                </label>
+                <label class="public-field">
+                    <span>Фамилия</span>
+                    <input
+                        id="publicLastName"
+                        name="lastName"
+                        type="text"
+                        maxlength="80"
+                        autocomplete="family-name"
+                        required
+                    >
+                </label>
+            </div>
+            <div class="public-identity-hint" id="publicIdentityHint" aria-live="polite">
+                После отправки в графе «Кем загружено» появятся указанные имя и фамилия.
+            </div>
+        </section>
+
+        <section class="public-folder-card public-upload-card" aria-labelledby="uploadTitle">
+            <div class="public-section-heading">
+                <div>
+                    <h2 id="uploadTitle">Загрузить файлы</h2>
+                    <p>Перетащите файлы в область или выберите их на устройстве.</p>
+                </div>
+            </div>
+            <div
+                class="public-upload-zone"
+                id="publicUploadZone"
+                role="button"
+                tabindex="0"
+                aria-label="Выбрать или перетащить файлы для загрузки"
+            >
+                <div class="public-upload-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none">
+                        <path d="M12 16V4"></path>
+                        <path d="m7 9 5-5 5 5"></path>
+                        <path d="M5 14v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"></path>
+                    </svg>
+                </div>
+                <div class="public-upload-zone-title">Перетащите файлы сюда</div>
+                <div class="public-upload-zone-subtitle">или</div>
+                <button class="public-primary-button" id="publicChooseFilesBtn" type="button">
+                    Выбрать файлы
+                </button>
+                <input id="publicUploadInput" type="file" multiple hidden>
+            </div>
+        </section>
+
+        <section class="public-folder-card" aria-labelledby="currentFilesTitle">
+            <div class="public-section-heading">
+                <div>
+                    <h2 id="currentFilesTitle">Текущие файлы</h2>
+                    <p id="publicCurrentSummary">Загрузка списка…</p>
+                </div>
+                <button class="public-secondary-button" id="publicRefreshBtn" type="button">
+                    Обновить
+                </button>
+            </div>
+            <div class="public-files-list" id="publicCurrentFiles" aria-live="polite"></div>
+            <input id="publicReplaceInput" type="file" hidden>
+        </section>
+
+        <section class="public-folder-card" aria-labelledby="archiveTitle">
+            <div class="public-section-heading">
+                <div>
+                    <h2 id="archiveTitle">Архив версий</h2>
+                    <p id="publicArchiveSummary">Архив загружается…</p>
+                </div>
+            </div>
+            <div class="public-archive-list" id="publicArchiveGroups"></div>
+        </section>
+
+        <section
+            class="public-folder-card public-operations-card"
+            id="publicOperationsCard"
+            aria-labelledby="operationsTitle"
+            hidden
+        >
+            <div class="public-section-heading">
+                <div>
+                    <h2 id="operationsTitle">Отправка файлов</h2>
+                    <p>Не закрывайте страницу, пока файл принимается приложением.</p>
+                </div>
+            </div>
+            <div class="public-operation-list" id="publicOperationList" aria-live="polite"></div>
+        </section>
+
+        <div class="public-page-message" id="publicPageMessage" role="status" aria-live="polite"></div>
+        <noscript>Для работы общей папки необходимо включить JavaScript.</noscript>
+    </main>
+    <script src="[[PUBLIC_FOLDER_JS_URL]]" defer></script>
+</body>
+</html>

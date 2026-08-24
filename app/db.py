@@ -963,6 +963,80 @@ def init_db():
                 "",
             ))
 
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS public_folder_links (
+            link_id TEXT PRIMARY KEY,
+            dialog_id TEXT NOT NULL,
+            checklist_key TEXT NOT NULL,
+            item_id TEXT NOT NULL,
+            generation INTEGER NOT NULL DEFAULT 1,
+            status TEXT NOT NULL DEFAULT 'active',
+            created_by_id TEXT,
+            created_by_name TEXT,
+            last_reissued_by_id TEXT,
+            last_reissued_by_name TEXT,
+            created_at TEXT,
+            updated_at TEXT,
+            revoked_at TEXT,
+            UNIQUE(dialog_id, checklist_key, item_id)
+        )
+    """)
+
+    cur.execute("""
+        CREATE INDEX IF NOT EXISTS idx_public_folder_links_status
+        ON public_folder_links(status, dialog_id, checklist_key, item_id)
+    """)
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS public_folder_operations (
+            operation_id TEXT PRIMARY KEY,
+            link_id TEXT NOT NULL,
+            link_generation INTEGER NOT NULL,
+            dialog_id TEXT NOT NULL,
+            checklist_key TEXT NOT NULL,
+            item_id TEXT NOT NULL,
+            operation_type TEXT NOT NULL,
+            expected_document_id TEXT,
+            expected_series_id TEXT,
+            document_id TEXT,
+            replacement_operation_id TEXT,
+            upload_job_id TEXT,
+            original_file_name TEXT,
+            file_name TEXT,
+            staging_path TEXT NOT NULL,
+            file_size INTEGER NOT NULL DEFAULT 0,
+            first_name TEXT NOT NULL,
+            last_name TEXT NOT NULL,
+            uploader_name TEXT NOT NULL,
+            force_replace INTEGER NOT NULL DEFAULT 0,
+            status TEXT NOT NULL DEFAULT 'queued',
+            stage TEXT NOT NULL DEFAULT 'accepted',
+            error TEXT,
+            attempts INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT,
+            updated_at TEXT,
+            started_at TEXT,
+            finished_at TEXT,
+            FOREIGN KEY(link_id) REFERENCES public_folder_links(link_id)
+        )
+    """)
+
+    cur.execute("""
+        CREATE INDEX IF NOT EXISTS idx_public_folder_operations_queue
+        ON public_folder_operations(status, created_at)
+    """)
+
+    cur.execute("""
+        CREATE INDEX IF NOT EXISTS idx_public_folder_operations_item
+        ON public_folder_operations(
+            dialog_id,
+            checklist_key,
+            item_id,
+            status,
+            created_at
+        )
+    """)
+
 
     conn.commit()
     conn.close()

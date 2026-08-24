@@ -34,6 +34,7 @@ from app.checklists.upload_jobs import (
     list_yandex_folder_resolution_error_job_ids,
     list_yandex_upload_error_job_ids,
     retry_failed_yandex_upload_job,
+    retry_failed_yandex_delete_job,
     claim_upload_job,
     update_upload_job_progress,
     finish_upload_job,
@@ -49,11 +50,15 @@ from app.checklists.yandex_structure_jobs import (
 
 from app.checklists.replacement_sync import (
     handle_document_replacement_after_job,
+    update_archive_version_yandex_state,
 )
 
 from app.checklists.document_replacements import (
+    get_document_replacement_by_delete_job,
+    list_recoverable_failed_document_replacements,
     list_pending_document_replacements,
     mark_document_replacement_failed,
+    update_document_replacement,
 )
 
 from app.checklists.yandex_folders import mirror_document_file_to_yandex
@@ -62,7 +67,9 @@ from app.checklists.yandex_resource_locks import (
 )
 from app.yandex_disk.client import (
     is_yandex_disk_enabled,
+    normalize_yandex_disk_path,
     yandex_disk_delete_path,
+    yandex_disk_try_get_resource_meta,
 )
 
 
@@ -862,6 +869,96 @@ def recover_pending_document_replacements(
     return result
 
 
+def recover_failed_document_replacement_deletes(
+    source: str = "startup",
+    limit: int = 500,
+) -> dict:
+    """Retry bounded transient/legacy delete failures from older builds."""
+    replacements = list_recoverable_failed_document_replacements(limit=limit)
+    retry_markers = (
+        "404",
+        "notfound",
+        "not found",
+        "diskresourcenotfounderror",
+        "diskresourcelockederror",
+        "resource is locked",
+        "ресурс заблокирован",
+        "timeout",
+        "timed out",
+        "connection",
+        "network",
+        "reset by peer",
+        "401",
+        "unauthorized",
+        "429",
+        "status 500",
+        "status 502",
+        "status 503",
+        "status 504",
+    )
+    requeued = 0
+    skipped = 0
+    results = []
+
+    for replacement in replacements:
+        job_id = clean_cell_value(replacement.get("delete_job_id"))
+        job = get_upload_job(job_id) or {}
+        error_text = clean_cell_value(job.get("error")).lower()
+        if not any(marker in error_text for marker in retry_markers):
+            skipped += 1
+            results.append({
+                "operationId": replacement.get("operation_id") or "",
+                "jobId": job_id,
+                "skipped": True,
+                "reason": "non_retryable_delete_error",
+                "error": job.get("error") or "",
+            })
+            continue
+
+        retried = retry_failed_yandex_delete_job(job_id) or {}
+        if clean_cell_value(retried.get("status")).lower() != "queued":
+            skipped += 1
+            results.append({
+                "operationId": replacement.get("operation_id") or "",
+                "jobId": job_id,
+                "skipped": True,
+                "reason": "delete_job_not_requeued",
+                "jobStatus": retried.get("status") or "",
+            })
+            continue
+
+        updated_replacement = update_document_replacement(
+            replacement.get("operation_id"),
+            status="pending",
+            stage="old_yandex_delete_queued",
+            error="",
+            finished_at="",
+        ) or replacement
+        update_archive_version_yandex_state(
+            replacement=updated_replacement,
+            delete_status="queued",
+            delete_job_id=job_id,
+            delete_error="",
+        )
+        requeued += 1
+        results.append({
+            "operationId": replacement.get("operation_id") or "",
+            "jobId": job_id,
+            "requeued": True,
+        })
+
+    result = {
+        "ok": True,
+        "source": source,
+        "found": len(replacements),
+        "requeued": requeued,
+        "skipped": skipped,
+        "resultsSample": results[:50],
+    }
+    write_debug_log("replacement_failed_deletes_recovered", result)
+    return result
+
+
 def recover_yandex_mirror_state_on_startup(
     source: str = "startup",
 ) -> dict:
@@ -873,6 +970,11 @@ def recover_yandex_mirror_state_on_startup(
         requeue_yandex_folder_resolution_failures(
             source=f"{source}_completed_structure_recovery"
         )
+    )
+
+    failed_delete_recovery = recover_failed_document_replacement_deletes(
+        source=source,
+        limit=500,
     )
 
     pending_jobs_result = (
@@ -900,6 +1002,7 @@ def recover_yandex_mirror_state_on_startup(
             interrupted_jobs
         ),
         "folderResolutionRecovery": folder_resolution_recovery,
+        "failedDeleteRecovery": failed_delete_recovery,
         "pendingJobs": pending_jobs_result,
         "replacements": replacements_result,
     }
@@ -1066,7 +1169,9 @@ def process_upload_job(job: dict):
 
 def process_delete_job(job: dict):
     job_id = clean_cell_value(job.get("job_id"))
-    yandex_path = clean_cell_value(job.get("yandex_path"))
+    yandex_path = normalize_yandex_disk_path(
+        clean_cell_value(job.get("yandex_path"))
+    )
 
     if not yandex_path:
         finish_upload_job(job_id, status="skipped", stage="empty_yandex_path")
@@ -1078,9 +1183,50 @@ def process_delete_job(job: dict):
 
     update_upload_job_progress(job_id, "yandex_delete", 50)
 
-    yandex_disk_delete_path(yandex_path, permanently=True)
+    replacement = get_document_replacement_by_delete_job(job_id) or {}
+    new_yandex_path = normalize_yandex_disk_path(
+        clean_cell_value(replacement.get("new_yandex_path"))
+    )
+    if new_yandex_path and new_yandex_path == yandex_path:
+        # A stale/malformed delete must never remove the newly uploaded current
+        # version. The replacement callback treats this as successful no-op.
+        finish_upload_job(
+            job_id,
+            status="skipped",
+            stage="same_path_protected",
+        )
+        return
 
-    finish_upload_job(job_id, status="deleted", stage="done")
+    remote_meta = yandex_disk_try_get_resource_meta(yandex_path)
+    if remote_meta is None:
+        finish_upload_job(
+            job_id,
+            status="deleted",
+            stage="already_missing",
+        )
+        return
+    if clean_cell_value(remote_meta.get("type")).lower() != "file":
+        raise RuntimeError(
+            "Yandex delete target is not a file: " + yandex_path
+        )
+    expected_name = clean_cell_value(job.get("file_name"))
+    remote_name = clean_cell_value(remote_meta.get("name"))
+    if expected_name and remote_name.casefold() != expected_name.casefold():
+        raise RuntimeError(
+            "Yandex delete target identity mismatch: "
+            f"expected {expected_name}, found {remote_name}"
+        )
+
+    delete_result = yandex_disk_delete_path(yandex_path, permanently=True)
+    finish_upload_job(
+        job_id,
+        status="deleted",
+        stage=(
+            "already_missing"
+            if delete_result.get("alreadyMissing")
+            else "done"
+        ),
+    )
 
 
 def process_yandex_mirror_job(job_id: str):

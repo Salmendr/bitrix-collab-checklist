@@ -6,18 +6,22 @@
 }
 
 .doc-actions {
-    display: grid;
-    grid-template-columns: repeat(4, 34px);
+    display: flex;
+    flex-wrap: wrap;
     align-items: center;
-    justify-content: space-between;
-    gap: 0;
+    justify-content: flex-start;
+    gap: 6px;
     width: 100%;
     min-height: 32px;
 }
 
 /* Button visuals are defined once in action-controls.css. */
 .doc-actions .checklist-action-button {
-    justify-self: center;
+    flex: 0 0 34px;
+}
+
+.doc-actions .checklist-action-button-share {
+    flex-basis: auto;
 }
 
 .doc-files {

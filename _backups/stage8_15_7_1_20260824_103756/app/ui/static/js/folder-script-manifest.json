@@ -1,0 +1,102 @@
+{
+  "stage": "8.15.5.1-folder-return-close",
+  "hashMode": "actual-file-bytes",
+  "modules": {
+    "checklist-window-channel.js": {
+      "sha256": "bb6415300c5a14fb28c409b644061e6d061c5e082efce27243aada0e3702bdd5",
+      "bytes": 10630
+    },
+    "checklist-action-icons.js": {
+      "sha256": "d6f1dd2996f83840b3974079d7269230d68689d90f3c640a5423799b5e3c74bb",
+      "bytes": 5537
+    },
+    "folder-core.js": {
+      "sha256": "c7f3481892e5faa7af6f095b04ff331c7e4b79b2b9f6bd61700b8220f40c5be5",
+      "bytes": 17784
+    },
+    "bitrix-user-picker.js": {
+      "sha256": "e69ee7af0913383cda4f02ba83279c64fe4650715532eee91176c47cfe57b1c9",
+      "bytes": 9311
+    },
+    "bitrix-company-picker.js": {
+      "sha256": "4f0b87f73764edbeef35133a5b68eb45d0b2e45a59aa9d20e6b66695086765b7",
+      "bytes": 12687
+    },
+    "notification-draft-ui.js": {
+      "sha256": "cb2a4ab9c2d9fc1bb63d8f8b430d8d09b9380d84250026e605d4a81e70a61f9a",
+      "bytes": 46917
+    },
+    "folder-notification-drafts.js": {
+      "sha256": "9e0738d2172d14ba9c956975f7920e68cf1015db242b9e5b592e69e2bcc314cc",
+      "bytes": 2422
+    },
+    "document-assignment-history.js": {
+      "sha256": "8ca593270b9e1e0170187046f5480c5fc8a7237c8dc62d1a89677e4f17d65e62",
+      "bytes": 13858
+    },
+    "folder-upload-progress.js": {
+      "sha256": "318d9e4ac147fb7f3efbc05a7176b1028927f4e289cd731033487ec1d5a75435",
+      "bytes": 15324
+    },
+    "folder-uploads.js": {
+      "sha256": "0de92fca32c5146fbb84ad5bdcf8c851f6ff57b732c14187cdc3f96deb2c0316",
+      "bytes": 27142
+    },
+    "folder-replacement.js": {
+      "sha256": "f268582ac9d4455855215d1bbed8f9b865717da3048b21f440bde02ab526c352",
+      "bytes": 18821
+    },
+    "folder-archive-ui.js": {
+      "sha256": "d222b142237700fc9f230fc99d796d258c72b4261f929b2a9f906c68d96361ef",
+      "bytes": 10282
+    }
+  },
+  "loadOrder": [
+    "checklist-window-channel.js",
+    "checklist-action-icons.js",
+    "folder-core.js",
+    "bitrix-user-picker.js",
+    "bitrix-company-picker.js",
+    "notification-draft-ui.js",
+    "folder-notification-drafts.js",
+    "document-assignment-history.js",
+    "folder-upload-progress.js",
+    "folder-uploads.js",
+    "folder-replacement.js",
+    "folder-archive-ui.js"
+  ],
+  "notes": [
+    "The item-folder page uses the same ChecklistActionIcons registry as the popup.",
+    "Current and archived file names are the visible open controls; redundant open/download action buttons are not rendered.",
+    "Archive permanent deletion retains the existing administrator-only backend contract.",
+    "Folder assets use the 7.2.1 cache version.",
+    "Stage 7.1.4.5 uses one real SVG path for the U+21BB-shaped replacement icon in every folder replacement control.",
+    "Stage 7.1.4.5 restores the exact previously approved U+21BB-derived SVG silhouette and reduces only its thickness with a 0.30 SVG morphology erosion.",
+    "Stage 7.2.1 makes upload, replacement and current-file deletion read-only when the folder page has no active edit-session ID.",
+    "Stage 7.2.1 sends requireEditSession with every folder document mutation so the backend cannot fall back to a nontransactional request.",
+    "Stage 7.2.2 requires an active edit session for administrator archive-version deletion.",
+    "Stage 7.2.2 stages archive files in the edit-session stash: explicit Cancel restores them, while commit permanently removes them.",
+    "Stage 7.2.3 routes folder uploads through the shared popup queue when the opener is available and limits the standalone one-item fallback queue to one active upload.",
+    "Stage 7.2.3 refreshes the active edit-session ID for each folder upload attempt and marks transient failures for automatic retry by the shared manager.",
+    "Stage 8.4.2 hides disabled/unknown local-only mirror badges; the disabled Yandex button remains the sole unavailable-state indicator.",
+    "Stage 8.4.4 aligns archive size, upload date, uploader and action cells to the current-file table columns and removes local-only archive badges.",
+    "Stage 8.5.1 makes current and archived file names clickable in the item-folder interface without exposing copy-link controls or technical URLs.",
+    "Stage 8.5.1.1 removes redundant Open and Download buttons from current and archive rows while retaining clickable names, delete controls and backend file routes.",
+    "Stage 8.8 enables the folder bell when current documents and an active edit-session are available.",
+    "Stage 8.8 uses the same notification-draft-ui.js module in popup and folder windows.",
+    "Folder URLs carry the active session actor identity; backend ownership checks remain authoritative.",
+    "Stage 8.9 exposes the same global assignment-part suggestions in the item-folder notification form.",
+    "New assignment-part values are stored globally by the backend when a draft is saved.",
+    "Stage 8.10 loads the same Bitrix employee picker in item-folder windows.",
+    "Cached employee search and manual fallback are shared with the popup notification form.",
+    "Stage 8.11 loads the same external-contractor and CRM-company picker in item-folder windows.",
+    "Stage 8.12 resolves the project object responsible user as curator for external recipients and retains manual fallback.",
+    "Stage 8.14 displays the ten most recent assignments for each current file series in the item folder.",
+    "Stage 8.15 exposes the same manual retry-only-failed control in item-folder assignment history.",
+    "Bitrix hotfix 8.15.1 keeps the folder notification bell visible but disabled and hides all non-error Yandex synchronization text.",
+    "Stage 8.15.4 publishes throttled click, key, input, change, drag, drop, touch and scroll activity from item-folder windows to the parent popup inactivity timer.",
+    "Stage 8.15.5 makes the folder back button call the opener navigation API and falls back to a stage-and-item popup URL if the opener cannot be restored.",
+    "Hotfix 8.15.5.1 starts opener navigation without awaiting it, calls window.close() synchronously inside the trusted back-button click, and always replaces the surviving folder tab with the exact popup URL when the host refuses to close it."
+  ],
+  "generatedAt": "2026-08-04T17:20:00+10:00"
+}

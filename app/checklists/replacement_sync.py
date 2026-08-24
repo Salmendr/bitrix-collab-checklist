@@ -730,6 +730,28 @@ def handle_replacement_delete_job(
         job.get("error")
     )
 
+    if job_status == "skipped" and job_stage == "same_path_protected":
+        update_archive_version_yandex_state(
+            replacement=replacement,
+            delete_status="not_required_same_path",
+            delete_job_id=job_id,
+            delete_error="",
+        )
+        updated = update_document_replacement(
+            replacement.get("operation_id"),
+            status="completed",
+            stage="same_yandex_path_protected",
+            error="",
+        )
+        return {
+            "ok": True,
+            "handled": True,
+            "action": "same_yandex_path_protected",
+            "operationId": replacement.get("operation_id"),
+            "deleteJobId": job_id,
+            "replacement": updated or {},
+        }
+
     if job_status == "deleted":
         update_archive_version_yandex_state(
             replacement=replacement,

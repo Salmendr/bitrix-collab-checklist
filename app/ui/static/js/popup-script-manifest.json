@@ -1,6 +1,6 @@
 {
-  "stage": "8.15.6-yandex-recovery",
-  "generatedAt": "2026-08-04T00:00:00+02:00",
+  "stage": "8.15.7.1-folder-download",
+  "generatedAt": "2026-08-13T07:39:32.454435+00:00",
   "loadOrder": [
     "popup-bootstrap.js",
     "checklist-action-icons.js",
@@ -12,6 +12,7 @@
     "popup-core.js",
     "popup-document-list.js",
     "document-assignment-history.js",
+    "public-folder-share.js",
     "popup-document-actions.js",
     "popup-window-channel.js",
     "popup-upload-progress.js",
@@ -46,12 +47,12 @@
   ],
   "extractedModules": {
     "popup-bootstrap.js": {
-      "sha256": "dc9b64928ca507b1e85b490aeec8dcc314d502eb68cef1bc14a8b8a2f072670b",
-      "bytes": 1432
+      "sha256": "81dff06dbfb85941cda360a92ebabba411a144d3ab84a548d6d96269c8e8c2d7",
+      "bytes": 1488
     },
     "checklist-action-icons.js": {
-      "sha256": "d6f1dd2996f83840b3974079d7269230d68689d90f3c640a5423799b5e3c74bb",
-      "bytes": 5537
+      "sha256": "82c147a2d3f3ed639712cfb51ca4291490890eee345f8e9d78463ddc88584b0f",
+      "bytes": 5819
     },
     "popup-api-client.js": {
       "sha256": "0683516e78abfd16154f583c4dda57f1e16e2e3a191fd5548c6ff6eb4504710f",
@@ -78,16 +79,20 @@
       "bytes": 103464
     },
     "popup-document-list.js": {
-      "sha256": "192228b672a965b6361095ce2e1c2d48ab1d3bfbc2cd2be027dda91d1eefcbac",
-      "bytes": 14567
+      "sha256": "ac29a6dae4f8258985f5fa0ebbd56583a8aef8f102c1f0c612321cdc07470fdb",
+      "bytes": 15308
     },
     "document-assignment-history.js": {
       "sha256": "8ca593270b9e1e0170187046f5480c5fc8a7237c8dc62d1a89677e4f17d65e62",
       "bytes": 13858
     },
+    "public-folder-share.js": {
+      "sha256": "0a76ada593bbad042556d0cf528f0f167681694c523f8a652cac9b7737325338",
+      "bytes": 12564
+    },
     "popup-document-actions.js": {
-      "sha256": "ab927b2446959ff54f29344e52666d3779925d1e17ceaea2bd99dc410def31e3",
-      "bytes": 26236
+      "sha256": "acbff936b75bda1f1ad6f4b76ac7067efac5c36eeea5e453b6f57a0ce802b5b4",
+      "bytes": 28297
     },
     "popup-window-channel.js": {
       "sha256": "5b9abaff9f29705db8745e4737f28bfb449fc23b4ae3ef2cf47050607f2f5723",
@@ -270,18 +275,20 @@
     "Stage 8.15.4 sends lastActivityAt through the edit-session heartbeat and accepts an idempotent server-side inactivity finalization fallback.",
     "Stage 8.15.4 startup reconciliation restores only current local documents without duplicating synced, queued or running Yandex upload jobs.",
     "Stage 8.15.5 exposes ChecklistPopupNavigation so item-folder return always restores the originating checklist stage and scrolls to the exact item.",
-    "Stage 8.15.6 adds conflict-aware custom-folder recovery, bounded Yandex lock retry and separate folder/file error controls."
+    "Stage 8.15.6 adds conflict-aware custom-folder recovery, bounded Yandex lock retry and separate folder/file error controls.",
+    "Stage 8.15.7 adds the labeled public-folder share control and drag-and-drop upload targets without exposing file deletion to public-link visitors.",
+    "Stage 8.15.7.1 restores icon-only download controls for current and archived item-folder files and uses one upward arrow touching a top line."
   ],
   "hashMode": "actual-file-bytes",
   "lineEndingNote": "Hashes are calculated from bytes written to disk. This is stable for Windows CRLF and Unix LF.",
   "modules": {
     "popup-bootstrap.js": {
-      "sha256": "dc9b64928ca507b1e85b490aeec8dcc314d502eb68cef1bc14a8b8a2f072670b",
-      "bytes": 1432
+      "sha256": "81dff06dbfb85941cda360a92ebabba411a144d3ab84a548d6d96269c8e8c2d7",
+      "bytes": 1488
     },
     "checklist-action-icons.js": {
-      "sha256": "d6f1dd2996f83840b3974079d7269230d68689d90f3c640a5423799b5e3c74bb",
-      "bytes": 5537
+      "sha256": "82c147a2d3f3ed639712cfb51ca4291490890eee345f8e9d78463ddc88584b0f",
+      "bytes": 5819
     },
     "popup-api-client.js": {
       "sha256": "0683516e78abfd16154f583c4dda57f1e16e2e3a191fd5548c6ff6eb4504710f",
@@ -308,16 +315,24 @@
       "bytes": 103464
     },
     "popup-document-list.js": {
-      "sha256": "192228b672a965b6361095ce2e1c2d48ab1d3bfbc2cd2be027dda91d1eefcbac",
-      "bytes": 14567
+      "sha256": "ac29a6dae4f8258985f5fa0ebbd56583a8aef8f102c1f0c612321cdc07470fdb",
+      "bytes": 15308
+    },
+    "document-assignment-history.js": {
+      "sha256": "8ca593270b9e1e0170187046f5480c5fc8a7237c8dc62d1a89677e4f17d65e62",
+      "bytes": 13858
+    },
+    "public-folder-share.js": {
+      "sha256": "0a76ada593bbad042556d0cf528f0f167681694c523f8a652cac9b7737325338",
+      "bytes": 12564
     },
     "popup-document-actions.js": {
-      "sha256": "ab927b2446959ff54f29344e52666d3779925d1e17ceaea2bd99dc410def31e3",
-      "bytes": 26236
+      "sha256": "acbff936b75bda1f1ad6f4b76ac7067efac5c36eeea5e453b6f57a0ce802b5b4",
+      "bytes": 28297
     },
     "popup-window-channel.js": {
-      "sha256": "4dd5ecc1576acbefd4f9a4d76cb59965a2e288afa6e58fffa121ae357fc07a72",
-      "bytes": 5006
+      "sha256": "5b9abaff9f29705db8745e4737f28bfb449fc23b4ae3ef2cf47050607f2f5723",
+      "bytes": 5316
     },
     "popup-upload-progress.js": {
       "sha256": "1ac521269bbc1ab10021985631974ccfe29aed3bf2524537aa1d2b3f99dc02de",
@@ -332,16 +347,24 @@
       "bytes": 25202
     },
     "popup-session-enhancements.js": {
-      "sha256": "0766351fc301463f264770f554867bdc6ffe6885a65c1882e1b1c3a3eb2ab46d",
-      "bytes": 43811
+      "sha256": "d7a69806176b1faad882ba82dda293b921f59ebaa2d8e1191772858cc06eb510",
+      "bytes": 47985
     },
     "popup-edit-session.js": {
-      "sha256": "1032d32752df4b3a59e40381bdf3c80303354dc4ee1337a3ef5dfb4d28810658",
-      "bytes": 12527
+      "sha256": "8cd402644dc0c9724b46b22c725e19a572232fa81d7105a8d3c094de9d6c7c42",
+      "bytes": 15502
+    },
+    "popup-inactivity.js": {
+      "sha256": "039f89a3adaea08cd3e3f8c3e6529bca4b3b85ad2860f22ae2ef29d20932c8d8",
+      "bytes": 6563
     },
     "bitrix-user-picker.js": {
       "sha256": "e69ee7af0913383cda4f02ba83279c64fe4650715532eee91176c47cfe57b1c9",
       "bytes": 9311
+    },
+    "bitrix-company-picker.js": {
+      "sha256": "4f0b87f73764edbeef35133a5b68eb45d0b2e45a59aa9d20e6b66695086765b7",
+      "bytes": 12687
     },
     "notification-draft-ui.js": {
       "sha256": "cb2a4ab9c2d9fc1bb63d8f8b430d8d09b9380d84250026e605d4a81e70a61f9a",
@@ -360,8 +383,8 @@
       "bytes": 9410
     },
     "popup-event-shell.js": {
-      "sha256": "6e93afd223103270c887b07e41d7c53a1abdc7140e35981b78c59ccd6820499a",
-      "bytes": 1631
+      "sha256": "b5f080eb74e23ee94208158dd9c984774da45beb9ff79398e55634d640225008",
+      "bytes": 2095
     },
     "popup-event-window-sync.js": {
       "sha256": "4d3f9c3de4aeb4e92ef532f0912d1edbba29958bb5bf3739bee6d047bc5333a7",
@@ -376,8 +399,8 @@
       "bytes": 485
     },
     "popup-renderer-id.js": {
-      "sha256": "3d50a2d4455f0cd86ec1111d69d3d0d4c39d1f860135de62af4fbcc2bb0b4b81",
-      "bytes": 5446
+      "sha256": "9ca7f840410d945507bf5715106ca132d2f7ea824d6560c6ba378d72821560b6",
+      "bytes": 6148
     },
     "popup-renderer-concept.js": {
       "sha256": "6a143212d9e7d7a6e8d7bc3e11b8b490b9c2a11786f845713df418f08ad7c347",
@@ -388,8 +411,8 @@
       "bytes": 4388
     },
     "popup-renderer-generic.js": {
-      "sha256": "8670542a719a30a20a267ad3b52f934f7a5b288a52f970d96941c5ed41397720",
-      "bytes": 6520
+      "sha256": "0fa7bb881a44d3e0ecf9fd14fc1bcce92fc48e90cf1f244388003ee726974125",
+      "bytes": 6583
     },
     "popup-renderer-configured-bim.js": {
       "sha256": "b266fb19a1f1f46e34a5c84b9b646c79563983b77f6bb5799889776a6f605194",

@@ -8,7 +8,7 @@ from app.db import get_conn
 from app.logging_utils import write_debug_log
 from app.yandex_disk.client import (
     is_yandex_disk_enabled,
-    yandex_disk_try_get_resource_meta,
+    normalize_yandex_disk_path,
 )
 from app.checklists.documents import (
     get_upload_file_path_from_url,
@@ -18,6 +18,9 @@ from app.checklists.documents import (
 from app.checklists.storage import get_project_storage_context
 from app.checklists.upload_jobs import (
     ensure_yandex_upload_job_for_reconciliation,
+    fail_document_upload_job_for_remote_conflict,
+    finish_document_upload_job_from_remote_match,
+    get_latest_document_job,
     requeue_interrupted_yandex_jobs,
 )
 from app.checklists.utils import (
@@ -45,6 +48,12 @@ from app.checklists.yandex_structure_queue import (
 )
 from app.checklists.yandex_custom_recovery import (
     reconcile_custom_item_yandex_folder,
+)
+from app.checklists.yandex_file_reconciliation import (
+    find_existing_yandex_document,
+)
+from app.checklists.document_replacements import (
+    get_document_replacement_by_upload_job,
 )
 
 _RECONCILIATION_GUARD = threading.Lock()
@@ -108,6 +117,51 @@ def _record_error(
     })
 
 
+def _pending_replacement_may_overwrite_old_path(
+    *,
+    dialog_id: str,
+    checklist_key: str,
+    item_id: str,
+    document_id: str,
+    remote_result: dict,
+) -> bool:
+    """Allow only the explicit same-name replacement of its own old path."""
+    job = get_latest_document_job(
+        dialog_id,
+        checklist_key,
+        item_id,
+        document_id,
+    ) or {}
+    if clean_cell_value(job.get("job_type")).lower() != "upload":
+        return False
+    replacement = get_document_replacement_by_upload_job(
+        clean_cell_value(job.get("job_id"))
+    ) or {}
+    if clean_cell_value(replacement.get("status")).lower() != "pending":
+        return False
+    if (
+        clean_cell_value(replacement.get("old_file_name")).casefold()
+        != clean_cell_value(replacement.get("new_file_name")).casefold()
+    ):
+        return False
+    old_path = normalize_yandex_disk_path(
+        clean_cell_value(replacement.get("old_yandex_path"))
+    ).rstrip("/").casefold()
+    if not old_path:
+        return False
+    remote_paths = {
+        normalize_yandex_disk_path(candidate.get("path") or "")
+        .rstrip("/")
+        .casefold()
+        for candidate in (
+            list(remote_result.get("matches") or [])
+            + list(remote_result.get("conflicts") or [])
+        )
+        if isinstance(candidate, dict)
+    }
+    return remote_paths == {old_path}
+
+
 def reconcile_yandex_mirror_documents(
     source: str = "startup",
     *,
@@ -117,9 +171,10 @@ def reconcile_yandex_mirror_documents(
 ) -> dict:
     """Verify and restore current-document mirrors from local primary files.
 
-    The pass never scans or deletes remote Yandex content. It probes only the
-    exact persisted file path and uploads the local primary copy when that path
-    is confirmed absent (or when no remote path was ever saved).
+    The pass never deletes or blindly overwrites remote Yandex content. It
+    probes every current/admissible legacy path linked to the checklist item,
+    compares name, size and checksum, and queues upload only after confirmed
+    absence from all known locations.
     """
     requested_dialog_id = normalize_dialog_id(dialog_id)
     requested_checklist_key = (
@@ -152,8 +207,13 @@ def reconcile_yandex_mirror_documents(
         "queued": 0,
         "existing": 0,
         "remoteVerified": 0,
+        "remoteMatchedByDiscovery": 0,
         "remoteMissing": 0,
         "remotePathMissing": 0,
+        "remoteFileConflicts": 0,
+        "remoteCandidatesChecked": 0,
+        "remoteSearchUnavailable": 0,
+        "explicitReplacementUploads": 0,
         "missingLocal": 0,
         "skippedProjects": 0,
         "unrecoverable": 0,
@@ -164,7 +224,7 @@ def reconcile_yandex_mirror_documents(
         "customConflicts": 0,
         "errors": [],
     }
-    context_cache: dict[str, bool] = {}
+    context_cache: dict[str, dict] = {}
 
     for row in rows:
         storage_id = clean_cell_value(row["dialog_id"])
@@ -187,9 +247,11 @@ def reconcile_yandex_mirror_documents(
                 continue
 
             if dialog_id not in context_cache:
-                context = get_project_storage_context(dialog_id) or {}
-                context_cache[dialog_id] = _project_uses_yandex_mirror(context)
-            if not context_cache[dialog_id]:
+                context_cache[dialog_id] = (
+                    get_project_storage_context(dialog_id) or {}
+                )
+            context = context_cache[dialog_id]
+            if not _project_uses_yandex_mirror(context):
                 stats["skippedProjects"] += 1
                 continue
 
@@ -203,6 +265,7 @@ def reconcile_yandex_mirror_documents(
                 if requested_item_id and item_id != requested_item_id:
                     continue
 
+                custom_recovery: dict = {}
                 if bool(item.get("isCustom", False)):
                     try:
                         custom_recovery = reconcile_custom_item_yandex_folder(
@@ -326,50 +389,214 @@ def reconcile_yandex_mirror_documents(
                         stored_yandex_path = clean_cell_value(
                             document.get("yandexPath")
                         )
-                        force_requeue = not stored_yandex_path
-                        if stored_yandex_path:
-                            with yandex_project_resource_guard(
-                                dialog_id,
+                        if not stored_yandex_path:
+                            stats["remotePathMissing"] += 1
+
+                        with yandex_project_resource_guard(
+                            dialog_id,
+                            checklist_key=checklist_key,
+                            item_id=item_id,
+                            operation="reconcile_file_discovery",
+                        ):
+                            remote_result = find_existing_yandex_document(
+                                dialog_id=dialog_id,
+                                checklist_key=checklist_key,
+                                item=item,
+                                document=document,
+                                local_path=local_path,
+                                context=context,
+                                repair_spec=repair_spec,
+                                custom_recovery=custom_recovery,
+                            )
+
+                        checked_paths = list(
+                            remote_result.get("checkedPaths") or []
+                        )
+                        stats["remoteCandidatesChecked"] += len(checked_paths)
+                        remote_status = clean_cell_value(
+                            remote_result.get("status")
+                        ).lower()
+                        explicit_replacement_override = False
+
+                        if remote_status == "unavailable":
+                            error = clean_cell_value(
+                                remote_result.get("error")
+                            ) or "Yandex remote verification failed"
+                            fail_document_upload_job_for_remote_conflict(
+                                dialog_id=dialog_id,
                                 checklist_key=checklist_key,
                                 item_id=item_id,
-                                operation="reconcile_file_probe",
+                                document_id=document_id,
+                                error=error,
+                            )
+                            update_document_mirror_fields(
+                                dialog_id,
+                                checklist_key,
+                                item_id,
+                                document_id,
+                                {
+                                    "mirrorStatus": "error",
+                                    "mirrorError": error,
+                                },
+                            )
+                            stats["remoteSearchUnavailable"] += 1
+                            write_debug_log(
+                                "yandex_file_reconciliation_unavailable",
+                                {
+                                    "dialogId": dialog_id,
+                                    "checklistKey": checklist_key,
+                                    "itemId": item_id,
+                                    "documentId": document_id,
+                                    "fileName": clean_cell_value(
+                                        document.get("name")
+                                    ),
+                                    "probeErrors": (
+                                        remote_result.get("probeErrors") or []
+                                    ),
+                                },
+                            )
+                            continue
+
+                        if remote_status == "matched":
+                            match = remote_result.get("match") or {}
+                            matched_path = clean_cell_value(match.get("path"))
+                            job_update = finish_document_upload_job_from_remote_match(
+                                dialog_id=dialog_id,
+                                checklist_key=checklist_key,
+                                item_id=item_id,
+                                document_id=document_id,
+                                yandex_path=matched_path,
+                            )
+                            matched_job = job_update.get("job") or {}
+                            update_document_mirror_fields(
+                                dialog_id,
+                                checklist_key,
+                                item_id,
+                                document_id,
+                                {
+                                    "mirrorStatus": "synced",
+                                    "mirrorError": "",
+                                    "mirrorJobId": clean_cell_value(
+                                        matched_job.get("job_id")
+                                    ) or clean_cell_value(
+                                        document.get("mirrorJobId")
+                                    ),
+                                    "yandexPath": matched_path,
+                                },
+                            )
+                            stats["existing"] += 1
+                            stats["remoteVerified"] += 1
+                            if (
+                                normalize_yandex_disk_path(stored_yandex_path)
+                                != normalize_yandex_disk_path(matched_path)
                             ):
-                                remote_meta = yandex_disk_try_get_resource_meta(
-                                    stored_yandex_path
+                                stats["remoteMatchedByDiscovery"] += 1
+                            continue
+
+                        if remote_status == "conflict":
+                            if _pending_replacement_may_overwrite_old_path(
+                                dialog_id=dialog_id,
+                                checklist_key=checklist_key,
+                                item_id=item_id,
+                                document_id=document_id,
+                                remote_result=remote_result,
+                            ):
+                                stats["explicitReplacementUploads"] += 1
+                                explicit_replacement_override = True
+                            else:
+                                error = clean_cell_value(
+                                    remote_result.get("error")
+                                ) or "Yandex remote file conflict"
+                                fail_document_upload_job_for_remote_conflict(
+                                    dialog_id=dialog_id,
+                                    checklist_key=checklist_key,
+                                    item_id=item_id,
+                                    document_id=document_id,
+                                    error=error,
                                 )
-                            if remote_meta is not None:
-                                if clean_cell_value(
-                                    remote_meta.get("type")
-                                ).lower() != "file":
-                                    raise RuntimeError(
-                                        "persisted Yandex file path points to a "
-                                        "non-file resource: " + stored_yandex_path
-                                    )
-                                stats["existing"] += 1
-                                stats["remoteVerified"] += 1
-                                if (
-                                    clean_cell_value(
-                                        document.get("mirrorStatus")
-                                    ).lower() != "synced"
-                                    or clean_cell_value(
-                                        document.get("mirrorError")
-                                    )
-                                ):
-                                    update_document_mirror_fields(
-                                        dialog_id,
-                                        checklist_key,
-                                        item_id,
-                                        document_id,
-                                        {
-                                            "mirrorStatus": "synced",
-                                            "mirrorError": "",
-                                        },
-                                    )
+                                update_document_mirror_fields(
+                                    dialog_id,
+                                    checklist_key,
+                                    item_id,
+                                    document_id,
+                                    {
+                                        "mirrorStatus": "error",
+                                        "mirrorError": error,
+                                    },
+                                )
+                                stats["remoteFileConflicts"] += 1
+                                write_debug_log(
+                                    "yandex_file_reconciliation_conflict",
+                                    {
+                                        "dialogId": dialog_id,
+                                        "checklistKey": checklist_key,
+                                        "itemId": item_id,
+                                        "documentId": document_id,
+                                        "fileName": clean_cell_value(
+                                            document.get("name")
+                                        ),
+                                        "matches": remote_result.get("matches") or [],
+                                        "conflicts": remote_result.get("conflicts") or [],
+                                    },
+                                )
                                 continue
-                            force_requeue = True
+
+                        if remote_status not in {"missing", "conflict"}:
+                            error = (
+                                "Не удалось подтвердить отсутствие файла на "
+                                "Яндекс.Диске. Автоматическая загрузка остановлена."
+                            )
+                            fail_document_upload_job_for_remote_conflict(
+                                dialog_id=dialog_id,
+                                checklist_key=checklist_key,
+                                item_id=item_id,
+                                document_id=document_id,
+                                error=error,
+                            )
+                            update_document_mirror_fields(
+                                dialog_id,
+                                checklist_key,
+                                item_id,
+                                document_id,
+                                {
+                                    "mirrorStatus": "error",
+                                    "mirrorError": error,
+                                },
+                            )
+                            stats["remoteSearchUnavailable"] += 1
+                            continue
+
+                        if not checked_paths:
+                            error = (
+                                "Не удалось определить ни одной допустимой "
+                                "папки Яндекс.Диска для проверки файла. "
+                                "Автоматическая загрузка остановлена."
+                            )
+                            fail_document_upload_job_for_remote_conflict(
+                                dialog_id=dialog_id,
+                                checklist_key=checklist_key,
+                                item_id=item_id,
+                                document_id=document_id,
+                                error=error,
+                            )
+                            update_document_mirror_fields(
+                                dialog_id,
+                                checklist_key,
+                                item_id,
+                                document_id,
+                                {
+                                    "mirrorStatus": "error",
+                                    "mirrorError": error,
+                                },
+                            )
+                            stats["remoteSearchUnavailable"] += 1
+                            continue
+
+                        # Every known current/legacy path was probed and none
+                        # contains this local file. Only now may recovery upload.
+                        force_requeue = True
+                        if not explicit_replacement_override:
                             stats["remoteMissing"] += 1
-                        else:
-                            stats["remotePathMissing"] += 1
 
                         job = ensure_yandex_upload_job_for_reconciliation(
                             dialog_id=dialog_id,

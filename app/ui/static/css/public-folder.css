@@ -1,0 +1,437 @@
+:root {
+    color-scheme: light;
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: #f3f6fa;
+    color: #172033;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+body.public-folder-page {
+    margin: 0;
+    min-width: 320px;
+    min-height: 100vh;
+    background:
+        radial-gradient(circle at top left, rgba(46, 144, 250, .10), transparent 32rem),
+        #f3f6fa;
+}
+
+button,
+input {
+    font: inherit;
+}
+
+.public-folder-shell {
+    width: min(1080px, calc(100% - 32px));
+    margin: 0 auto;
+    padding: 42px 0 60px;
+}
+
+.public-folder-header {
+    margin-bottom: 22px;
+    padding: 0 4px;
+}
+
+.public-folder-eyebrow {
+    margin-bottom: 8px;
+    color: #175cd3;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+}
+
+.public-folder-title {
+    margin: 0;
+    font-size: clamp(28px, 4vw, 42px);
+    line-height: 1.12;
+    overflow-wrap: anywhere;
+}
+
+.public-folder-lead {
+    max-width: 760px;
+    margin: 12px 0 0;
+    color: #475467;
+    font-size: 15px;
+    line-height: 1.55;
+}
+
+.public-folder-card {
+    margin-top: 16px;
+    padding: 22px;
+    border: 1px solid #e4e7ec;
+    border-radius: 16px;
+    background: rgba(255, 255, 255, .96);
+    box-shadow: 0 8px 28px rgba(16, 24, 40, .055);
+}
+
+.public-section-heading {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 18px;
+    margin-bottom: 18px;
+}
+
+.public-section-heading h2 {
+    margin: 0;
+    font-size: 18px;
+    line-height: 1.3;
+}
+
+.public-section-heading p {
+    margin: 5px 0 0;
+    color: #667085;
+    font-size: 13px;
+    line-height: 1.45;
+}
+
+.public-required-note {
+    flex: 0 0 auto;
+    color: #b42318;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.public-identity-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+}
+
+.public-field {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    color: #344054;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.public-field input {
+    width: 100%;
+    height: 42px;
+    padding: 0 12px;
+    border: 1px solid #d0d5dd;
+    border-radius: 9px;
+    background: #fff;
+    color: #101828;
+    outline: none;
+}
+
+.public-field input:focus {
+    border-color: #2e90fa;
+    box-shadow: 0 0 0 3px rgba(46, 144, 250, .14);
+}
+
+.public-field input.is-invalid {
+    border-color: #f04438;
+    box-shadow: 0 0 0 3px rgba(240, 68, 56, .10);
+}
+
+.public-identity-hint {
+    margin-top: 10px;
+    color: #667085;
+    font-size: 12px;
+    line-height: 1.4;
+}
+
+.public-identity-hint.is-error {
+    color: #b42318;
+}
+
+.public-upload-zone {
+    display: flex;
+    min-height: 220px;
+    padding: 24px;
+    border: 2px dashed #b2ccff;
+    border-radius: 14px;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    background: #f5f9ff;
+    color: #344054;
+    cursor: pointer;
+    transition: border-color .15s ease, background .15s ease, transform .15s ease;
+}
+
+.public-upload-zone:hover,
+.public-upload-zone:focus-visible,
+.public-upload-zone.is-drag-over {
+    border-color: #2e90fa;
+    background: #eaf3ff;
+    outline: none;
+}
+
+.public-upload-zone.is-drag-over {
+    transform: translateY(-2px);
+}
+
+.public-upload-icon {
+    display: grid;
+    width: 46px;
+    height: 46px;
+    margin-bottom: 11px;
+    border-radius: 13px;
+    place-items: center;
+    background: #dbeafe;
+    color: #175cd3;
+}
+
+.public-upload-icon svg {
+    width: 24px;
+    height: 24px;
+    stroke: currentColor;
+    stroke-width: 1.8;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+.public-upload-zone-title {
+    font-weight: 700;
+}
+
+.public-upload-zone-subtitle {
+    margin: 5px 0 10px;
+    color: #667085;
+    font-size: 12px;
+}
+
+.public-primary-button,
+.public-secondary-button,
+.public-replace-button {
+    min-height: 36px;
+    padding: 0 14px;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    cursor: pointer;
+    font-weight: 650;
+    transition: background .15s ease, border-color .15s ease, transform .15s ease;
+}
+
+.public-primary-button {
+    background: #175cd3;
+    color: #fff;
+}
+
+.public-primary-button:hover:not(:disabled) {
+    background: #1849a9;
+    transform: translateY(-1px);
+}
+
+.public-secondary-button,
+.public-replace-button {
+    border-color: #d0d5dd;
+    background: #fff;
+    color: #344054;
+}
+
+.public-secondary-button:hover:not(:disabled),
+.public-replace-button:hover:not(:disabled) {
+    border-color: #84adff;
+    background: #eff8ff;
+    color: #175cd3;
+}
+
+button:disabled {
+    opacity: .5;
+    cursor: not-allowed;
+    transform: none;
+}
+
+.public-files-list,
+.public-archive-list,
+.public-operation-list {
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+}
+
+.public-file-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(140px, .55fr) auto;
+    gap: 14px;
+    align-items: center;
+    padding: 13px 14px;
+    border: 1px solid #eaecf0;
+    border-radius: 11px;
+    background: #fff;
+}
+
+.public-file-main {
+    min-width: 0;
+}
+
+.public-file-name {
+    display: inline-block;
+    max-width: 100%;
+    color: #175cd3;
+    font-size: 14px;
+    font-weight: 650;
+    text-decoration: none;
+    overflow-wrap: anywhere;
+}
+
+.public-file-name:hover {
+    text-decoration: underline;
+}
+
+.public-file-meta,
+.public-file-uploader {
+    margin-top: 4px;
+    color: #667085;
+    font-size: 12px;
+    line-height: 1.4;
+}
+
+.public-file-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 7px;
+}
+
+.public-download-link {
+    display: inline-flex;
+    min-height: 36px;
+    padding: 0 12px;
+    border: 1px solid #d0d5dd;
+    border-radius: 8px;
+    align-items: center;
+    color: #344054;
+    font-size: 13px;
+    font-weight: 650;
+    text-decoration: none;
+}
+
+.public-download-link:hover {
+    border-color: #84adff;
+    background: #eff8ff;
+    color: #175cd3;
+}
+
+.public-empty-state {
+    padding: 24px;
+    border: 1px dashed #d0d5dd;
+    border-radius: 11px;
+    color: #667085;
+    text-align: center;
+    font-size: 13px;
+}
+
+.public-archive-group {
+    border: 1px solid #eaecf0;
+    border-radius: 11px;
+    background: #fff;
+    overflow: hidden;
+}
+
+.public-archive-group summary {
+    padding: 14px;
+    color: #344054;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 700;
+}
+
+.public-archive-versions {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    border-top: 1px solid #eaecf0;
+}
+
+.public-archive-version {
+    display: grid;
+    grid-template-columns: 72px minmax(0, 1fr) auto;
+    gap: 10px;
+    align-items: center;
+    padding: 11px 14px;
+    border-bottom: 1px solid #f2f4f7;
+}
+
+.public-archive-version:last-child {
+    border-bottom: 0;
+}
+
+.public-version-label {
+    color: #475467;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.public-operation-row {
+    padding: 12px 14px;
+    border: 1px solid #b2ddff;
+    border-radius: 10px;
+    background: #eff8ff;
+}
+
+.public-operation-row.is-completed {
+    border-color: #abefc6;
+    background: #ecfdf3;
+}
+
+.public-operation-row.is-error,
+.public-operation-row.is-conflict {
+    border-color: #fecdca;
+    background: #fef3f2;
+}
+
+.public-operation-title {
+    font-size: 13px;
+    font-weight: 700;
+    overflow-wrap: anywhere;
+}
+
+.public-operation-state {
+    margin-top: 4px;
+    color: #475467;
+    font-size: 12px;
+    line-height: 1.4;
+}
+
+.public-page-message {
+    min-height: 20px;
+    margin-top: 14px;
+    color: #475467;
+    font-size: 13px;
+    text-align: center;
+}
+
+.public-page-message.is-error {
+    color: #b42318;
+}
+
+@media (max-width: 760px) {
+    .public-folder-shell {
+        width: min(100% - 20px, 1080px);
+        padding: 22px 0 40px;
+    }
+
+    .public-folder-card {
+        padding: 16px;
+        border-radius: 13px;
+    }
+
+    .public-identity-grid,
+    .public-file-row {
+        grid-template-columns: 1fr;
+    }
+
+    .public-file-actions {
+        justify-content: flex-start;
+        flex-wrap: wrap;
+    }
+
+    .public-archive-version {
+        grid-template-columns: 58px minmax(0, 1fr);
+    }
+
+    .public-archive-version .public-download-link {
+        grid-column: 2;
+        justify-self: start;
+    }
+}

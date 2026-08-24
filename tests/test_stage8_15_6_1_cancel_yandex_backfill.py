@@ -515,7 +515,16 @@ class YandexBackfillTests(unittest.TestCase):
                     return_value={"repairRequired": False},
                 ),
                 patch.object(reconciliation, "yandex_project_resource_guard", return_value=nullcontext()),
-                patch.object(reconciliation, "yandex_disk_try_get_resource_meta", return_value=None),
+                patch.object(
+                    reconciliation,
+                    "find_existing_yandex_document",
+                    return_value={
+                        "status": "missing",
+                        "checkedPaths": ["disk:/project/item/file.pdf"],
+                        "matches": [],
+                        "conflicts": [],
+                    },
+                ),
                 patch.object(reconciliation, "ensure_yandex_upload_job_for_reconciliation", ensure_job),
                 patch.object(reconciliation, "update_document_mirror_fields", update),
                 patch.object(reconciliation, "enqueue_yandex_mirror_job", enqueue),

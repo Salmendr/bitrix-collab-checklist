@@ -25,6 +25,8 @@ YANDEX_DISK_API_BASE = "https://cloud-api.yandex.net/v1/disk"
 UPLOAD_ROOT = VOLUME_DIR / "uploads"
 CHECKLIST_UPLOAD_ROOT = UPLOAD_ROOT / "checklists"
 EDIT_SESSION_FILE_ROOT = VOLUME_DIR / "edit_sessions"
+PUBLIC_FOLDER_STAGING_ROOT = VOLUME_DIR / "public_folder_staging"
+PUBLIC_FOLDER_SIGNING_KEY_PATH = DB_DIR / "public_folder_signing.key"
 
 DEBUG_DIR = BASE_DIR / "debug"
 DEBUG_LOG_PATH = DEBUG_DIR / "close_popup.log"
@@ -68,4 +70,5 @@ def ensure_runtime_directories():
     UPLOAD_ROOT.mkdir(parents=True, exist_ok=True)
     CHECKLIST_UPLOAD_ROOT.mkdir(parents=True, exist_ok=True)
     EDIT_SESSION_FILE_ROOT.mkdir(parents=True, exist_ok=True)
+    PUBLIC_FOLDER_STAGING_ROOT.mkdir(parents=True, exist_ok=True)
     DEBUG_DIR.mkdir(parents=True, exist_ok=True)

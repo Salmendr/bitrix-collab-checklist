@@ -1,5 +1,5 @@
 {
-  "stage": "8.15.5.1-folder-return-close",
+  "stage": "8.15.7.1-folder-download",
   "hashMode": "actual-file-bytes",
   "modules": {
     "checklist-window-channel.js": {
@@ -7,12 +7,16 @@
       "bytes": 10630
     },
     "checklist-action-icons.js": {
-      "sha256": "d6f1dd2996f83840b3974079d7269230d68689d90f3c640a5423799b5e3c74bb",
-      "bytes": 5537
+      "sha256": "82c147a2d3f3ed639712cfb51ca4291490890eee345f8e9d78463ddc88584b0f",
+      "bytes": 5819
     },
     "folder-core.js": {
-      "sha256": "c7f3481892e5faa7af6f095b04ff331c7e4b79b2b9f6bd61700b8220f40c5be5",
-      "bytes": 17784
+      "sha256": "81947496694f3158fa1eff60983a49f0b3a07c94daf11c8e13d8c8d4ac4faaf1",
+      "bytes": 17815
+    },
+    "public-folder-share.js": {
+      "sha256": "0a76ada593bbad042556d0cf528f0f167681694c523f8a652cac9b7737325338",
+      "bytes": 12564
     },
     "bitrix-user-picker.js": {
       "sha256": "e69ee7af0913383cda4f02ba83279c64fe4650715532eee91176c47cfe57b1c9",
@@ -39,8 +43,8 @@
       "bytes": 15324
     },
     "folder-uploads.js": {
-      "sha256": "0de92fca32c5146fbb84ad5bdcf8c851f6ff57b732c14187cdc3f96deb2c0316",
-      "bytes": 27142
+      "sha256": "ff48af08fc51e94943d4b884cdfb6aea8f1fb8090139ee168cbf1cae926a5797",
+      "bytes": 29014
     },
     "folder-replacement.js": {
       "sha256": "f268582ac9d4455855215d1bbed8f9b865717da3048b21f440bde02ab526c352",
@@ -55,6 +59,7 @@
     "checklist-window-channel.js",
     "checklist-action-icons.js",
     "folder-core.js",
+    "public-folder-share.js",
     "bitrix-user-picker.js",
     "bitrix-company-picker.js",
     "notification-draft-ui.js",
@@ -67,7 +72,6 @@
   ],
   "notes": [
     "The item-folder page uses the same ChecklistActionIcons registry as the popup.",
-    "Current and archived file names are the visible open controls; redundant open/download action buttons are not rendered.",
     "Archive permanent deletion retains the existing administrator-only backend contract.",
     "Folder assets use the 7.2.1 cache version.",
     "Stage 7.1.4.5 uses one real SVG path for the U+21BB-shaped replacement icon in every folder replacement control.",
@@ -81,7 +85,6 @@
     "Stage 8.4.2 hides disabled/unknown local-only mirror badges; the disabled Yandex button remains the sole unavailable-state indicator.",
     "Stage 8.4.4 aligns archive size, upload date, uploader and action cells to the current-file table columns and removes local-only archive badges.",
     "Stage 8.5.1 makes current and archived file names clickable in the item-folder interface without exposing copy-link controls or technical URLs.",
-    "Stage 8.5.1.1 removes redundant Open and Download buttons from current and archive rows while retaining clickable names, delete controls and backend file routes.",
     "Stage 8.8 enables the folder bell when current documents and an active edit-session are available.",
     "Stage 8.8 uses the same notification-draft-ui.js module in popup and folder windows.",
     "Folder URLs carry the active session actor identity; backend ownership checks remain authoritative.",
@@ -96,7 +99,9 @@
     "Bitrix hotfix 8.15.1 keeps the folder notification bell visible but disabled and hides all non-error Yandex synchronization text.",
     "Stage 8.15.4 publishes throttled click, key, input, change, drag, drop, touch and scroll activity from item-folder windows to the parent popup inactivity timer.",
     "Stage 8.15.5 makes the folder back button call the opener navigation API and falls back to a stage-and-item popup URL if the opener cannot be restored.",
-    "Hotfix 8.15.5.1 starts opener navigation without awaiting it, calls window.close() synchronously inside the trusted back-button click, and always replaces the surviving folder tab with the exact popup URL when the host refuses to close it."
+    "Hotfix 8.15.5.1 starts opener navigation without awaiting it, calls window.close() synchronously inside the trusted back-button click, and always replaces the surviving folder tab with the exact popup URL when the host refuses to close it.",
+    "Stage 8.15.7 adds the permanent public-folder link dialog and makes the folder upload button a drag-and-drop target with the same six-pixel toolbar gap.",
+    "Stage 8.15.7.1 restores an icon-only current-file download control immediately after Replace and an equivalent control for every archive version."
   ],
-  "generatedAt": "2026-08-04T17:20:00+10:00"
+  "generatedAt": "2026-08-13T07:39:32.454435+00:00"
 }

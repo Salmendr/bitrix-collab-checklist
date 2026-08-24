@@ -2,7 +2,7 @@
     'use strict';
 
     global.ChecklistPopupRuntime = Object.freeze({
-        stage: '8.8',
+        stage: '8.15.7.1-folder-download',
         modules: Object.freeze([
             'checklist-action-icons',
             'popup-api-client',
@@ -11,6 +11,7 @@
             'popup-client-session',
             'popup-core',
             'popup-document-list',
+            'public-folder-share',
             'popup-document-actions',
             'popup-window-channel',
             'popup-upload-progress',

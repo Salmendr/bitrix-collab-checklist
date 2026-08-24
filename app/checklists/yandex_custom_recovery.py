@@ -469,7 +469,13 @@ def reconcile_custom_item_yandex_folder(
                 item_id=item_id,
                 job=job,
             )
-            return {"ok": True, "completed": True, "job": job, "result": result}
+            return {
+                "ok": True,
+                "completed": True,
+                "job": job,
+                "result": result,
+                "candidates": candidates,
+            }
 
         source_candidate = candidates[0] if candidates else {}
         source_path = source_candidate.get("path") or ""
@@ -545,4 +551,5 @@ def reconcile_custom_item_yandex_folder(
         "job": job,
         "enqueue": enqueue_result,
         "candidateCount": len(candidates),
+        "candidates": candidates,
     }
