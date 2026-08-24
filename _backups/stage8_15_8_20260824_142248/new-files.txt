@@ -1,3 +1,0 @@
-﻿app\ui\static\js\upload-staging.js
-tests\test_stage8_15_7_public_folder_dnd.py
-tests\test_stage8_15_8_archive_staged_upload.py

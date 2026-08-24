@@ -1,3 +1,0 @@
-﻿app\checklists\yandex_custom_recovery.py
-app\checklists\yandex_resource_locks.py
-tests\test_stage8_15_6_recovery.py
