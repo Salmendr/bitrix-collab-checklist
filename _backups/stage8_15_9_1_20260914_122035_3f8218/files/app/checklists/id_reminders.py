@@ -12,7 +12,6 @@ from app.logging_utils import write_debug_log
 from app.checklists.bitrix_users import get_cached_bitrix_user
 from app.checklists.documents import migrate_legacy_document_fields, normalize_documents_list
 from app.checklists.config import get_checklist_config
-from app.checklists.messages import build_checklist_message_link, build_message_value_link
 from app.checklists.utils import clean_cell_value, normalize_dialog_id
 
 DEFAULT_CONFIG = {"enabled": False, "days": list(range(7)), "hour": 9,
@@ -170,12 +169,11 @@ def empty_items(data):
     return result
 
 
-def plain_message(project, names, dialog_id=""):
+def plain_message(project, names):
     # Names are untrusted user input; prevent BBCode links/mentions in IM.
     def plain(s):
         return " ".join(str(s).replace("[", "［").replace("]", "］").split())
-    project_link = build_message_value_link(plain(project), build_checklist_message_link(dialog_id, "id"))
-    return "Исходные данные по [B]" + project_link + "[/B] требуют дополнения по следующим пунктам:\n" + "\n".join(
+    return "Исходные данные по " + plain(project) + " требуют дополнения по следующим пунктам:\n" + "\n".join(
         f"{i}-{plain(name)}" for i, name in enumerate(names, 1))
 
 
@@ -215,7 +213,7 @@ def collect_due(now=None):
             context = conn.execute("SELECT project_name FROM project_storage_contexts WHERE dialog_id=?",
                                    (row["dialog_id"],)).fetchone()
             project = context["project_name"] if context and context["project_name"] else data_row["title"] or row["dialog_id"]
-            message = plain_message(project, names, row["dialog_id"])
+            message = plain_message(project, names)
             for user in config["recipients"]:
                 conn.execute("""INSERT OR IGNORE INTO id_reminder_deliveries
                     (delivery_id,dialog_id,slot_at,revision,user_id,message,status,updated_at)

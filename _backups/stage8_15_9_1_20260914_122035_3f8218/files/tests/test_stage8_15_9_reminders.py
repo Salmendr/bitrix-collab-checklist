@@ -87,15 +87,8 @@ class ReminderTests(DatabaseCase):
         self.assertEqual(reminders.collect_due(NOW),0)
 
     def test_empty_item_message_includes_id_tu_other_but_not_not_required(self):
-        self.publish()
-        with patch('app.checklists.messages.BITRIX_TECH_WEBHOOK_URL', 'https://portal.example/rest/138/test-key/'), \
-                patch('app.checklists.messages.APP_PORTAL_PATH', '/marketplace/app/80/'):
-            reminders.collect_due(NOW)
-        self.assertEqual(self.rows()[0]['message'],
-            'Исходные данные по [B][URL=https://portal.example/marketplace/app/80/'
-            '?dialogId=chat1&checklistKey=id#dialogId=chat1&checklistKey=id]'
-            'ОБЪЕКТ НА ПАВЛЕНКО[/URL][/B] требуют дополнения по следующим пунктам:\n'
-            '1-ППТ\n2-ТУ\n3-Согласование с аэропортом')
+        self.publish();reminders.collect_due(NOW)
+        self.assertEqual(self.rows()[0]['message'], 'Исходные данные по ОБЪЕКТ НА ПАВЛЕНКО требуют дополнения по следующим пунктам:\n1-ППТ\n2-ТУ\n3-Согласование с аэропортом')
 
     def test_present_document_with_sync_error_is_not_empty(self):
         data={'items':[{'id':'a','name':'ППТ','group':1,'documents':[{'id':'d','name':'a.pdf','fileUrl':'/uploads/a.pdf','mirrorStatus':'error'}]}]}
