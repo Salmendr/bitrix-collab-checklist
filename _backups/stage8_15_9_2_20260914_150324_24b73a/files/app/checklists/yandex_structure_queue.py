@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from app.checklists.yandex_upload_preflight import is_manual_recovery, mark_manual_structure_continuation
-
 import os
 import threading
 from queue import Empty, Queue
@@ -265,8 +263,8 @@ def process_yandex_structure_job(job_id: str) -> dict:
 
         # File uploads for the same item are durable but deliberately kept out
         # of the in-memory mirror queue until the folder mutation completes.
-        # Previously failed files require explicit manual intent; a normal
-        # structural edit must not revive those uploads in the background.
+        # A folder-not-found failure that raced with an older build is also
+        # returned to the queue only after this successful structure result.
         recovery_result = {}
         pending_result = {}
         mirror_release_error = ""
@@ -275,17 +273,12 @@ def process_yandex_structure_job(job_id: str) -> dict:
                 enqueue_pending_yandex_mirror_jobs_for_item,
                 requeue_current_yandex_file_failures,
             )
-            if (job.get('result') or {}).get('manualFileRecovery'):
-                from app.checklists.yandex_mirror_reconciliation import reconcile_yandex_mirror_documents
-                recovery_result = reconcile_yandex_mirror_documents(
-                    source='manual_structure_completed', dialog_id=dialog_id,
-                    checklist_key=checklist_key, item_id=item_id,
-                )
-            else:
-                recovery_result = requeue_current_yandex_file_failures(
-                    dialog_id=dialog_id, checklist_key=checklist_key, item_id=item_id,
-                    source='yandex_structure_completed',
-                )
+            recovery_result = requeue_current_yandex_file_failures(
+                dialog_id=dialog_id,
+                checklist_key=checklist_key,
+                item_id=item_id,
+                source="yandex_structure_completed",
+            )
             pending_result = enqueue_pending_yandex_mirror_jobs_for_item(
                 dialog_id=dialog_id,
                 checklist_key=checklist_key,
@@ -399,9 +392,6 @@ def enqueue_yandex_structure_job(job_id: str, source: str = "") -> dict:
             "reason": f"job status is {job.get('status')}",
             "jobId": normalized_job_id,
         }
-
-    if is_manual_recovery(source):
-        mark_manual_structure_continuation(normalized_job_id)
 
     with YANDEX_STRUCTURE_GUARD:
         if normalized_job_id in YANDEX_STRUCTURE_QUEUED_JOB_IDS:

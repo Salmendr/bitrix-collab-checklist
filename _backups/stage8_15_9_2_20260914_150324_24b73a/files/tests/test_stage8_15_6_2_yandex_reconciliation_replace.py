@@ -244,8 +244,6 @@ class YandexReconciliationIntegrationTests(unittest.TestCase):
                     "get_project_storage_context",
                     return_value={
                         "storageMode": {"mirrorTargets": ["yandex_disk"]},
-                        "yandexDisk": {"projectRootPath": "disk:/Проект", "folders": {"bound": {"path": "disk:/Проект/Пункт"}}},
-                        "itemMappings": [{"checklistKey": "id", "groupId": 1, "itemName": "Пункт", "folderAlias": "bound"}],
                     },
                 ),
                 patch.object(reconciliation, "_document_local_path", return_value=local_file),
@@ -318,8 +316,6 @@ class YandexReconciliationIntegrationTests(unittest.TestCase):
                     "get_project_storage_context",
                     return_value={
                         "storageMode": {"mirrorTargets": ["yandex_disk"]},
-                        "yandexDisk": {"projectRootPath": "disk:/Проект", "folders": {"bound": {"path": "disk:/Проект/Пункт"}}},
-                        "itemMappings": [{"checklistKey": "id", "groupId": 1, "itemName": "Пункт", "folderAlias": "bound"}],
                     },
                 ),
                 patch.object(reconciliation, "_document_local_path", return_value=local_file),

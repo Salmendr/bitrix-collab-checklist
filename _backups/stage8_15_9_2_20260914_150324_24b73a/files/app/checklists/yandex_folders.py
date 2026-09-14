@@ -2219,6 +2219,17 @@ def mirror_document_file_to_yandex(
                     "folderAlias": explicit_folder_alias,
                 },
             }
+            if explicit_folder_alias:
+                upsert_item_yandex_mapping(
+                    dialog_id=dialog_id,
+                    checklist_key=checklist_key,
+                    item_name=item_name,
+                    folder_alias=explicit_folder_alias,
+                    folder_name=normalized_explicit_path.rstrip("/").rsplit("/", 1)[-1],
+                    folder_path=normalized_explicit_path,
+                    folder_url=explicit_folder_url,
+                    group_id=int(item_group or 0),
+                )
         else:
             folder_info = ensure_item_yandex_folder_for_upload(
                 dialog_id=dialog_id,
@@ -2250,16 +2261,6 @@ def mirror_document_file_to_yandex(
             }
 
         require_project_path(dialog_id, folder_path)
-        from app.checklists.yandex_upload_preflight import ensure_upload_folder
-        verified_folder = ensure_upload_folder(dialog_id, folder_path)
-        folder_url = (clean_cell_value(verified_folder['meta'].get('public_url'))
-                      or yandex_disk_client_url(folder_path))
-        if folder_alias:
-            upsert_item_yandex_mapping(
-                dialog_id=dialog_id, checklist_key=checklist_key, item_name=item_name,
-                folder_alias=folder_alias, folder_name=folder_path.rsplit('/', 1)[-1],
-                folder_path=folder_path, folder_url=folder_url, group_id=int(item_group or 0),
-            )
         target_path = build_yandex_file_target_path(folder_path, filename)
 
         # Recheck in the worker, not just when a job was queued. A prior PUT
@@ -2267,8 +2268,6 @@ def mirror_document_file_to_yandex(
         from app.checklists.yandex_file_reconciliation import _remote_identity_result, REMOTE_FILE_CONFLICT_ERROR
         remote = yandex_disk_try_get_resource_meta(target_path)
         if remote is not None:
-            if normalize_yandex_disk_path(remote.get('path') or '') != target_path:
-                raise RuntimeError('Ответ Яндекса относится к другому пути. Загрузка остановлена.')
             matches, _ = _remote_identity_result(
                 local_path=Path(local_path), expected_name=safe_file_name(filename),
                 remote_meta=remote, hash_cache={},
@@ -2286,13 +2285,6 @@ def mirror_document_file_to_yandex(
             overwrite=allow_replace,
         )
 
-        confirmed = yandex_disk_try_get_resource_meta(target_path)
-        if (not confirmed or confirmed.get('type') != 'file'
-                or normalize_yandex_disk_path(confirmed.get('path') or '') != target_path
-                or not _remote_identity_result(local_path=Path(local_path),
-                    expected_name=safe_file_name(filename), remote_meta=confirmed, hash_cache={})[0]):
-            raise RuntimeError('Файл передан, но его содержимое на Яндексе ещё не подтверждено. '
-                               'Повторите проверку вручную: совпадающая копия повторно не загружается.')
         return {
             "ok": True,
             "folderAlias": folder_alias,

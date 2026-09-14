@@ -71,8 +71,7 @@ def item_folder(dialog_id: str, checklist_key: str, item: dict,
     for mapping in context.get("itemMappings") or []:
         if normalize_checklist_key(mapping.get("checklistKey")) != key:
             continue
-        same_alias = bool(alias and mapping.get("folderAlias") == alias
-                          and int(mapping.get("groupId") or 0) in {0, int(item.get("group") or 0)})
+        same_alias = bool(alias and mapping.get("folderAlias") == alias)
         same_identity = (
             clean_cell_value(mapping.get("itemName")).casefold()
             == clean_cell_value(item.get("name")).casefold()
@@ -84,10 +83,6 @@ def item_folder(dialog_id: str, checklist_key: str, item: dict,
         if is_inside(path, root):
             candidates.append(canonical_path(path))
     if alias and not candidates:
-        if any(m.get("folderAlias") == alias and normalize_checklist_key(m.get("checklistKey")) == key
-               and int(m.get("groupId") or 0) not in {0, int(item.get("group") or 0)}
-               for m in context.get("itemMappings") or []):
-            raise YandexScopeError("Привязка папки относится к другому разделу. Проверьте пункт перед синхронизацией.")
         path = (folders.get(alias) or {}).get("path") or ""
         if is_inside(path, root):
             candidates.append(canonical_path(path))

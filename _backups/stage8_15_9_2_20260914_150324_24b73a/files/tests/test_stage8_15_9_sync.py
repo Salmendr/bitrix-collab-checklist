@@ -136,10 +136,7 @@ class UploadIdempotencyTests(DatabaseCase):
     def run_upload(self, remote, allow=False, folder=FOLDER):
         self.context(); local=self.path/'file.pdf';local.write_bytes(b'abc')
         upload=Mock(return_value={'path':FOLDER+'/file.pdf'})
-        from app.checklists import yandex_upload_preflight as preflight
-        def probe(path):
-            return ScopeTests.meta(path) if upload.called else remote
-        with patch.object(preflight, 'ensure_upload_folder', return_value={'meta': {'type': 'dir', 'path': folder}, 'created': []}),patch.object(folders,'is_yandex_disk_enabled',return_value=True),patch.object(folders,'yandex_disk_try_get_resource_meta',side_effect=probe),patch.object(folders,'yandex_disk_upload_file',upload):
+        with patch.object(folders,'is_yandex_disk_enabled',return_value=True),patch.object(folders,'yandex_disk_try_get_resource_meta',return_value=remote),patch.object(folders,'yandex_disk_upload_file',upload):
             result=folders.mirror_document_file_to_yandex('chat1','id','Тех задание','file.pdf',local,item_folder_path=folder,allow_replace=allow)
         return result,upload
 

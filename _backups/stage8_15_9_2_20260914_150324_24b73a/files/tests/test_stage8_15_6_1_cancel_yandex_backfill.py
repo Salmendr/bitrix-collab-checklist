@@ -506,8 +506,6 @@ class YandexBackfillTests(unittest.TestCase):
                     "get_project_storage_context",
                     return_value={
                         "storageMode": {"mirrorTargets": ["yandex_disk"]},
-                        "yandexDisk": {"projectRootPath": "disk:/project", "folders": {"bound": {"path": "disk:/project/Пункт"}}},
-                        "itemMappings": [{"checklistKey": "id", "groupId": 1, "itemName": "Документ", "folderAlias": "bound"}],
                     },
                 ),
                 patch.object(reconciliation, "_document_local_path", return_value=local_file),

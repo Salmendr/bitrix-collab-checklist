@@ -175,7 +175,6 @@ def ensure_yandex_upload_job_for_reconciliation(
     file_name: str,
     file_size: int,
     force_requeue_synced: bool = False,
-    manual_retry: bool = False,
 ) -> dict:
     """Idempotently restore/create one upload job for a current document."""
     ensure_upload_jobs_table()
@@ -210,9 +209,6 @@ def ensure_yandex_upload_job_for_reconciliation(
         if row:
             record = dict(row)
             status = clean_cell_value(record.get("status")).lower()
-            if status in {"error", "conflict"} and not manual_retry:
-                conn.commit()
-                return {**record, "reconciledAction": "unrecoverable_manual_retry_required"}
             if force_requeue_synced and status != "running":
                 conn.execute(
                     """

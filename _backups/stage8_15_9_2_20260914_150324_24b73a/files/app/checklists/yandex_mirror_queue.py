@@ -1,4 +1,3 @@
-from app.checklists.yandex_upload_preflight import is_manual_recovery, require_exclusive_item_folder
 from app.checklists.yandex_scope import require_project_path, item_folder, canonical_path
 import os
 import threading
@@ -392,11 +391,6 @@ def requeue_yandex_folder_resolution_failures(
     skipped = 0
     results = []
 
-    if not is_manual_recovery(source):
-        return {"ok": True, "source": source, "found": len(job_ids), "requeued": 0,
-                "queued": 0, "skipped": len(job_ids), "manualRequired": len(job_ids),
-                "results": [{"jobId": j, "skipped": True, "reason": "manual_retry_required"} for j in job_ids]}
-
     for job_id in job_ids:
         job = get_upload_job(job_id) or {}
         latest_structure = get_latest_yandex_structure_job_for_item(
@@ -505,11 +499,6 @@ def requeue_current_yandex_file_failures(
     results = []
     requeued = 0
     queued = 0
-
-    if not is_manual_recovery(source):
-        return {"ok": True, "source": source, "found": len(job_ids), "requeued": 0,
-                "queued": 0, "skipped": len(job_ids), "manualRequired": len(job_ids),
-                "results": [{"jobId": j, "skipped": True, "reason": "manual_retry_required"} for j in job_ids]}
 
     for job_id in job_ids:
         job = get_upload_job(job_id) or {}
@@ -1078,8 +1067,8 @@ def process_upload_job(job: dict):
         finish_upload_job(job_id, status="cancelled", stage="document_removed_before_upload")
         return
 
-    data, item, document = found
-    folder_path = require_exclusive_item_folder(dialog_id, checklist_key, item, data.get("items", []))
+    _, item, document = found
+    folder_path = item_folder(dialog_id, checklist_key, item)
     file_name = clean_cell_value(document.get("name")) or file_name
     # Old duplicated names must not overwrite another current document.
     same_names = [d for d in item.get("documents", [])
@@ -1133,7 +1122,7 @@ def process_upload_job(job: dict):
         item_id=item_id,
         item_group=int(item.get("group") or 0),
         is_custom=bool(item.get("isCustom", False)),
-        item_folder_path=folder_path,
+        item_folder_path=(folder_path if canonical_path(item.get("yandexFolderPath") or "") == folder_path else ""),
         item_folder_url=clean_cell_value(item.get("yandexFolderUrl")),
         item_folder_alias=clean_cell_value(item.get("yandexFolderAlias")),
         progress_callback=on_upload_progress,

@@ -1,5 +1,4 @@
 from __future__ import annotations
-from app.checklists.yandex_upload_preflight import is_manual_recovery, requires_manual_recovery, require_exclusive_item_folder
 
 import json
 import threading
@@ -173,9 +172,9 @@ def reconcile_yandex_mirror_documents(
     """Verify and restore current-document mirrors from local primary files.
 
     The pass never deletes or blindly overwrites remote Yandex content. It
-    probes only the owning item's directory, compares name, size and checksum,
-    and queues upload only after confirmed absence. Previously failed items
-    remain held until an explicit manual recovery request.
+    probes every current/admissible legacy path linked to the checklist item,
+    compares name, size and checksum, and queues upload only after confirmed
+    absence from all known locations.
     """
     requested_dialog_id = normalize_dialog_id(dialog_id)
     requested_checklist_key = (
@@ -223,7 +222,6 @@ def reconcile_yandex_mirror_documents(
         "customRepairsQueued": 0,
         "customRepairsCompleted": 0,
         "customConflicts": 0,
-        "manualRequired": 0,
         "errors": [],
     }
     context_cache: dict[str, dict] = {}
@@ -265,15 +263,6 @@ def reconcile_yandex_mirror_documents(
                 item = migrate_legacy_document_fields(raw_item)
                 item_id = clean_cell_value(item.get("id"))
                 if requested_item_id and item_id != requested_item_id:
-                    continue
-
-                current_jobs = [get_latest_document_job(dialog_id, checklist_key, item_id, d.get('id')) or {}
-                                for d in normalize_documents_list(item.get('documents'))]
-                from app.checklists.yandex_structure_jobs import get_latest_yandex_structure_job_for_item
-                current_jobs.append(get_latest_yandex_structure_job_for_item(
-                    dialog_id=dialog_id, checklist_key=checklist_key, item_id=item_id) or {})
-                if not is_manual_recovery(source) and requires_manual_recovery(item, current_jobs):
-                    stats['manualRequired'] += 1
                     continue
 
                 custom_recovery: dict = {}
@@ -377,7 +366,7 @@ def reconcile_yandex_mirror_documents(
                     if repair_status == "queued":
                         enqueue_result = enqueue_yandex_structure_job(
                             clean_cell_value(repair_job.get("job_id")),
-                            source=(source if is_manual_recovery(source) else "startup_standard_item_repair"),
+                            source="startup_standard_item_repair",
                         )
                         if (
                             enqueue_result.get("queued")
@@ -409,8 +398,6 @@ def reconcile_yandex_mirror_documents(
                             item_id=item_id,
                             operation="reconcile_file_discovery",
                         ):
-                            require_exclusive_item_folder(dialog_id, checklist_key, item,
-                                                          raw_data.get('items') or [], context)
                             remote_result = find_existing_yandex_document(
                                 dialog_id=dialog_id,
                                 checklist_key=checklist_key,
@@ -623,7 +610,6 @@ def reconcile_yandex_mirror_documents(
                             ),
                             file_size=int(local_path.stat().st_size),
                             force_requeue_synced=force_requeue,
-                            manual_retry=is_manual_recovery(source),
                         )
                         status = clean_cell_value(job.get("status")).lower()
                         action = clean_cell_value(job.get("reconciledAction"))
@@ -691,14 +677,6 @@ def reconcile_yandex_mirror_documents(
                             if enqueue_result.get("queued"):
                                 stats["queued"] += 1
                     except Exception as exc:
-                        from app.checklists.yandex_scope import YandexScopeError
-                        if isinstance(exc, YandexScopeError):
-                            fail_document_upload_job_for_remote_conflict(
-                                dialog_id=dialog_id, checklist_key=checklist_key, item_id=item_id,
-                                document_id=document_id, error=str(exc),
-                            )
-                            update_document_mirror_fields(dialog_id, checklist_key, item_id, document_id,
-                                                          {"mirrorStatus": "error", "mirrorError": str(exc)})
                         _record_error(
                             stats,
                             storage_id=storage_id,

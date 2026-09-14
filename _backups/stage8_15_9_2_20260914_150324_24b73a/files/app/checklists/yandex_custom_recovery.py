@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from app.checklists.yandex_upload_preflight import is_manual_recovery
-
 import hashlib
 
 from app.checklists.storage import (
@@ -326,17 +324,13 @@ def reconcile_custom_item_yandex_folder(
         item_id=item_id,
     ) or {}
     latest_status = clean_cell_value(latest.get("status")).lower()
-    if latest_status in {'error', 'conflict'} and not is_manual_recovery(source):
-        return {'ok': True, 'skipped': True, 'manualRequired': True, 'job': latest,
-                'conflict': latest_status == 'conflict', 'reason': 'manual_retry_required'}
-
     if latest_status in {"queued", "running"}:
         enqueue_result = {}
         if enqueue and latest_status == "queued":
             from app.checklists.yandex_structure_queue import enqueue_yandex_structure_job
             enqueue_result = enqueue_yandex_structure_job(
                 latest.get("job_id") or "",
-                source=(source if is_manual_recovery(source) else "custom_folder_recovery_existing"),
+                source="custom_folder_recovery_existing",
             )
         return {
             "ok": True,
@@ -549,7 +543,7 @@ def reconcile_custom_item_yandex_folder(
         from app.checklists.yandex_structure_queue import enqueue_yandex_structure_job
         enqueue_result = enqueue_yandex_structure_job(
             job.get("job_id") or "",
-            source=(source if is_manual_recovery(source) else "custom_folder_recovery"),
+            source="custom_folder_recovery",
         )
     return {
         "ok": True,
