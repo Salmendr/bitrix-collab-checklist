@@ -1040,3 +1040,6 @@ def init_db():
 
     conn.commit()
     conn.close()
+
+    from app.checklists.id_reminders import ensure_schema
+    ensure_schema()

@@ -1,3 +1,5 @@
+from app.checklists.yandex_scope import assert_operation_path
+
 import requests
 import time
 from pathlib import Path
@@ -84,6 +86,7 @@ def _request_with_resource_retry(
 
 
 def yandex_disk_get_upload_href(target_path: str, overwrite: bool = True) -> str:
+    assert_operation_path(target_path)
     normalized_path = normalize_yandex_disk_path(target_path)
 
     response = _request_with_resource_retry(
@@ -107,8 +110,8 @@ def yandex_disk_get_upload_href(target_path: str, overwrite: bool = True) -> str
     return href
 
 
-def yandex_disk_upload_bytes(target_path: str, file_bytes: bytes) -> dict:
-    upload_href = yandex_disk_get_upload_href(target_path, overwrite=True)
+def yandex_disk_upload_bytes(target_path: str, file_bytes: bytes, *, overwrite: bool = False) -> dict:
+    upload_href = yandex_disk_get_upload_href(target_path, overwrite=overwrite)
 
     _request_with_resource_retry(
         lambda: requests.put(
@@ -151,6 +154,7 @@ def yandex_disk_upload_file(
     local_path,
     progress_callback=None,
     chunk_size: int = 1024 * 1024,
+    overwrite: bool = False,
 ) -> dict:
     normalized_path = normalize_yandex_disk_path(target_path)
     source_path = Path(local_path)
@@ -159,7 +163,7 @@ def yandex_disk_upload_file(
         raise RuntimeError(f"Local file not found: {source_path}")
 
     total_bytes = source_path.stat().st_size
-    upload_href = yandex_disk_get_upload_href(normalized_path, overwrite=True)
+    upload_href = yandex_disk_get_upload_href(normalized_path, overwrite=overwrite)
 
     def upload_once():
         with open(source_path, "rb") as source:
@@ -193,6 +197,7 @@ def yandex_disk_delete_path(
     permanently: bool = True,
     wait_timeout: int = 45,
 ) -> dict:
+    assert_operation_path(target_path)
     normalized_path = normalize_yandex_disk_path(target_path)
 
     if not normalized_path:
@@ -264,6 +269,7 @@ def yandex_disk_delete_path(
 
 
 def yandex_disk_ensure_folder(target_path: str) -> dict:
+    assert_operation_path(target_path, allow_ancestor=True)
     normalized_path = normalize_yandex_disk_path(target_path)
 
     response = _request_with_resource_retry(
@@ -285,6 +291,7 @@ def yandex_disk_ensure_folder(target_path: str) -> dict:
 
 
 def yandex_disk_publish_path(target_path: str) -> dict:
+    assert_operation_path(target_path)
     normalized_path = normalize_yandex_disk_path(target_path)
 
     _request_with_resource_retry(
@@ -310,6 +317,8 @@ def yandex_disk_move_path(
     overwrite: bool = False,
     wait_timeout: int = 45,
 ) -> dict:
+    assert_operation_path(source_path)
+    assert_operation_path(target_path)
     normalized_source = normalize_yandex_disk_path(source_path)
     normalized_target = normalize_yandex_disk_path(target_path)
 
@@ -380,6 +389,7 @@ def yandex_disk_move_path(
 
 
 def yandex_disk_get_resource_meta(target_path: str) -> dict:
+    assert_operation_path(target_path)
     normalized_path = normalize_yandex_disk_path(target_path)
 
     response = _request_with_resource_retry(
@@ -408,6 +418,7 @@ def yandex_disk_get_resource_meta(target_path: str) -> dict:
 
 
 def yandex_disk_try_get_resource_meta(target_path: str) -> dict | None:
+    assert_operation_path(target_path)
     normalized_path = normalize_yandex_disk_path(target_path)
     if not normalized_path:
         return None
@@ -439,6 +450,7 @@ def yandex_disk_try_get_resource_meta(target_path: str) -> dict | None:
 
 
 def yandex_disk_list_folder_children(target_path: str) -> list[dict]:
+    assert_operation_path(target_path)
     normalized_path = normalize_yandex_disk_path(target_path)
     if not normalized_path:
         return []

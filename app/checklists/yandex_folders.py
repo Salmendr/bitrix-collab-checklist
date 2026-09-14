@@ -1,3 +1,5 @@
+from app.checklists.yandex_scope import require_project_path, project_root
+from app.checklists.document_names import safe_file_name
 import re
 from pathlib import Path
 from datetime import datetime
@@ -1762,8 +1764,8 @@ def rename_yandex_folder_for_item(
     target_path: str,
     folder_alias: str,
 ) -> dict:
-    source_path = normalize_yandex_disk_path(source_path)
-    target_path = normalize_yandex_disk_path(target_path)
+    source_path = require_project_path(dialog_id, source_path)
+    target_path = require_project_path(dialog_id, target_path)
     if not source_path:
         raise RuntimeError("Yandex source folder path is unavailable")
     if not target_path:
@@ -1980,6 +1982,7 @@ def ensure_item_yandex_folder_for_upload(
     item_group: int = 0,
     is_custom: bool = False,
 ):
+    project_root(dialog_id)
     checklist_key = normalize_checklist_key(checklist_key)
     item_name = clean_cell_value(item_name)
 
@@ -2000,6 +2003,8 @@ def ensure_item_yandex_folder_for_upload(
         folder_path = clean_cell_value(folder.get("path"))
         folder_url = clean_cell_value(folder.get("url"))
 
+        if folder_path:
+            require_project_path(dialog_id, folder_path)
         if folder_path and folder_url:
             return existing
 
@@ -2093,7 +2098,7 @@ def ensure_item_yandex_folder_for_upload(
 
 def build_yandex_file_target_path(folder_path: str, filename: str) -> str:
     folder_path = normalize_yandex_disk_path(folder_path).rstrip("/")
-    safe_name = Path(filename or "file.bin").name
+    safe_name = safe_file_name(filename)
     return f"{folder_path}/{safe_name}"
 
 
@@ -2142,6 +2147,7 @@ def mirror_document_to_yandex(
                 "reason": "yandex folder path is empty",
             }
 
+        require_project_path(dialog_id, folder_path)
         target_path = build_yandex_file_target_path(folder_path, filename)
         upload_result = yandex_disk_upload_bytes(target_path, file_bytes)
 
@@ -2180,6 +2186,7 @@ def mirror_document_file_to_yandex(
     item_folder_url: str = "",
     item_folder_alias: str = "",
     progress_callback=None,
+    allow_replace: bool = False,
 ) -> dict:
     if not is_yandex_disk_enabled():
         return {
@@ -2194,6 +2201,7 @@ def mirror_document_file_to_yandex(
         explicit_folder_alias = clean_cell_value(item_folder_alias)
         explicit_folder_url = clean_cell_value(item_folder_url)
         if explicit_folder_path:
+            require_project_path(dialog_id, explicit_folder_path)
             normalized_explicit_path = normalize_yandex_disk_path(
                 explicit_folder_path
             )
@@ -2252,12 +2260,29 @@ def mirror_document_file_to_yandex(
                 "reason": "yandex folder path is empty",
             }
 
+        require_project_path(dialog_id, folder_path)
         target_path = build_yandex_file_target_path(folder_path, filename)
+
+        # Recheck in the worker, not just when a job was queued. A prior PUT
+        # can have succeeded before a timeout/restart or a database failure.
+        from app.checklists.yandex_file_reconciliation import _remote_identity_result, REMOTE_FILE_CONFLICT_ERROR
+        remote = yandex_disk_try_get_resource_meta(target_path)
+        if remote is not None:
+            matches, _ = _remote_identity_result(
+                local_path=Path(local_path), expected_name=safe_file_name(filename),
+                remote_meta=remote, hash_cache={},
+            )
+            if remote.get("type") == "file" and matches:
+                return {"ok": True, "folderAlias": folder_alias, "folderPath": folder_path,
+                        "folderUrl": folder_url, "filePath": target_path, "reused": True}
+            if not allow_replace or remote.get("type") != "file":
+                raise RuntimeError(REMOTE_FILE_CONFLICT_ERROR)
 
         upload_result = yandex_disk_upload_file(
             target_path=target_path,
             local_path=local_path,
             progress_callback=progress_callback,
+            overwrite=allow_replace,
         )
 
         return {

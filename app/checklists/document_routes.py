@@ -1,3 +1,5 @@
+from app.checklists.document_names import unique_file_name, safe_file_name
+from app.checklists.item_mutation_guard import serialize_legacy_file_mutation
 import html
 import json
 from logging import config
@@ -306,6 +308,7 @@ def format_document_uploaded_at(value: str) -> str:
 
 
 @router.post("/api/checklist/upload-document")
+@serialize_legacy_file_mutation
 async def api_checklist_upload_document(
     dialogId: str = Form(...),
     itemId: str = Form(...),
@@ -323,7 +326,7 @@ async def api_checklist_upload_document(
     dialog_id = normalize_dialog_id(dialogId)
     checklist_key = normalize_checklist_key(checklistKey)
     item_id = str(itemId or "").strip()
-    uploaded_name = Path(file.filename or "file.bin").name
+    uploaded_name = safe_file_name(file.filename)
     uploaded_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
     acting_user_id = clean_cell_value(actingUserId)
     acting_user_name = clean_cell_value(actingUserName) or "Пользователь"
@@ -421,6 +424,7 @@ async def api_checklist_upload_document(
             "existingDocumentsCount": len(normalize_documents_list(target_item.get("documents"))),
         })
 
+        uploaded_name = unique_file_name(uploaded_name, [d.get("name") for d in target_item.get("documents", [])])
         rel_path = build_upload_rel_path(dialog_id, item_id, uploaded_name)
         abs_path = UPLOAD_ROOT / rel_path
 
@@ -616,6 +620,7 @@ async def api_checklist_upload_document(
 
 
 @router.post("/api/checklist/replace-document")
+@serialize_legacy_file_mutation
 async def api_checklist_replace_document(
     dialogId: str = Form(...),
     itemId: str = Form(...),
@@ -777,6 +782,8 @@ async def api_checklist_replace_document(
             {"ok": False, "error": "document not found"},
             status_code=404,
         )
+
+    uploaded_name = unique_file_name(uploaded_name, [d.get("name") for d in documents if d.get("id") != document_id])
 
     guard = get_document_replacement_guard(
         old_document,
@@ -2154,7 +2161,7 @@ def api_checklist_folder(
     ui_static_base_url = (
         f"{app_base_path}/ui-static"
     )
-    ui_asset_version = "8.15.8-staged-upload"
+    ui_asset_version = "8.15.9"
     popup_url = (
         f"{app_base_path}/popup"
         f"?dialogId={quote(dialog_id, safe='')}"

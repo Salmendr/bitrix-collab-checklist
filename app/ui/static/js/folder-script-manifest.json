@@ -1,13 +1,13 @@
 {
-  "stage": "8.15.8-staged-upload",
-  "hashMode": "actual-file-bytes",
+  "stage": "8.15.9",
+  "hashMode": "utf8-lf",
   "modules": {
     "checklist-window-channel.js": {
-      "sha256": "bb6415300c5a14fb28c409b644061e6d061c5e082efce27243aada0e3702bdd5",
-      "bytes": 10630
+      "sha256": "d45014ff74333e2be74c591b6b965fd17c520cd9077bc0b27057ded071dab625",
+      "bytes": 10245
     },
     "checklist-action-icons.js": {
-      "sha256": "82c147a2d3f3ed639712cfb51ca4291490890eee345f8e9d78463ddc88584b0f",
+      "sha256": "7f45dfe1bf29f07c7abe36305f6851ed44c2826d38dc6ddcc266a9d61f3d8550",
       "bytes": 5819
     },
     "folder-core.js": {
@@ -39,8 +39,8 @@
       "bytes": 13858
     },
     "folder-upload-progress.js": {
-      "sha256": "318d9e4ac147fb7f3efbc05a7176b1028927f4e289cd731033487ec1d5a75435",
-      "bytes": 15324
+      "sha256": "4246a25efa94514c13c0d1d250e52c8288aef526a86b805e325f1cd53473dcb9",
+      "bytes": 14797
     },
     "upload-staging.js": {
       "sha256": "b963077085f916aadd7fce4018336de4db638822e4a8fe6544f2a47f03538fad",
@@ -111,5 +111,5 @@
     "Dropped and selected files remain local file cards until explicit confirmation; failed files stay staged for retry.",
     "The folder public-link action is icon-only, permanently disabled in the current interface and cannot be re-enabled by edit-session refresh."
   ],
-  "generatedAt": "2026-08-24T03:05:47.575167+00:00"
+  "generatedAt": "2026-09-11T02:15:36+00:00"
 }

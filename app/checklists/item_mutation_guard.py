@@ -28,7 +28,7 @@ def build_item_mutation_key(
         (
             normalize_dialog_id(dialog_id),
             normalize_checklist_key(checklist_key),
-            clean_cell_value(item_id),
+            # All item mutations write the same checklist JSON row.
         )
     )
 
@@ -83,3 +83,18 @@ async def item_mutation_guard(
 
     async with lock:
         yield
+
+
+def serialize_legacy_file_mutation(function):
+    """Session uploads have their own guard; legacy routes need the same lock."""
+    from functools import wraps
+    from inspect import signature
+    sig = signature(function)
+    @wraps(function)
+    async def wrapper(*args, **kwargs):
+        values = sig.bind_partial(*args, **kwargs).arguments
+        if values.get("sessionId"):
+            return await function(*args, **kwargs)
+        async with item_mutation_guard(values.get("dialogId", ""), values.get("checklistKey", "id"), values.get("itemId", "")):
+            return await function(*args, **kwargs)
+    return wrapper

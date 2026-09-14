@@ -509,6 +509,7 @@ def hydrate_project_storage_context_from_configs(context: dict) -> dict:
     if not isinstance(yandex_disk, dict):
         yandex_disk = {}
 
+    context.setdefault("yandexRootExplicit", bool(clean_cell_value(yandex_disk.get("projectRootPath"))))
     yandex_disk.setdefault("provider", "yandex_disk")
     yandex_disk["projectRootPath"] = get_project_root_path({
         **context,

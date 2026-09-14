@@ -41,7 +41,7 @@
 
 .doc-file-row {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) max-content 34px;
+    grid-template-columns: minmax(0, 1fr) max-content 34px 34px;
     align-items: center;
     column-gap: 2px;
     row-gap: 0;

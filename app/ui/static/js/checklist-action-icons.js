@@ -2,7 +2,7 @@
     'use strict';
 
     const paths = Object.freeze({
-        upload: `
+        download: `
             <path d="M12 3v12"></path>
             <path d="m7 10 5 5 5-5"></path>
             <path d="M5 17v2a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-2"></path>
@@ -22,7 +22,7 @@
             <path d="M10 14 21 3"></path>
             <path d="M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5"></path>
         `,
-        download: `
+        upload: `
             <path d="M5 4h14"></path>
             <path d="M12 20V4"></path>
             <path d="m7 9 5-5 5 5"></path>

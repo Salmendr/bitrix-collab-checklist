@@ -1,3 +1,4 @@
+from app.checklists.yandex_scope import require_project_path, item_folder, canonical_path
 import os
 import threading
 from pathlib import Path
@@ -1066,7 +1067,20 @@ def process_upload_job(job: dict):
         finish_upload_job(job_id, status="cancelled", stage="document_removed_before_upload")
         return
 
-    _, item, _ = found
+    _, item, document = found
+    folder_path = item_folder(dialog_id, checklist_key, item)
+    file_name = clean_cell_value(document.get("name")) or file_name
+    # Old duplicated names must not overwrite another current document.
+    same_names = [d for d in item.get("documents", [])
+                  if clean_cell_value(d.get("name")).casefold() == file_name.casefold()]
+    if len(same_names) > 1:
+        raise RuntimeError("В пункте есть несколько файлов с одинаковым именем. Переименуйте один из файлов перед синхронизацией.")
+    from app.checklists.document_replacements import get_document_replacement_by_upload_job
+    replacement = get_document_replacement_by_upload_job(job_id) or {}
+    old_path = canonical_path(replacement.get("old_yandex_path") or "")
+    target_path = canonical_path(folder_path + "/" + file_name)
+    allow_replace = (replacement.get("status") == "pending" and old_path == target_path)
+
 
     update_document_mirror_fields(
         dialog_id,
@@ -1108,10 +1122,11 @@ def process_upload_job(job: dict):
         item_id=item_id,
         item_group=int(item.get("group") or 0),
         is_custom=bool(item.get("isCustom", False)),
-        item_folder_path=clean_cell_value(item.get("yandexFolderPath")),
+        item_folder_path=(folder_path if canonical_path(item.get("yandexFolderPath") or "") == folder_path else ""),
         item_folder_url=clean_cell_value(item.get("yandexFolderUrl")),
         item_folder_alias=clean_cell_value(item.get("yandexFolderAlias")),
         progress_callback=on_upload_progress,
+        allow_replace=allow_replace,
     )
 
     if not result.get("ok"):
@@ -1135,6 +1150,7 @@ def process_upload_job(job: dict):
         yandex_path = clean_cell_value(result.get("filePath"))
         if yandex_path and is_yandex_disk_enabled():
             try:
+                require_project_path(dialog_id, yandex_path)
                 yandex_disk_delete_path(yandex_path, permanently=True)
             except Exception as exc:
                 write_debug_log("yandex_mirror_orphan_delete_failed", {
@@ -1167,6 +1183,24 @@ def process_upload_job(job: dict):
     finish_upload_job(job_id, status="synced", stage="done")
 
 
+def _path_used_by_current_document(dialog_id: str, path: str) -> bool:
+    import json
+    from app.db import get_conn
+    conn = get_conn()
+    try:
+        rows = conn.execute("SELECT data_json FROM checklists WHERE dialog_id=? OR dialog_id LIKE ?",
+                            (dialog_id, dialog_id + "::%" )).fetchall()
+    finally:
+        conn.close()
+    for row in rows:
+        for raw_item in json.loads(row["data_json"] or "{}").get("items", []):
+            item = migrate_legacy_document_fields(raw_item)
+            for doc in normalize_documents_list(item.get("documents")):
+                if canonical_path(doc.get("yandexPath") or "") == path:
+                    return True
+    return False
+
+
 def process_delete_job(job: dict):
     job_id = clean_cell_value(job.get("job_id"))
     yandex_path = normalize_yandex_disk_path(
@@ -1181,6 +1215,7 @@ def process_delete_job(job: dict):
         finish_upload_job(job_id, status="skipped", stage="yandex_disabled")
         return
 
+    require_project_path(normalize_dialog_id(job.get("dialog_id")), yandex_path)
     update_upload_job_progress(job_id, "yandex_delete", 50)
 
     replacement = get_document_replacement_by_delete_job(job_id) or {}
@@ -1195,6 +1230,10 @@ def process_delete_job(job: dict):
             status="skipped",
             stage="same_path_protected",
         )
+        return
+
+    if _path_used_by_current_document(normalize_dialog_id(job.get("dialog_id")), canonical_path(yandex_path)):
+        finish_upload_job(job_id, status="skipped", stage="same_path_protected")
         return
 
     remote_meta = yandex_disk_try_get_resource_meta(yandex_path)

@@ -1,6 +1,6 @@
 {
-  "stage": "8.15.8-staged-upload",
-  "generatedAt": "2026-08-24T03:05:47.575167+00:00",
+  "stage": "8.15.9",
+  "generatedAt": "2026-09-11T02:15:36+00:00",
   "loadOrder": [
     "popup-bootstrap.js",
     "checklist-action-icons.js",
@@ -23,6 +23,7 @@
     "popup-edit-session.js",
     "popup-inactivity.js",
     "bitrix-user-picker.js",
+    "id-reminders.js",
     "bitrix-company-picker.js",
     "notification-draft-ui.js",
     "popup-notification-drafts.js",
@@ -288,28 +289,28 @@
     "The public-link action is icon-only and disabled in the application interface while its backend remains unchanged.",
     "Archive rows display the preserved original uploader and upload time rather than the later replacement actor and archive time."
   ],
-  "hashMode": "actual-file-bytes",
+  "hashMode": "utf8-lf",
   "lineEndingNote": "Hashes are calculated from bytes written to disk. This is stable for Windows CRLF and Unix LF.",
   "modules": {
     "popup-bootstrap.js": {
-      "sha256": "81dff06dbfb85941cda360a92ebabba411a144d3ab84a548d6d96269c8e8c2d7",
-      "bytes": 1488
+      "sha256": "79ea9dc579d40fe407a868f22577efeced5236e4a6a28244f36d589281fe41c1",
+      "bytes": 1514
     },
     "checklist-action-icons.js": {
-      "sha256": "82c147a2d3f3ed639712cfb51ca4291490890eee345f8e9d78463ddc88584b0f",
+      "sha256": "7f45dfe1bf29f07c7abe36305f6851ed44c2826d38dc6ddcc266a9d61f3d8550",
       "bytes": 5819
     },
     "popup-api-client.js": {
-      "sha256": "0683516e78abfd16154f583c4dda57f1e16e2e3a191fd5548c6ff6eb4504710f",
-      "bytes": 1787
+      "sha256": "57b7d842c8639c4b9007f8d1f2b03c0aa6e87fc787b4fdb3fb93e4d3aef3f1ed",
+      "bytes": 1717
     },
     "popup-bitrix-bridge.js": {
       "sha256": "88eee130a578fae63f8bab92a0d634ad06b4a6469552714f0a19dfa65fff8b45",
       "bytes": 4488
     },
     "checklist-window-channel.js": {
-      "sha256": "bb6415300c5a14fb28c409b644061e6d061c5e082efce27243aada0e3702bdd5",
-      "bytes": 10630
+      "sha256": "d45014ff74333e2be74c591b6b965fd17c520cd9077bc0b27057ded071dab625",
+      "bytes": 10245
     },
     "popup-client-session.js": {
       "sha256": "3a87eae696ca5de7e93a2a8c9700ced94186f0e36cb97a5f110a38ac7b84289f",
@@ -324,8 +325,8 @@
       "bytes": 103464
     },
     "popup-document-list.js": {
-      "sha256": "ac29a6dae4f8258985f5fa0ebbd56583a8aef8f102c1f0c612321cdc07470fdb",
-      "bytes": 15308
+      "sha256": "52a3b95cdd786a00a7ca161d80dc08d2aaf121f40c026abaa3c84234c713af17",
+      "bytes": 15567
     },
     "document-assignment-history.js": {
       "sha256": "8ca593270b9e1e0170187046f5480c5fc8a7237c8dc62d1a89677e4f17d65e62",
@@ -336,8 +337,8 @@
       "bytes": 12564
     },
     "popup-document-actions.js": {
-      "sha256": "acbff936b75bda1f1ad6f4b76ac7067efac5c36eeea5e453b6f57a0ce802b5b4",
-      "bytes": 28297
+      "sha256": "8919f53e54c98e7e1666b53df0bddeefc80a1d8c927581cba0b7e65a1761c37d",
+      "bytes": 25445
     },
     "popup-window-channel.js": {
       "sha256": "5b9abaff9f29705db8745e4737f28bfb449fc23b4ae3ef2cf47050607f2f5723",
@@ -356,8 +357,8 @@
       "bytes": 25202
     },
     "popup-session-enhancements.js": {
-      "sha256": "d7a69806176b1faad882ba82dda293b921f59ebaa2d8e1191772858cc06eb510",
-      "bytes": 47985
+      "sha256": "534cbd2f8b1699f68791c872c157e5f17e7a833c05748f109b870dac260201ad",
+      "bytes": 48980
     },
     "popup-edit-session.js": {
       "sha256": "8cd402644dc0c9724b46b22c725e19a572232fa81d7105a8d3c094de9d6c7c42",
@@ -452,12 +453,16 @@
       "bytes": 2244
     },
     "popup-render-orchestrator.js": {
-      "sha256": "e64bb8528ac6918d05c039bf8e5294a13f4adbdad9f32a5f5108157b3df3e6c4",
-      "bytes": 10570
+      "sha256": "130edee9a638848cfeda63409c6cc79452aad4886b5cde8d87cea591d3bc7f5d",
+      "bytes": 10646
     },
     "popup-init.js": {
-      "sha256": "fe4e820d6e49b456574b2a0484319c37ef05e67a81083a2a3b246381a772b665",
-      "bytes": 2393
+      "sha256": "4596fcfe86614d66f79a923ff65a5b0c8e579dabf2fb7c45b4b99646a9f42b47",
+      "bytes": 2328
+    },
+    "id-reminders.js": {
+      "sha256": "a240bc308255aa10b9f5b9e5a74fee8d9646b88956b7a0e02fc8bdb113598789",
+      "bytes": 10131
     }
   }
 }

@@ -30,40 +30,6 @@ def _path_key(value: str) -> str:
     return normalize_yandex_disk_path(value).rstrip("/").casefold()
 
 
-def _add_folder_path(result: dict[str, str], value: str) -> None:
-    normalized = normalize_yandex_disk_path(value).rstrip("/")
-    if normalized:
-        result.setdefault(_path_key(normalized), normalized)
-
-
-def _add_job_paths(result: dict[str, str], job: dict | None) -> None:
-    job = job or {}
-    _add_folder_path(result, clean_cell_value(job.get("source_path")))
-    _add_folder_path(result, clean_cell_value(job.get("sourcePath")))
-    _add_folder_path(result, clean_cell_value(job.get("target_path")))
-    _add_folder_path(result, clean_cell_value(job.get("targetPath")))
-
-    payload = job.get("result") or {}
-    if isinstance(payload, dict):
-        _add_folder_path(result, clean_cell_value(payload.get("folderPath")))
-        _add_folder_path(result, clean_cell_value(payload.get("sourcePath")))
-        _add_folder_path(result, clean_cell_value(payload.get("targetPath")))
-        for candidate in payload.get("conflictCandidates") or []:
-            if isinstance(candidate, dict):
-                _add_folder_path(result, clean_cell_value(candidate.get("path")))
-
-
-def _add_recovery_paths(result: dict[str, str], recovery: dict | None) -> None:
-    recovery = recovery or {}
-    payload = recovery.get("result") or {}
-    if isinstance(payload, dict):
-        _add_folder_path(result, clean_cell_value(payload.get("folderPath")))
-    for candidate in recovery.get("candidates") or []:
-        if isinstance(candidate, dict):
-            _add_folder_path(result, clean_cell_value(candidate.get("path")))
-    _add_job_paths(result, recovery.get("job") or {})
-
-
 def collect_known_item_yandex_folder_paths(
     *,
     dialog_id: str,
@@ -74,99 +40,13 @@ def collect_known_item_yandex_folder_paths(
     repair_spec: dict | None = None,
     custom_recovery: dict | None = None,
 ) -> list[str]:
-    """Collect only folders that are durably linked to this checklist item.
+    """Only the current item's directory inside its authoritative project root.
 
-    The recovery pass deliberately does not scan the whole Yandex Disk.  It
-    checks the persisted path, the current/target item folders, the mapping
-    history and the source/target paths of folder recovery jobs.  This covers
-    current and admissible legacy locations without adopting an unrelated file
-    from another project or checklist item.
+    A persisted document path or an old job is not proof of ownership. Folder
+    moves are reconciled separately; file discovery must not follow history.
     """
-    dialog_id = normalize_dialog_id(dialog_id)
-    checklist_key = normalize_checklist_key(checklist_key)
-    item = dict(item or {})
-    document = dict(document or {})
-    context = context or get_project_storage_context(dialog_id) or {}
-
-    paths: dict[str, str] = {}
-    stored_file_path = normalize_yandex_disk_path(
-        clean_cell_value(document.get("yandexPath"))
-    )
-    if stored_file_path and "/" in stored_file_path.rstrip("/"):
-        _add_folder_path(paths, stored_file_path.rstrip("/").rsplit("/", 1)[0])
-
-    for key in ("yandexFolderPath", "yandexFolderTargetPath"):
-        _add_folder_path(paths, clean_cell_value(item.get(key)))
-
-    aliases = {
-        clean_cell_value(item.get("yandexFolderAlias")),
-    }
-    aliases.discard("")
-    item_name = clean_cell_value(item.get("name"))
-    item_names = {item_name.casefold()} if item_name else set()
-    group_ids = {
-        int(item.get("group") or 0),
-        int(item.get("notRequiredReturnGroupId") or 0),
-    }
-    group_ids.discard(0)
-
-    yandex = context.get("yandexDisk") or {}
-    folders = yandex.get("folders") or {}
-    mappings = context.get("itemMappings") or []
-
-    for mapping in mappings:
-        if not isinstance(mapping, dict):
-            continue
-        if normalize_checklist_key(mapping.get("checklistKey")) != checklist_key:
-            continue
-        mapping_alias = clean_cell_value(mapping.get("folderAlias"))
-        mapping_name = clean_cell_value(mapping.get("itemName")).casefold()
-        mapping_group = int(mapping.get("groupId") or 0)
-        alias_match = bool(mapping_alias and mapping_alias in aliases)
-        identity_match = bool(
-            mapping_name
-            and mapping_name in item_names
-            and (not group_ids or not mapping_group or mapping_group in group_ids)
-        )
-        if not alias_match and not identity_match:
-            continue
-        if mapping_alias:
-            aliases.add(mapping_alias)
-        if mapping_name:
-            item_names.add(mapping_name)
-
-    for alias, raw_folder in (
-        folders.items() if isinstance(folders, dict) else []
-    ):
-        folder = raw_folder if isinstance(raw_folder, dict) else {}
-        folder_alias = clean_cell_value(alias)
-        folder_key = normalize_checklist_key(folder.get("checklistKey"))
-        folder_name = clean_cell_value(folder.get("itemName")).casefold()
-        folder_group = int(folder.get("groupId") or 0)
-        alias_match = bool(folder_alias and folder_alias in aliases)
-        identity_match = bool(
-            folder_key == checklist_key
-            and folder_name
-            and folder_name in item_names
-            and (not group_ids or not folder_group or folder_group in group_ids)
-        )
-        if not alias_match and not identity_match:
-            continue
-        _add_folder_path(paths, clean_cell_value(folder.get("path")))
-
-    repair_spec = repair_spec or {}
-    _add_folder_path(paths, clean_cell_value(repair_spec.get("sourcePath")))
-    _add_folder_path(paths, clean_cell_value(repair_spec.get("targetPath")))
-    _add_recovery_paths(paths, custom_recovery)
-
-    latest_job = get_latest_yandex_structure_job_for_item(
-        dialog_id=dialog_id,
-        checklist_key=checklist_key,
-        item_id=clean_cell_value(item.get("id")),
-    ) or {}
-    _add_job_paths(paths, latest_job)
-
-    return sorted(paths.values(), key=str.casefold)
+    from app.checklists.yandex_scope import item_folder
+    return [item_folder(dialog_id, checklist_key, dict(item or {}), context)]
 
 
 def _hash_local_file(
@@ -257,8 +137,8 @@ def find_existing_yandex_document(
     stored_path = normalize_yandex_disk_path(
         clean_cell_value(document.get("yandexPath"))
     )
-    if stored_path:
-        candidate_paths.setdefault(_path_key(stored_path), stored_path)
+    # Ignore persisted file paths: even an identically named file in another
+    # object must never influence this item's synchronization.
     safe_name = Path(expected_name or local_path.name).name
     for folder_path in known_folders:
         file_path = normalize_yandex_disk_path(
@@ -283,6 +163,11 @@ def find_existing_yandex_document(
             })
             continue
         if remote_meta is None:
+            continue
+        from app.checklists.yandex_scope import canonical_path
+        returned_path = clean_cell_value(remote_meta.get("path"))
+        if returned_path and canonical_path(returned_path) != canonical_path(candidate_path):
+            probe_errors.append({"path": candidate_path, "error": "Remote response path differs from requested path"})
             continue
         if clean_cell_value(remote_meta.get("type")).lower() != "file":
             conflicts.append({

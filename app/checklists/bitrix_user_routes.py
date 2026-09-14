@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Request
+from starlette.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
 
 from app.checklists.bitrix_users import (
@@ -33,7 +34,7 @@ async def api_list_bitrix_users(request: Request):
 
     sync = None
     if refresh_mode in {"auto", "1", "true", "force"}:
-        sync = synchronize_bitrix_users(force=refresh_mode == "force")
+        sync = await run_in_threadpool(synchronize_bitrix_users, force=refresh_mode == "force")
 
     users = list_cached_bitrix_users(
         query=query,
@@ -56,7 +57,7 @@ async def api_refresh_bitrix_users(request: Request):
         payload = {}
     payload = payload if isinstance(payload, dict) else {}
 
-    sync = synchronize_bitrix_users(force=True)
+    sync = await run_in_threadpool(synchronize_bitrix_users, force=True)
     query = clean_cell_value(payload.get("q"))
     limit = _limit_param(payload.get("limit"), 50)
     users = list_cached_bitrix_users(query=query, limit=limit)

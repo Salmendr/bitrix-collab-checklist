@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from app.checklists.document_names import unique_file_name, safe_file_name
+
 import copy
 import shutil
 import time
@@ -263,7 +265,7 @@ async def _transactional_upload_document_inner(
     normalized_item_id = clean_cell_value(item_id)
     normalized_user_id = clean_cell_value(acting_user_id)
     normalized_user_name = clean_cell_value(acting_user_name) or "Пользователь"
-    uploaded_name = Path(file.filename or "file.bin").name
+    uploaded_name = safe_file_name(file.filename)
     operation_id = uuid.uuid4().hex
     created_path: Path | None = None
     before_checklist: dict | None = None
@@ -288,6 +290,7 @@ async def _transactional_upload_document_inner(
         )
 
         _, target_item = _find_item(data, normalized_item_id)
+        uploaded_name = unique_file_name(uploaded_name, [d.get("name") for d in target_item.get("documents", [])])
         rel_path = build_upload_rel_path(
             normalized_dialog_id,
             normalized_item_id,
@@ -436,7 +439,12 @@ async def _transactional_upload_document_inner(
         raise
 
 
-async def transactional_replace_document(
+async def transactional_replace_document(**kwargs) -> dict:
+    async with item_mutation_guard(kwargs["dialog_id"], kwargs["checklist_key"], kwargs["item_id"]):
+        return await _transactional_replace_document_inner(**kwargs)
+
+
+async def _transactional_replace_document_inner(
     *,
     session_id: str,
     dialog_id: str,
@@ -455,7 +463,7 @@ async def transactional_replace_document(
     normalized_document_id = clean_cell_value(document_id)
     normalized_user_id = clean_cell_value(acting_user_id)
     normalized_user_name = clean_cell_value(acting_user_name) or "Пользователь"
-    uploaded_name = Path(file.filename or "file.bin").name
+    uploaded_name = safe_file_name(file.filename)
     operation_id = uuid.uuid4().hex
     before_checklist: dict | None = None
     archive_path: Path | None = None
@@ -509,6 +517,7 @@ async def transactional_replace_document(
                 "У текущего файла есть ошибка синхронизации; требуется подтверждение"
             )
 
+        uploaded_name = unique_file_name(uploaded_name, [d.get("name") for d in documents if d.get("id") != normalized_document_id])
         old_local_path = _document_local_path(old_document)
         new_rel_path = build_upload_rel_path(
             normalized_dialog_id,

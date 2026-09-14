@@ -106,6 +106,8 @@ def yandex_project_resource_guard(
     lock = _project_lock(normalized_dialog_id)
     started = time.monotonic()
     lock.acquire()
+    from app.checklists.yandex_scope import active_project
+    scope_token = active_project.set(normalized_dialog_id)
     waited = time.monotonic() - started
     try:
         if waited >= 0.1:
@@ -118,4 +120,5 @@ def yandex_project_resource_guard(
             })
         yield
     finally:
+        active_project.reset(scope_token)
         lock.release()

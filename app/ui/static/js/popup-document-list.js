@@ -214,6 +214,10 @@ function buildDocumentCell(item) {
                 >
                     ${iconSvg('replace')}
                 </button>
+                <a class="doc-file-download checklist-action-button checklist-action-button-download"
+                   href="${esc(openUrl + '&download=1')}" title="Скачать" aria-label="Скачать ${esc(docName)}">
+                    ${iconSvg('download')}
+                </a>
             </div>
             ${mirrorErrorHtml}
             ${historyHtml}

@@ -1,0 +1,212 @@
+[
+  {
+    "path": "app/checklists/bitrix_actor_auth.py",
+    "beforeSha256": null,
+    "afterSha256": "2837f215f286e271b12992af07af69056c0f20868b8edd5acc0fc71e3c9c33c3"
+  },
+  {
+    "path": "app/checklists/bitrix_user_routes.py",
+    "beforeSha256": "d6fa001bc184b587d8c649b61718e7b6b19a280bc0980992c42f421cc5583397",
+    "afterSha256": "1e120da440479edea6b179eabfcbcd923cd0f139725cd04017d766331edb5ac6"
+  },
+  {
+    "path": "app/checklists/document_names.py",
+    "beforeSha256": null,
+    "afterSha256": "9feb2ab90381cfc43991ec8c494e48078cb0dc1aaf31bb9f3a2eb78a5037e07f"
+  },
+  {
+    "path": "app/checklists/document_routes.py",
+    "beforeSha256": "cc970667b892b16dd5386fec1d47ae1c2ddeb6dee25f07acc8fc002caec1bc50",
+    "afterSha256": "baf44a02793fb6bd454ac80d23033be6aa1d43fcbdeb63d4d045b37e28a4132f"
+  },
+  {
+    "path": "app/checklists/edit_session_documents.py",
+    "beforeSha256": "39003cf93c1f3336fdfdc04ffa989a19b54894ce61e2a187bab17a00998a5208",
+    "afterSha256": "2649792cdbba66625fcc7650ab1449916d247d5fdd0eb43c40add50ae25d42fe"
+  },
+  {
+    "path": "app/checklists/edit_sessions.py",
+    "beforeSha256": "701fd3525bbe0e35259dfa0a5514679b351dd1dac30d0c76fc5f2a6a1de845d1",
+    "afterSha256": "54be52a651bd2da4f4496010040946ff2b9d3d7d607e36c0c647679a4e175c8e"
+  },
+  {
+    "path": "app/checklists/id_reminder_routes.py",
+    "beforeSha256": null,
+    "afterSha256": "dbff9064da331b48059ea8b9d7f095dcb9b7805ea86f2b39a3c4ce9d063524eb"
+  },
+  {
+    "path": "app/checklists/id_reminders.py",
+    "beforeSha256": null,
+    "afterSha256": "a25c1a7f8829714c3dcf842f92e1b6f2d8f0e340a8ee44335e713ee922c1c135"
+  },
+  {
+    "path": "app/checklists/item_mutation_guard.py",
+    "beforeSha256": "bc9b7f0c0e8b185f02cfd897aca1bc29076477ed271780ffffe1869b11234b77",
+    "afterSha256": "d82fce9c484a2b3e69d4d30272adc77561dfaef1573d373451b343ab481409ef"
+  },
+  {
+    "path": "app/checklists/public_folder_operations.py",
+    "beforeSha256": "2e93bc7533774ef3de9abca35c9b081f9e6e72ea17689d1f95eef35288173ab6",
+    "afterSha256": "d8753cd5b2af6aca66445f23647266b63ddd877288dc62013240d49fbfb71c0a"
+  },
+  {
+    "path": "app/checklists/public_folder_routes.py",
+    "beforeSha256": "dd606bc7eea75de0f645f66173462e08105a68c03dde771c59daafc504929f64",
+    "afterSha256": "a88696093b2097cb2d3c86f51f9ea5cb755681070e2e967ab2042cec278dd808"
+  },
+  {
+    "path": "app/checklists/replacement_sync.py",
+    "beforeSha256": "f127f3d11d3b272d0528420c8d2e2fe2e9e51bcb5bd31949e610fa5dc1b71378",
+    "afterSha256": "3af876360f76952a995d83650f6ec0ecc5407886cc6a836c30c8b3bc28c6c75e"
+  },
+  {
+    "path": "app/checklists/yandex_context.py",
+    "beforeSha256": "eb1a34bcedd5eaa3773173edfbfb5fea9f6e9534f6318c6286dcb5c99f44980b",
+    "afterSha256": "361a9c379ff9bb66b9716b453d2c20c13a886429f8663584681a3f32f4202e20"
+  },
+  {
+    "path": "app/checklists/yandex_file_reconciliation.py",
+    "beforeSha256": "bd07cfbf1331cb725535be065a82ec08d32dfca25cef732b1b8be20ea67dfa81",
+    "afterSha256": "e56ac5ced865c2f4be4b2ac593c533f1acbd5b9aebd1ad641aa1602fa82221a6"
+  },
+  {
+    "path": "app/checklists/yandex_folders.py",
+    "beforeSha256": "b40e18ed1b94f48bd7a590e07bc5e82df2b775dffe7b39b47d78797a98a826c9",
+    "afterSha256": "fe2ee67d09b47a5b40d8967443b8397e1ee3c652b6cdff3715682dd39658705f"
+  },
+  {
+    "path": "app/checklists/yandex_mirror_queue.py",
+    "beforeSha256": "a193ff639b3300aebae3d7b01c39a3c11f92afe996121b04169fda25fdc4e2b6",
+    "afterSha256": "ffed19d2b0c9e6cf3d3bb30f0222bd744f2b53ef9d894be331f4ba2a3d9b766a"
+  },
+  {
+    "path": "app/checklists/yandex_resource_locks.py",
+    "beforeSha256": "5ddf80e7238d1f2276a5afdd32a88163af479c8b546c22ea9bc3464be38b7f9a",
+    "afterSha256": "7e21dbab870ed16791aa2ff57ef7e6661bc238a96e0a734be5571795b39c86ac"
+  },
+  {
+    "path": "app/checklists/yandex_scope.py",
+    "beforeSha256": null,
+    "afterSha256": "f65f193f19040db1a90f000354263eecb67bceabfd14fc3f10d1e2da40b4d3da"
+  },
+  {
+    "path": "app/db.py",
+    "beforeSha256": "a10240328accd3175465f0e83b33a888fedaafcacd33def10bf60bc11abafcbc",
+    "afterSha256": "3d7409e9e1520289429b2575d3b1d0c210df6fa8293f475f9996ac4b20d520c6"
+  },
+  {
+    "path": "app/ui/static/css/documents.css",
+    "beforeSha256": "dc2671dae5cd97bc18bd2d3f8d903eef15add1406c775f3360015bcda766ef88",
+    "afterSha256": "28fa0ad2dbcde328e3270f5a7b5f08e5884215b6e7d3062ea5e28bbded920117"
+  },
+  {
+    "path": "app/ui/static/css/id-reminders.css",
+    "beforeSha256": null,
+    "afterSha256": "a1b1c8bd24e9680c3cb60cb919c7c12735ae6d36a592812d9fca3bdeb19a5b28"
+  },
+  {
+    "path": "app/ui/static/css/popup-bootstrap.css",
+    "beforeSha256": "582ad6432c880883ea3f4f43561beee46ee6fefe1a93a7c42b62f8c9ef09c657",
+    "afterSha256": "afed9151747ec1ab29c777ce8db6dadf758c99b95f4c7c240583911beb36046f"
+  },
+  {
+    "path": "app/ui/static/css/popup-style-manifest.json",
+    "beforeSha256": "376c6fc57eef29c36ac90776755a2230f8759604471e4d1a7305ac333decae42",
+    "afterSha256": "1977fe9dc70b09f53d51bf6d4846c7eea18009329f26712590b45d3ebbb5a136"
+  },
+  {
+    "path": "app/ui/static/js/checklist-action-icons.js",
+    "beforeSha256": "82c147a2d3f3ed639712cfb51ca4291490890eee345f8e9d78463ddc88584b0f",
+    "afterSha256": "7f45dfe1bf29f07c7abe36305f6851ed44c2826d38dc6ddcc266a9d61f3d8550"
+  },
+  {
+    "path": "app/ui/static/js/folder-script-manifest.json",
+    "beforeSha256": "1c1329e3d6a5f00b683fd9565578d24334a38be1490ed98852876dfd77c2f8d9",
+    "afterSha256": "986638aafc79514c562db842a99698596ef8ac1e8510e7bc994cf97c81821cf5"
+  },
+  {
+    "path": "app/ui/static/js/id-reminders.js",
+    "beforeSha256": null,
+    "afterSha256": "a240bc308255aa10b9f5b9e5a74fee8d9646b88956b7a0e02fc8bdb113598789"
+  },
+  {
+    "path": "app/ui/static/js/popup-document-list.js",
+    "beforeSha256": "e74d38adc05ca2c34f4774e16d5063603e3d7dfd034318f3ed30819203fed7ee",
+    "afterSha256": "52a3b95cdd786a00a7ca161d80dc08d2aaf121f40c026abaa3c84234c713af17"
+  },
+  {
+    "path": "app/ui/static/js/popup-render-orchestrator.js",
+    "beforeSha256": "e64bb8528ac6918d05c039bf8e5294a13f4adbdad9f32a5f5108157b3df3e6c4",
+    "afterSha256": "130edee9a638848cfeda63409c6cc79452aad4886b5cde8d87cea591d3bc7f5d"
+  },
+  {
+    "path": "app/ui/static/js/popup-script-manifest.json",
+    "beforeSha256": "a583115577e8dfa69ba3cdfdba3a629ce3a54d27842303d1721cab26a21da9cc",
+    "afterSha256": "106b95110675a0cd812181362202ec50f80bd451ec256d61287ecb3ba2ca7e40"
+  },
+  {
+    "path": "app/ui/templates/popup.html",
+    "beforeSha256": "306a6608963ce880747066c8ed51a82ad97ea0eb1906faea2c9b831b199dc9db",
+    "afterSha256": "a7e2533ff6894b77567df057f2469e56a29dc4cbb758ee8986bded009a4632a9"
+  },
+  {
+    "path": "app/yandex_disk/client.py",
+    "beforeSha256": "08e982059fdd431342e70b422127a97916914e33dd76369c9668f9be5cad2b26",
+    "afterSha256": "9b3c7773738db3944b269d4c6aa05f32a9e17143011397d9edc587ed222820c6"
+  },
+  {
+    "path": "main.py",
+    "beforeSha256": "6670dd804cd861aee43e1826b5317e816975bdf3083918b2b12e2c7125c0a466",
+    "afterSha256": "408aefee422c9567e763ab58071157518e427f3db3bfc8651a8386c0bdafea22"
+  },
+  {
+    "path": "tests/test_stage8_15_6_1_cancel_yandex_backfill.py",
+    "beforeSha256": null,
+    "afterSha256": "19907af7bff07edb7408a481fd3950bcc9ca8bc96cd15b7a712768f5c16bf76f"
+  },
+  {
+    "path": "tests/test_stage8_15_6_2_yandex_reconciliation_replace.py",
+    "beforeSha256": null,
+    "afterSha256": "2e7ebbededd23db9c656ba635a622dd58060b295b3ffa37e955bf5a47351f517"
+  },
+  {
+    "path": "tests/test_stage8_15_6_recovery.py",
+    "beforeSha256": null,
+    "afterSha256": "9b55519854343e98ee66e12a085049f822a23c51999104bfd2e09e2ef527187b"
+  },
+  {
+    "path": "tests/test_stage8_15_7_1_folder_download.py",
+    "beforeSha256": null,
+    "afterSha256": "0e8911dda8e5dc8bae9d1ef9e2806ca6423ee7d46da397ff5677b0a0e974ba43"
+  },
+  {
+    "path": "tests/test_stage8_15_7_public_folder_dnd.py",
+    "beforeSha256": null,
+    "afterSha256": "83421ddde8984b52df662da2930613a5908a1be88a4002910debc7d13b761451"
+  },
+  {
+    "path": "tests/test_stage8_15_8_archive_staged_upload.py",
+    "beforeSha256": null,
+    "afterSha256": "8f12a19ea6a0e6d6b9505c8c635356b6656bc872d30412e93162080c833ebfe4"
+  },
+  {
+    "path": "tests/test_stage8_15_9_http.py",
+    "beforeSha256": null,
+    "afterSha256": "4596f7717cb777e2312cac23d2fa9de7f1463ed87be6a83f75af6cf70c664abe"
+  },
+  {
+    "path": "tests/test_stage8_15_9_reminders.py",
+    "beforeSha256": null,
+    "afterSha256": "f28e013f5f86121e07f946194b8a5de9b0c89775d87785d3659e528ce9253178"
+  },
+  {
+    "path": "tests/test_stage8_15_9_sync.py",
+    "beforeSha256": null,
+    "afterSha256": "2ad660a9823656b4585be38747dff514be345c128b6d27a185fcbf45fe0402f2"
+  },
+  {
+    "path": "tools/run_offline_tests.py",
+    "beforeSha256": null,
+    "afterSha256": "345c88cf14719f138b75c72ee4657fda59ac6c92223d578a2cb186fac7432ac1"
+  }
+]

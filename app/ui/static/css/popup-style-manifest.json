@@ -1,5 +1,5 @@
 {
-  "version": "8.15.8-staged-upload",
+  "version": "8.15.9",
   "orderedFiles": [
     "popup.css",
     "uploads.css",
@@ -9,7 +9,8 @@
     "checklist-overrides.css",
     "archive.css",
     "notifications.css",
-    "assignment-history.css"
+    "assignment-history.css",
+    "id-reminders.css"
   ],
   "sourceFiles": [
     "popup.css",
@@ -20,7 +21,8 @@
     "checklist-overrides.css",
     "archive.css",
     "notifications.css",
-    "assignment-history.css"
+    "assignment-history.css",
+    "id-reminders.css"
   ],
   "sourceSha256": "162376c5fff15473b87ea3da51097f18be90c18312da01eb99f0978a87ac0f9b",
   "sourceLength": 59395,
@@ -31,15 +33,15 @@
     "documents": ".doc-cell {",
     "checklistOverrides": ".add-item-row {"
   },
-  "assetVersion": "8.15.8-staged-upload",
+  "assetVersion": "8.15.9",
   "modules": {
     "popup.css": {
-      "sha256": "6e8b8a6714fb2cf5357271a748c7676206ed924c7f8ee3090e66f143f69253f8",
-      "bytes": 1581
+      "sha256": "677647285c9b9467b40a3bf0c2c285c0fcc02b812c239cd2b0765af54e0f970e",
+      "bytes": 1560
     },
     "uploads.css": {
-      "sha256": "c4ffa05937180860bacac501afab4acb3a08a8d0f3cf9a1d7d16de9ad6ca6932",
-      "bytes": 2452
+      "sha256": "f19410f972b54bd9516994a2935b00dfc1cadfe55106bc95ea7931d07135d224",
+      "bytes": 2341
     },
     "checklist.css": {
       "sha256": "ba06b46334d97a9674c65a19da03abc91fbe8e171b97693a940faa080967084a",
@@ -50,8 +52,8 @@
       "bytes": 13103
     },
     "documents.css": {
-      "sha256": "dc2671dae5cd97bc18bd2d3f8d903eef15add1406c775f3360015bcda766ef88",
-      "bytes": 9695
+      "sha256": "28fa0ad2dbcde328e3270f5a7b5f08e5884215b6e7d3062ea5e28bbded920117",
+      "bytes": 9700
     },
     "checklist-overrides.css": {
       "sha256": "e973250044cb058101787ee202808d9020043de46645e764bc422ebf9361d979",
@@ -68,6 +70,10 @@
     "assignment-history.css": {
       "sha256": "bf1a50de480170a88657737e5cb037f268463ba06818934b9588f623b0b77b9a",
       "bytes": 4500
+    },
+    "id-reminders.css": {
+      "sha256": "a1b1c8bd24e9680c3cb60cb919c7c12735ae6d36a592812d9fca3bdeb19a5b28",
+      "bytes": 2835
     }
   },
   "notes": [
@@ -93,5 +99,7 @@
     "Stage 8.15.8 adds a responsive pre-upload file-card grid that grows downward one row at a time.",
     "Each staged file has a hover/focus red remove control, and the confirmation action appears only after the first file is staged.",
     "Stage 8.15.8 returns the disabled share action to the standard icon-only button width."
-  ]
+  ],
+  "hashMode": "utf8-lf",
+  "generatedAt": "2026-09-11T02:15:36+00:00"
 }

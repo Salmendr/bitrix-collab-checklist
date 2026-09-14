@@ -128,6 +128,7 @@ function renderAll() {
     renderProjectChecklistList();
     renderProjectRootFolderButton();
     renderStageFolderButton();
+    if (window.ChecklistIDReminders) window.ChecklistIDReminders.refresh();
 
     if (
         window.ChecklistPopupItemOrdering

@@ -89,7 +89,16 @@ from app.checklists.yandex_structure_queue import (
 
 from app.logging_utils import write_debug_log
 
+from app.checklists.id_reminder_routes import router as id_reminder_router
+from app.checklists.id_reminders import start_worker as start_id_reminders, stop_worker as stop_id_reminders
+
 app = FastAPI()
+app.include_router(id_reminder_router)
+
+@app.on_event("shutdown")
+def shutdown_id_reminders():
+    stop_id_reminders()
+
 
 @app.middleware("http")
 async def upload_request_debug_middleware(request: Request, call_next):
@@ -202,3 +211,5 @@ def startup_event():
     start_yandex_mirror_reconciliation(
         source="startup"
     )
+
+    start_id_reminders()

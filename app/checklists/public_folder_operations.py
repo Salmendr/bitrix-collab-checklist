@@ -138,23 +138,7 @@ def _name_parts(file_name: str) -> tuple[str, str, int]:
     return stem or "file", suffix, 1
 
 
-def unique_file_name(file_name: str, occupied_names) -> str:
-    original = Path(file_name or "file.bin").name or "file.bin"
-    occupied = {
-        clean_cell_value(value).casefold()
-        for value in occupied_names or []
-        if clean_cell_value(value)
-    }
-    if original.casefold() not in occupied:
-        return original
-
-    base, suffix, current_number = _name_parts(original)
-    number = max(2, current_number + 1 if current_number >= 2 else 2)
-    while True:
-        candidate = f"{base} ({number}){suffix}"
-        if candidate.casefold() not in occupied:
-            return candidate
-        number += 1
+from app.checklists.document_names import unique_file_name
 
 
 def _find_item(data: dict, item_id: str) -> tuple[int, dict]:

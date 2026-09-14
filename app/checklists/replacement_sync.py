@@ -452,6 +452,13 @@ def handle_replacement_upload_job(
                 archive_status="not_required",
             )
 
+        from app.checklists.yandex_scope import project_root, is_inside
+        if not is_inside(old_yandex_path, project_root(replacement.get("dialog_id"))):
+            return complete_replacement_without_delete(
+                replacement=replacement, new_yandex_path=new_yandex_path,
+                stage="foreign_old_path_preserved", archive_status="preserved_foreign_project",
+            )
+
         if old_yandex_path == new_yandex_path:
             return complete_replacement_without_delete(
                 replacement=replacement,

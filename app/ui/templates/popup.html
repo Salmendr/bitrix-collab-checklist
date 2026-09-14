@@ -4,7 +4,7 @@
         <meta charset="utf-8">
         <title>[[POPUP_FULL_TITLE]]</title>
         <script src="https://api.bitrix24.com/api/v1/"></script>
-        <link rel="stylesheet" href="ui-static/css/popup-bootstrap.css?v=8.15.8-staged-upload">
+        <link rel="stylesheet" href="ui-static/css/popup-bootstrap.css?v=8.15.9">
         <!-- Stage 6.2: popup styles are loaded through popup-bootstrap.css. -->
     </head>
     <body>
@@ -13,6 +13,11 @@
                 <div class="header">
                     <div class="header-main">
                         <div class="title" id="popupTitle">[[POPUP_FULL_TITLE]]</div>
+                        <div id="idReminderControl" class="id-reminder-control" hidden>
+                            <label><input type="checkbox" id="idReminderEnabled"> Включить оповещения</label>
+                            <button type="button" id="idReminderSettings" class="id-reminder-settings" hidden>Настроить</button>
+                            <span id="idReminderSummary" class="id-reminder-summary" aria-live="polite"></span>
+                        </div>
                         <div style="display:flex; align-items:flex-end; gap:10px; flex-wrap:wrap;">
                             <div class="progress-box">
                                 <div class="progress-label">Прогресс</div>
@@ -136,14 +141,14 @@
             });
         </script>
         <script src="ui-static/js/popup-bootstrap.js?v=8.15.1-bitrix-hotfix"></script>
-        <script src="ui-static/js/checklist-action-icons.js?v=8.15.8-staged-upload"></script>
+        <script src="ui-static/js/checklist-action-icons.js?v=8.15.9"></script>
         <script src="ui-static/js/popup-api-client.js?v=8.15.1-bitrix-hotfix"></script>
         <script src="ui-static/js/popup-bitrix-bridge.js?v=8.15.1-bitrix-hotfix"></script>
         <script src="ui-static/js/checklist-window-channel.js?v=8.15.1-bitrix-hotfix"></script>
         <script src="ui-static/js/popup-client-session.js?v=8.15.1-bitrix-hotfix"></script>
         <script src="ui-static/js/popup-document-refresh.js?v=8.15.1-bitrix-hotfix"></script>
         <script src="ui-static/js/popup-core.js?v=8.15.1-bitrix-hotfix"></script>
-        <script src="ui-static/js/popup-document-list.js?v=8.15.8-staged-upload"></script>
+        <script src="ui-static/js/popup-document-list.js?v=8.15.9"></script>
         <script src="ui-static/js/document-assignment-history.js?v=8.15.1-bitrix-hotfix"></script>
         <script src="ui-static/js/public-folder-share.js?v=8.15.8-staged-upload"></script>
         <script src="ui-static/js/upload-staging.js?v=8.15.8-staged-upload"></script>
@@ -156,6 +161,7 @@
         <script src="ui-static/js/popup-edit-session.js?v=8.15.5-id-yandex-folder-return"></script>
         <script src="ui-static/js/popup-inactivity.js?v=8.15.5-id-yandex-folder-return"></script>
         <script src="ui-static/js/bitrix-user-picker.js?v=8.15.1-bitrix-hotfix"></script>
+        <script src="ui-static/js/id-reminders.js?v=8.15.9"></script>
         <script src="ui-static/js/bitrix-company-picker.js?v=8.15.1-bitrix-hotfix"></script>
         <script src="ui-static/js/notification-draft-ui.js?v=8.15.1-bitrix-hotfix"></script>
         <script src="ui-static/js/popup-notification-drafts.js?v=8.15.1-bitrix-hotfix"></script>
@@ -176,5 +182,5 @@
         <script src="ui-static/js/popup-event-opr.js?v=8.15.1-bitrix-hotfix"></script>
         <script src="ui-static/js/popup-event-generic.js?v=8.15.1-bitrix-hotfix"></script>
         <script src="ui-static/js/popup-renderer-registry.js?v=8.15.1-bitrix-hotfix"></script>
-        <script src="ui-static/js/popup-render-orchestrator.js?v=8.15.5-id-yandex-folder-return"></script>
+        <script src="ui-static/js/popup-render-orchestrator.js?v=8.15.9"></script>
         <script src="ui-static/js/popup-init.js?v=8.15.5-id-yandex-folder-return"></script>
