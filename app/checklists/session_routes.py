@@ -83,7 +83,13 @@ async def api_checklist_close_session(request: Request):
                 session_data["resolvedDialogId"] = session_dialog_id
                 data = normalize_checklist_data(session_data, checklist_key)
                 data["resolvedDialogId"] = session_dialog_id
-                save_checklist(session_dialog_id, data, checklist_key)
+                data = save_checklist(
+                    session_dialog_id,
+                    data,
+                    checklist_key,
+                    preserve_server_yandex=True,
+                )
+                data["resolvedDialogId"] = session_dialog_id
             else:
                 data = get_checklist(session_dialog_id, checklist_key)
 
@@ -190,7 +196,13 @@ async def api_checklist_close_session(request: Request):
         session_data["resolvedDialogId"] = dialog_id
         data = normalize_checklist_data(session_data, checklist_key)
         data["resolvedDialogId"] = dialog_id
-        save_checklist(dialog_id, data, checklist_key)
+        data = save_checklist(
+            dialog_id,
+            data,
+            checklist_key,
+            preserve_server_yandex=True,
+        )
+        data["resolvedDialogId"] = dialog_id
     else:
         data = get_checklist(dialog_id, checklist_key)
 
@@ -311,4 +323,3 @@ async def api_checklist_finalize_session(request: Request):
             },
             status_code=500,
         )
-

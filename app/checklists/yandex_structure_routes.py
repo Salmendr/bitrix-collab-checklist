@@ -244,6 +244,18 @@ async def api_retry_yandex_recovery(request: Request):
             "files": {},
         })
 
+    # Explicit retry may repair a confirmed move overwritten by an old popup.
+    # Do this before folder/file recovery, including the conflicting owner.
+    from app.checklists.yandex_binding_recovery import restore_confirmed_item_bindings
+    try:
+        binding_recovery = await run_in_threadpool(
+            restore_confirmed_item_bindings,
+            dialog_id=dialog_id, checklist_key=checklist_key, item_id=item_id,
+            source="manual_combined_recovery",
+        )
+    except Exception as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=409)
+
     custom_result = await run_in_threadpool(
         reconcile_custom_item_yandex_folder,
         dialog_id=dialog_id,
@@ -277,7 +289,9 @@ async def api_retry_yandex_recovery(request: Request):
     )
     # Keep the existing frontend refresh contract while retry now performs a
     # full remote verification instead of blindly requeueing an upload.
-    files["requeued"] = int(files.get("queued") or 0) + int((files.get("replacementCleanup") or {}).get("queued") or 0)
+    files["requeued"] = (int(files.get("queued") or 0)
+                         + int(files.get("replacementContinuationQueued") or 0)
+                         + int((files.get("replacementCleanup") or {}).get("queued") or 0))
     latest = (
         get_latest_yandex_structure_job_for_item(
             dialog_id=dialog_id,
@@ -290,5 +304,6 @@ async def api_retry_yandex_recovery(request: Request):
         "ok": True,
         "job": _public_job(latest) if latest else {},
         "recovery": custom_result,
+        "bindingRecovery": binding_recovery,
         "files": files,
     })

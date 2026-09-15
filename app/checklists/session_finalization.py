@@ -500,11 +500,16 @@ def _persist_finalization_sessions(
                 checklist_key,
             )
             data["resolvedDialogId"] = session_dialog_id
-            save_checklist(
+            data = save_checklist(
                 session_dialog_id,
                 data,
                 checklist_key,
+                preserve_server_yandex=True,
             )
+            # save_checklist returns canonical persisted data. Restore this
+            # request-only value so the existing chat-message link builder
+            # still targets the exact project dialog.
+            data["resolvedDialogId"] = session_dialog_id
         else:
             data = get_checklist(
                 session_dialog_id,

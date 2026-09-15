@@ -508,6 +508,20 @@ def reconcile_yandex_mirror_documents(
                                         "yandexPath": matched_path,
                                     },
                                 )
+                                # A manual match confirms the upload without PUT,
+                                # but an interrupted replacement still needs its
+                                # usual post-upload continuation. Existing delete
+                                # jobs are handled by manual cleanup below.
+                                if is_manual_recovery(source) and matched_job.get("job_id"):
+                                    from app.checklists.replacement_sync import handle_document_replacement_after_job
+                                    replacement = get_document_replacement_by_upload_job(matched_job["job_id"]) or {}
+                                    if replacement.get("status") in {"pending", "error"} and not replacement.get("delete_job_id"):
+                                        continued = handle_document_replacement_after_job(matched_job["job_id"])
+                                        if continued.get("deleteJobId"):
+                                            dispatched = enqueue_yandex_mirror_job(
+                                                continued["deleteJobId"], source="manual_verified_replacement",
+                                            )
+                                            stats["replacementContinuationQueued"] = stats.get("replacementContinuationQueued", 0) + int(bool(dispatched.get("queued")))
                                 stats["existing"] += 1
                                 stats["remoteVerified"] += 1
                                 if (

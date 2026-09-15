@@ -28,30 +28,48 @@ def make_storage_dialog_id(dialog_id: str, checklist_key: str = "id") -> str:
     return dialog_id if checklist_key == "id" else f"{dialog_id}::{checklist_key}"
 
 
-def save_checklist(dialog_id: str, data: dict, checklist_key: str = "id"):
+def save_checklist(dialog_id: str, data: dict, checklist_key: str = "id", *,
+                   preserve_server_yandex: bool = False):
     storage_dialog_id = make_storage_dialog_id(dialog_id, checklist_key)
     checklist_key = normalize_checklist_key(checklist_key)
     data = normalize_checklist_data(data, checklist_key)
 
     conn = get_conn()
-    conn.execute("""
-        INSERT INTO checklists(dialog_id, title, data_json)
-        VALUES (?, ?, ?)
-        ON CONFLICT(dialog_id) DO UPDATE SET
-            title=excluded.title,
-            data_json=excluded.data_json
-    """, (
-        storage_dialog_id,
-        data.get("title", "Чек-лист"),
-        json.dumps(data, ensure_ascii=False),
-    ))
-    conn.commit()
-    conn.close()
+    try:
+        # Browser snapshots can predate a completed folder move or file job.
+        # Read and preserve server bookkeeping in the SAME write transaction;
+        # workers cannot finish between this read and the checklist write.
+        conn.execute("BEGIN IMMEDIATE")
+        if preserve_server_yandex:
+            row = conn.execute(
+                "SELECT data_json FROM checklists WHERE dialog_id = ?",
+                (storage_dialog_id,),
+            ).fetchone()
+            if row:
+                from app.checklists.edit_session_changes import merge_background_yandex_state
+                data = merge_background_yandex_state(
+                    data, json.loads(row["data_json"]), None, checklist_key,
+                )
+        conn.execute("""
+            INSERT INTO checklists(dialog_id, title, data_json)
+            VALUES (?, ?, ?)
+            ON CONFLICT(dialog_id) DO UPDATE SET
+                title=excluded.title,
+                data_json=excluded.data_json
+        """, (
+            storage_dialog_id,
+            data.get("title", "Чек-лист"),
+            json.dumps(data, ensure_ascii=False),
+        ))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
     order_version = synchronize_checklist_item_order(
-        dialog_id,
-        checklist_key,
-        data,
+        dialog_id, checklist_key, data,
     )
     data["orderVersion"] = int(order_version or 0)
     return data
