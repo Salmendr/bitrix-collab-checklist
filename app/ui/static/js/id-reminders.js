@@ -2,6 +2,9 @@
     'use strict';
     const host = document.getElementById('idReminderControl');
     const toggle = document.getElementById('idReminderEnabled');
+    const toggleLabel = document.getElementById('idReminderToggleLabel');
+    const adminIds = new Set(['18', '138', '142']);
+    let canManage = false;
     const settingsButton = document.getElementById('idReminderSettings');
     const summary = document.getElementById('idReminderSummary');
     let config = { enabled: false, days: [0,1,2,3,4,5,6], hour: 9, minute: 0, timezoneOffset: 600, recipients: [] };
@@ -13,10 +16,21 @@
         const who = getCurrentEditorIdentity();
         return { dialogId, sessionId, userId: String(who.userId || '') };
     }
+    function isAdmin() {
+        return adminIds.has(String(getCurrentEditorIdentity().userId || ''));
+    }
+    function currentSession() {
+        return global.ChecklistPopupEditSession && global.ChecklistPopupEditSession.getSessionId() || '';
+    }
+    function loadKey(sessionId) {
+        return sessionId + ':' + String(getCurrentEditorIdentity().userId || '');
+    }
     function zoneLabel(offset) {
         return 'UTC' + (offset >= 0 ? '+' : '−') + pad(Math.floor(Math.abs(offset) / 60)) + ':' + pad(Math.abs(offset) % 60);
     }
     async function request(sessionId, value) {
+        if (value && (!isAdmin() || !canManage)) throw new Error('Настройка оповещений доступна только администраторам');
+        const key = loadKey(sessionId);
         const payload = actor(sessionId);
         const url = appUrl('api/checklist/id-reminders');
         if (global.ChecklistPopupBitrix) await global.ChecklistPopupBitrix.init();
@@ -29,32 +43,48 @@
         } : { headers });
         const result = await response.json();
         if (!response.ok || !result.ok) throw new Error(result.error || 'Не удалось сохранить оповещения');
-        config = result.config; deliveries = result.deliveries || []; loaded = true; isPending = !!result.pending;
-        paint(result.pending);
+        if (key !== loadKey(currentSession())) return null;
+        canManage = isAdmin() && result.canManage === true;
+        config = { ...config, ...result.config, recipients: result.config.recipients || [] };
+        deliveries = canManage ? result.deliveries || [] : [];
+        loaded = true; isPending = canManage && !!result.pending;
+        paint(isPending);
         return result;
     }
     function paint(pending) {
-        toggle.checked = !!config.enabled;
-        settingsButton.hidden = !config.enabled;
-        summary.textContent = config.enabled ? ((config.days.length === 7 ? 'Ежедневно' : config.days.map(d => weekdays[d]).join(', '))
+        const editable = isAdmin() && canManage && loaded;
+        const enabled = loaded && !!config.enabled;
+        host.hidden = currentChecklistKey !== 'id' || (!editable && !enabled);
+        toggleLabel.hidden = !editable;
+        toggle.disabled = !editable;
+        toggle.checked = enabled;
+        settingsButton.hidden = !editable || !enabled;
+        settingsButton.disabled = !editable;
+        pending = editable && pending;
+        summary.textContent = enabled ? ((config.days.length === 7 ? 'Ежедневно' : config.days.map(d => weekdays[d]).join(', '))
             + ' · ' + pad(config.hour) + ':' + pad(config.minute) + ' ' + zoneLabel(config.timezoneOffset)
             + (pending ? ' · после сохранения' : '')) : (pending ? 'Отключение после сохранения' : '');
     }
     async function refresh() {
         if (!host) return;
-        host.hidden = currentChecklistKey !== 'id';
-        if (host.hidden || loading) return;
-        const sessionId = global.ChecklistPopupEditSession && global.ChecklistPopupEditSession.getSessionId();
-        if (!sessionId || loadedSession === sessionId) return;
+        if (currentChecklistKey !== 'id') { host.hidden = true; return; }
+        const sessionId = currentSession();
+        if (!sessionId) { loaded = false; canManage = false; paint(false); return; }
+        const key = loadKey(sessionId);
+        if (loadedSession === key) { paint(isPending); return; }
+        if (loading) return;
+        loaded = false; canManage = false; paint(false);
         loading = true;
-        try { await request(sessionId); loadedSession = sessionId; }
-        catch (error) { summary.textContent = error.message; }
-        finally { loading = false; }
+        try { if (await request(sessionId)) loadedSession = key; }
+        catch (error) { report(error); }
+        finally { loading = false; if (key !== loadKey(currentSession())) refresh(); }
     }
     async function open() {
+        if (!isAdmin()) throw new Error('Настройка оповещений доступна только администраторам');
         const sessionId = await requireEditingSession('настройка оповещений');
-        if (!loaded || loadedSession !== sessionId) await request(sessionId);
-        loadedSession = sessionId;
+        if (!loaded || loadedSession !== loadKey(sessionId)) await request(sessionId);
+        if (!canManage) throw new Error('Настройка оповещений доступна только администраторам');
+        loadedSession = loadKey(sessionId);
         if (document.querySelector(".id-reminder-dialog")) return;
         let recipients = config.recipients.map(u => ({ ...u }));
         const box = document.createElement('dialog');
@@ -114,10 +144,14 @@
         });
         box.showModal(); q('#idReminderUser').focus();
     }
-    function report(error) { paint(isPending); summary.textContent=error.message; }
+    function report(error) {
+        paint(isPending);
+        if (isAdmin() && currentChecklistKey === 'id') { host.hidden = false; summary.textContent = error.message; }
+    }
     if (host) {
         toggle.addEventListener('change',async()=>{
             const requested = toggle.checked; toggle.checked=config.enabled;
+            if (!isAdmin() || !canManage) { paint(isPending); return; }
             try {
                 if(requested) await open();
                 else { const sessionId=await requireEditingSession('отключение оповещений'); await request(sessionId,{...config,enabled:false}); }

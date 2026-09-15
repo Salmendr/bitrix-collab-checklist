@@ -61,6 +61,7 @@ BACKGROUND_DOCUMENT_FIELDS = frozenset({
 })
 
 BACKGROUND_ARCHIVE_FIELDS = frozenset({
+    "originalYandexPath",
     "yandexDeleteStatus",
     "yandexDeleteJobId",
     "yandexDeleteError",

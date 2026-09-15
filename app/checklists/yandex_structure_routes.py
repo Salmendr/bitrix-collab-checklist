@@ -277,7 +277,7 @@ async def api_retry_yandex_recovery(request: Request):
     )
     # Keep the existing frontend refresh contract while retry now performs a
     # full remote verification instead of blindly requeueing an upload.
-    files["requeued"] = int(files.get("queued") or 0)
+    files["requeued"] = int(files.get("queued") or 0) + int((files.get("replacementCleanup") or {}).get("queued") or 0)
     latest = (
         get_latest_yandex_structure_job_for_item(
             dialog_id=dialog_id,

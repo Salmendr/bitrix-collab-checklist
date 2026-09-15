@@ -98,178 +98,37 @@ def update_archive_version_yandex_state(
     delete_job_id: str = "",
     delete_error: str = "",
 ) -> bool:
-    dialog_id = normalize_dialog_id(
-        replacement.get("dialog_id")
-    )
-    checklist_key = normalize_checklist_key(
-        replacement.get("checklist_key")
-    )
-    item_id = clean_cell_value(
-        replacement.get("item_id")
-    )
-    archive_version_id = clean_cell_value(
-        replacement.get("archive_version_id")
-    )
-
-    if (
-        not dialog_id
-        or not item_id
-        or not archive_version_id
-    ):
-        return False
-
-    data = get_checklist(
-        dialog_id,
-        checklist_key,
-    )
-
-    items = data.get("items", []) or []
-    changed = False
-
-    for item_index, raw_item in enumerate(items):
-        if clean_cell_value(raw_item.get("id")) != item_id:
-            continue
-
-        item = migrate_legacy_document_fields(
-            deepcopy(raw_item)
-        )
-
-        next_documents = []
-
-        for raw_document in normalize_documents_list(
-            item.get("documents")
-        ):
-            document = dict(raw_document)
-
-            versions = normalize_archive_versions(
-                document.get("archiveVersions"),
-                series_id=clean_cell_value(
-                    document.get("seriesId")
-                ),
-            )
-
-            next_versions = []
-
-            for raw_version in versions:
-                version = dict(raw_version)
-
-                if (
-                    clean_cell_value(version.get("id"))
-                    == archive_version_id
-                ):
-                    version["yandexDeleteStatus"] = (
-                        clean_cell_value(delete_status)
-                    )
-                    version["yandexDeleteJobId"] = (
-                        clean_cell_value(delete_job_id)
-                    )
-                    version["yandexDeleteError"] = (
-                        clean_cell_value(delete_error)
-                    )
+    # Update only these runtime fields in one transaction. A concurrent upload
+    # or relocation must not be overwritten by a whole-checklist save.
+    import json
+    from app.db import get_conn
+    from app.checklists.storage import make_storage_dialog_id
+    from app.checklists.yandex_replacement_cleanup import archive_versions
+    storage_id = make_storage_dialog_id(replacement.get("dialog_id"), replacement.get("checklist_key"))
+    conn = get_conn()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute("SELECT data_json FROM checklists WHERE dialog_id=?", (storage_id,)).fetchone()
+        data = json.loads(row["data_json"]) if row else {}
+        changed = False
+        for item in data.get("items", []):
+            if item.get("id") != replacement.get("item_id"):
+                continue
+            for version in archive_versions(item):
+                if (version.get("id") or version.get("versionId")) == replacement.get("archive_version_id"):
+                    version.update(yandexDeleteStatus=delete_status, yandexDeleteJobId=delete_job_id,
+                                   yandexDeleteError=delete_error)
                     changed = True
-
-                next_versions.append(version)
-
-            document["archiveVersions"] = (
-                normalize_archive_versions(
-                    next_versions,
-                    series_id=clean_cell_value(
-                        document.get("seriesId")
-                    ),
-                )
-            )
-
-            next_documents.append(document)
-
-        item["documents"] = normalize_documents_list(
-            next_documents
-        )
-
-        detached_series = (
-            normalize_detached_archive_series(
-                item.get("archivedDocumentSeries")
-            )
-        )
-
-        next_detached_series = []
-
-        for raw_series in detached_series:
-            series = dict(raw_series)
-
-            versions = normalize_archive_versions(
-                series.get("archiveVersions"),
-                series_id=clean_cell_value(
-                    series.get("seriesId")
-                ),
-            )
-
-            next_versions = []
-
-            for raw_version in versions:
-                version = dict(raw_version)
-
-                if (
-                    clean_cell_value(version.get("id"))
-                    == archive_version_id
-                ):
-                    version["yandexDeleteStatus"] = (
-                        clean_cell_value(delete_status)
-                    )
-                    version["yandexDeleteJobId"] = (
-                        clean_cell_value(delete_job_id)
-                    )
-                    version["yandexDeleteError"] = (
-                        clean_cell_value(delete_error)
-                    )
-                    changed = True
-
-                next_versions.append(version)
-
-            series["archiveVersions"] = (
-                normalize_archive_versions(
-                    next_versions,
-                    series_id=clean_cell_value(
-                        series.get("seriesId")
-                    ),
-                )
-            )
-
-            next_detached_series.append(series)
-
-        item["archivedDocumentSeries"] = (
-            normalize_detached_archive_series(
-                next_detached_series
-            )
-        )
-
-        items[item_index] = item
-        break
-
-    if not changed:
-        write_debug_log(
-            "replacement_archive_version_not_found",
-            {
-                "operationId": replacement.get(
-                    "operation_id"
-                ),
-                "dialogId": dialog_id,
-                "checklistKey": checklist_key,
-                "itemId": item_id,
-                "archiveVersionId": archive_version_id,
-                "deleteStatus": delete_status,
-            },
-        )
-        return False
-
-    data["items"] = items
-
-    save_checklist(
-        dialog_id,
-        data,
-        checklist_key,
-    )
-
-    return True
+        if changed:
+            conn.execute("UPDATE checklists SET data_json=? WHERE dialog_id=?",
+                         (json.dumps(data, ensure_ascii=False), storage_id))
+        conn.commit()
+        return changed
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 
 def complete_replacement_without_delete(
@@ -759,10 +618,17 @@ def handle_replacement_delete_job(
             "replacement": updated or {},
         }
 
+    if job_status == "deleted" and job_stage == "already_missing":
+        error = "Необходимо проверить старую версию в актуальной папке пункта. Нажмите синхронизацию."
+        update_archive_version_yandex_state(replacement, "error", job_id, error)
+        mark_document_replacement_failed(replacement.get("operation_id"), error, stage="old_yandex_location_unverified")
+        return {"ok": False, "handled": True, "action": "old_yandex_location_unverified", "deleteJobId": job_id}
+
     if job_status == "deleted":
+        absent = job_stage == "confirmed_absent"
         update_archive_version_yandex_state(
             replacement=replacement,
-            delete_status="deleted",
+            delete_status="confirmed_absent" if absent else "deleted",
             delete_job_id=job_id,
             delete_error="",
         )
@@ -770,14 +636,14 @@ def handle_replacement_delete_job(
         updated = update_document_replacement(
             replacement.get("operation_id"),
             status="completed",
-            stage="old_yandex_deleted",
+            stage="old_yandex_confirmed_absent" if absent else "old_yandex_deleted",
             error="",
         )
 
         return {
             "ok": True,
             "handled": True,
-            "action": "old_yandex_deleted",
+            "action": "old_yandex_confirmed_absent" if absent else "old_yandex_deleted",
             "operationId": replacement.get(
                 "operation_id"
             ),

@@ -741,7 +741,7 @@ def list_pending_yandex_job_ids_for_item(
             SELECT job_id
             FROM upload_jobs
             WHERE status = 'queued'
-              AND job_type = 'upload'
+              AND job_type IN ('upload', 'delete')
               AND dialog_id = ?
               AND checklist_key = ?
               AND item_id = ?

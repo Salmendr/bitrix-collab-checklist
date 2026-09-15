@@ -252,16 +252,13 @@ def process_yandex_structure_job(job_id: str) -> dict:
         ):
             result = _execute_yandex_structure_mutation(job)
 
-        completed = finish_yandex_structure_job(
-            job_id,
-            result=result,
-        )
-        persist_item_yandex_structure_state(
-            dialog_id=dialog_id,
-            checklist_key=checklist_key,
-            item_id=item_id,
-            job=completed,
-        )
+            # Persist file addresses before marking the durable move completed.
+            # A crash here leaves a retriable move; its prefix rebase is idempotent.
+            persist_item_yandex_structure_state(
+                dialog_id=dialog_id, checklist_key=checklist_key, item_id=item_id,
+                job={**job, "status": "completed", "error": "", "result": result},
+            )
+            completed = finish_yandex_structure_job(job_id, result=result)
 
         # File uploads for the same item are durable but deliberately kept out
         # of the in-memory mirror queue until the folder mutation completes.

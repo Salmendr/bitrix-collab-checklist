@@ -15,6 +15,13 @@ from app.checklists.config import get_checklist_config
 from app.checklists.messages import build_checklist_message_link, build_message_value_link
 from app.checklists.utils import clean_cell_value, normalize_dialog_id
 
+ID_REMINDER_ADMIN_USER_IDS = frozenset({"18", "138", "142"})
+
+
+def can_manage_id_reminders(user_id):
+    return clean_cell_value(str(user_id or "")) in ID_REMINDER_ADMIN_USER_IDS
+
+
 DEFAULT_CONFIG = {"enabled": False, "days": list(range(7)), "hour": 9,
                   "minute": 0, "timezoneOffset": 600, "recipients": []}
 _STOP = threading.Event()
@@ -106,6 +113,9 @@ def get_settings(dialog_id, session_id=""):
 
 
 def save_draft(*, dialog_id, session_id, user_id, config):
+    from app.checklists.edit_sessions import EditSessionPermissionError
+    if not can_manage_id_reminders(user_id):
+        raise EditSessionPermissionError("Настройка оповещений доступна только администраторам")
     normalized = normalize_config(config)
     from app.checklists.edit_session_changes import acquire_checklist_for_edit_session
     from app.checklists.edit_sessions import EditSessionConflictError
@@ -132,6 +142,9 @@ def finalize_drafts(conn, session_id, *, commit, now):
     ensure_schema(conn)
     if commit:
         for row in conn.execute("SELECT * FROM id_reminder_drafts WHERE session_id=?", (session_id,)).fetchall():
+            # Do not publish an old non-admin draft left open before this update.
+            if not can_manage_id_reminders(row["updated_by"]):
+                continue
             conn.execute("""INSERT INTO id_reminder_settings VALUES(?,?,?,?,?)
                             ON CONFLICT(dialog_id) DO UPDATE SET config_json=excluded.config_json,
                             revision=excluded.revision,updated_at=excluded.updated_at,updated_by=excluded.updated_by""",

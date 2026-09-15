@@ -221,7 +221,7 @@ def document_still_exists(
 
 
 def get_upload_job_blocking_structure_job(job: dict) -> dict | None:
-    if clean_cell_value((job or {}).get("job_type")) != "upload":
+    if clean_cell_value((job or {}).get("job_type")) not in {"upload", "delete"}:
         return None
     return get_blocking_yandex_structure_job_for_item(
         dialog_id=(job or {}).get("dialog_id"),
@@ -1088,9 +1088,10 @@ def process_upload_job(job: dict):
         raise RuntimeError("В пункте есть несколько файлов с одинаковым именем. Переименуйте один из файлов перед синхронизацией.")
     from app.checklists.document_replacements import get_document_replacement_by_upload_job
     replacement = get_document_replacement_by_upload_job(job_id) or {}
-    old_path = canonical_path(replacement.get("old_yandex_path") or "")
-    target_path = canonical_path(folder_path + "/" + file_name)
-    allow_replace = (replacement.get("status") == "pending" and old_path == target_path)
+    from app.checklists.yandex_replacement_cleanup import may_overwrite_relocated_version
+    allow_replace = may_overwrite_relocated_version(
+        replacement, item, folder_path, yandex_disk_try_get_resource_meta,
+    ) if replacement else False
 
 
     update_document_mirror_fields(
@@ -1230,6 +1231,27 @@ def process_delete_job(job: dict):
     update_upload_job_progress(job_id, "yandex_delete", 50)
 
     replacement = get_document_replacement_by_delete_job(job_id) or {}
+    if replacement and canonical_path(replacement.get("new_yandex_path") or "") == canonical_path(yandex_path):
+        finish_upload_job(job_id, status="skipped", stage="same_path_protected")
+        return
+    if replacement:
+        from app.checklists.yandex_replacement_cleanup import resolve_replacement_delete, persist_delete_target
+        resolved = resolve_replacement_delete(replacement, yandex_disk_try_get_resource_meta)
+        yandex_path = resolved["path"]
+        persist_delete_target(replacement, job_id, yandex_path)
+        if resolved["action"] == "same_path_protected":
+            finish_upload_job(job_id, status="skipped", stage="same_path_protected")
+            return
+        if resolved["action"] == "confirmed_absent":
+            finish_upload_job(job_id, status="deleted", stage="confirmed_absent")
+            return
+        deleted = yandex_disk_delete_path(yandex_path, permanently=True)
+        if yandex_disk_try_get_resource_meta(yandex_path) is not None:
+            raise RuntimeError("Не подтверждено удаление старой версии на Яндексе. Повторите проверку вручную.")
+        finish_upload_job(job_id, status="deleted",
+                          stage="confirmed_absent" if deleted.get("alreadyMissing") else "done")
+        return
+
     new_yandex_path = normalize_yandex_disk_path(
         clean_cell_value(replacement.get("new_yandex_path"))
     )
@@ -1280,6 +1302,12 @@ def process_delete_job(job: dict):
 
 
 def process_yandex_mirror_job(job_id: str):
+    initial = get_upload_job(job_id) or {}
+    with yandex_project_resource_guard(initial.get("dialog_id") or "", operation="mirror_job"):
+        return _process_yandex_mirror_job_locked(job_id)
+
+
+def _process_yandex_mirror_job_locked(job_id: str):
     current_job = get_upload_job(job_id) or {}
     blocking_structure_job = get_upload_job_blocking_structure_job(
         current_job
@@ -1313,7 +1341,7 @@ def process_yandex_mirror_job(job_id: str):
             item_id=job.get("item_id") or "",
             operation="upload_file",
         ):
-            process_upload_job(job)
+            process_upload_job(get_upload_job(job_id) or job)
 
         replacement_result = (
             handle_document_replacement_after_job(
@@ -1361,7 +1389,7 @@ def process_yandex_mirror_job(job_id: str):
             item_id=job.get("item_id") or "",
             operation="delete_file",
         ):
-            process_delete_job(job)
+            process_delete_job(get_upload_job(job_id) or job)
 
         replacement_result = (
             handle_document_replacement_after_job(

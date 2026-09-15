@@ -169,6 +169,12 @@ def persist_item_yandex_structure_state(
             item.update(build_yandex_structure_item_fields(item=item, job=job))
             if isinstance(extra_fields, dict):
                 item.update(extra_fields)
+            if job and job.get("status") == "completed":
+                from app.checklists.yandex_relocation import rebase_item_file_paths_in_transaction
+                rebase_item_file_paths_in_transaction(
+                    conn, dialog_id=normalize_dialog_id(dialog_id),
+                    checklist_key=normalize_checklist_key(checklist_key), item=item, job=job,
+                )
             found = True
             break
 

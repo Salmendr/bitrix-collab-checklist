@@ -1,5 +1,5 @@
 {
-  "stage": "8.15.9",
+  "stage": "8.15.9.3",
   "generatedAt": "2026-09-11T02:15:36+00:00",
   "loadOrder": [
     "popup-bootstrap.js",
@@ -461,8 +461,8 @@
       "bytes": 2328
     },
     "id-reminders.js": {
-      "sha256": "a240bc308255aa10b9f5b9e5a74fee8d9646b88956b7a0e02fc8bdb113598789",
-      "bytes": 10131
+      "sha256": "151dc7293602d751014178a2cf61c3748edb9440e8a99455b742eac4a1951dd5",
+      "bytes": 12057
     }
   }
 }
