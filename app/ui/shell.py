@@ -118,6 +118,22 @@ def app_home_html(
                     return (APP_BASE_PATH || '') + '/' + String(path || '').replace(/^\\/+/, '');
                 }}
 
+                function logLauncherEvent(eventName, payload) {{
+                    try {{
+                        fetch(appPath('api/debug/event'), {{
+                            method: 'POST',
+                            headers: {{ 'Content-Type': 'application/json' }},
+                            body: JSON.stringify({{
+                                event: eventName,
+                                payload: payload || {{}},
+                                href: window.location.href,
+                                ts: new Date().toISOString()
+                            }}),
+                            keepalive: true
+                        }}).catch(function () {{}});
+                    }} catch (e) {{}}
+                }}
+
                 function pickValue(searchParams, hashParams, key, fallback) {{
                     return (searchParams.get(key) || hashParams.get(key) || fallback || '').trim();
                 }}
@@ -249,6 +265,12 @@ def app_home_html(
                             ? '&closeToken=' + encodeURIComponent(normalizedCloseToken)
                             : '');
 
+                    logLauncherEvent('bitrix_application_redirect_requested', {{
+                        dialogId: dialogId,
+                        checklistKey: checklistKey || 'id',
+                        closeTokenExists: Boolean(normalizedCloseToken)
+                    }});
+
                     resizeCurrentPopupFrame();
                     setTimeout(resizeCurrentPopupFrame, 80);
 
@@ -258,6 +280,11 @@ def app_home_html(
                 }}
 
                 try {{
+                    logLauncherEvent('bitrix_application_entry_loaded', {{
+                        initialDialogIdExists: Boolean(initialDialogId),
+                        initialChecklistKey: initialChecklistKey || 'id',
+                        initialContextExists: Boolean(initialContextText)
+                    }});
                     if (initialContextText) {{
                         console.log('HOME initial context:', initialContextText);
                     }}
@@ -311,6 +338,11 @@ def app_home_html(
                     if (window.BX24 && typeof window.BX24.init === 'function') {{
                         window.BX24.init(function () {{
                             const bxData = extractFromBx24();
+                            logLauncherEvent('bitrix_application_context_resolved', {{
+                                dialogIdExists: Boolean(bxData.dialogId),
+                                checklistKey: bxData.checklistKey || checklistKey || 'id',
+                                source: 'BX24'
+                            }});
                             if (bxData.dialogId) {{
                                 rememberAndRedirect(
                                     bxData.dialogId,
@@ -326,7 +358,12 @@ def app_home_html(
                                     normalizeChecklistKey(localPayload.checklistKey || 'id'),
                                     localPayload.closeToken || closeToken
                                 );
+                                return;
                             }}
+                            logLauncherEvent('bitrix_application_context_missing', {{
+                                localPayloadExists: Boolean(localPayload),
+                                localPayloadAgeMs: age
+                            }});
                         }});
                         return;
                     }}
@@ -341,6 +378,9 @@ def app_home_html(
                     }}
                 }} catch (e) {{
                     console.log('launcher redirect skipped:', e);
+                    logLauncherEvent('bitrix_application_entry_failed', {{
+                        error: String(e)
+                    }});
                 }}
             }})();
         </script>
@@ -439,6 +479,10 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
             var initialDialogId = {initial_dialog_id_json};
             var initialContextText = {initial_context_text_json};
             var autoOpened = false;
+            var popupLaunchState = 'idle';
+            var reactivationArmed = false;
+            var sawHiddenAfterClose = false;
+            var hiddenAfterCloseAt = 0;
 
             function detectAppBasePath() {{
                 const path = String(window.location.pathname || '/').replace(/\\/+$/, '');
@@ -459,6 +503,24 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
             function appPath(path) {{
                 return (APP_BASE_PATH || '') + '/' + String(path || '').replace(/^\\/+/, '');
             }}
+
+            function logLauncherEvent(eventName, payload) {{
+                try {{
+                    fetch(appPath('api/debug/event'), {{
+                        method: 'POST',
+                        headers: {{ 'Content-Type': 'application/json' }},
+                        body: JSON.stringify({{
+                            event: eventName,
+                            dialogId: String(window.__dialogId || initialDialogId || ''),
+                            payload: payload || {{}},
+                            href: window.location.href,
+                            ts: new Date().toISOString()
+                        }}),
+                        keepalive: true
+                    }}).catch(function () {{}});
+                }} catch (e) {{}}
+            }}
+
             function setMeta(text) {{
                 document.getElementById('meta').textContent = text;
             }}
@@ -612,11 +674,35 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
                 }}
             }}
 
+            function markPopupClosed(dialogId, checklistKey) {{
+                popupLaunchState = 'idle';
+                autoOpened = false;
+                reactivationArmed = true;
+                sawHiddenAfterClose = false;
+                hiddenAfterCloseAt = 0;
+                setMeta('Чек-лист закрыт. Можно открыть его повторно.');
+                logLauncherEvent('bitrix_chat_popup_closed', {{
+                    dialogId: dialogId,
+                    checklistKey: checklistKey
+                }});
+            }}
+
             function openChecklist(dialogId, checklistKey = 'id') {{
                 if (!dialogId) {{
                     setError('dialogId не найден');
                     return;
                 }}
+                if (popupLaunchState !== 'idle') {{
+                    setMeta('Чек-лист уже открывается...');
+                    return;
+                }}
+
+                popupLaunchState = 'opening';
+                autoOpened = true;
+                reactivationArmed = false;
+                sawHiddenAfterClose = false;
+                hiddenAfterCloseAt = 0;
+                setError('');
 
                 const closeToken = createPopupCloseToken();
 
@@ -633,6 +719,11 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
 
                 try {{
                     if (window.BX24 && typeof window.BX24.openApplication === 'function') {{
+                        logLauncherEvent('bitrix_chat_popup_open_requested', {{
+                            dialogId: dialogId,
+                            checklistKey: checklistKey,
+                            closeTokenExists: Boolean(closeToken)
+                        }});
                         BX24.openApplication(
                             {{
                                 dialogId: dialogId,
@@ -641,21 +732,30 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
                                 closeToken: closeToken
                             }},
                             function () {{
+                                markPopupClosed(dialogId, checklistKey);
                                 finalizeClosedChecklist(
                                     closeToken,
                                     dialogId,
                                     checklistKey
                                 ).catch(function (error) {{
                                     console.log('popup close callback error:', error);
+                                    logLauncherEvent('bitrix_chat_popup_finalize_failed', {{
+                                        error: String(error)
+                                    }});
                                 }});
                             }}
                         );
-                        autoOpened = true;
+                        popupLaunchState = 'open';
                         setMeta('Открываем popup для ' + dialogId);
                         return;
                     }}
                 }} catch (e) {{
+                    popupLaunchState = 'idle';
+                    autoOpened = false;
                     setError('BX24.openApplication error: ' + String(e));
+                    logLauncherEvent('bitrix_chat_popup_open_failed', {{
+                        error: String(e)
+                    }});
                 }}
 
                 window.open(
@@ -665,6 +765,7 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
                     '&closeToken=' + encodeURIComponent(closeToken),
                     '_blank'
                 );
+                popupLaunchState = 'idle';
             }}
 
             document.getElementById('openBtn').addEventListener('click', function () {{
@@ -682,6 +783,10 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
             function finish(dialogId, sourceText) {{
                 window.__dialogId = dialogId || '';
                 setMeta('dialogId: ' + (window.__dialogId || 'не передан') + ' | source: ' + sourceText);
+                logLauncherEvent('bitrix_chat_launcher_context_resolved', {{
+                    dialogIdExists: Boolean(window.__dialogId),
+                    source: sourceText
+                }});
 
                 try {{
                     if (window.BX24 && typeof window.BX24.fitWindow === 'function') {{
@@ -696,9 +801,39 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
                 }}
             }}
 
+            document.addEventListener('visibilitychange', function () {{
+                if (!reactivationArmed) return;
+                if (document.hidden) {{
+                    sawHiddenAfterClose = true;
+                    hiddenAfterCloseAt = Date.now();
+                    return;
+                }}
+                if (
+                    sawHiddenAfterClose
+                    && (Date.now() - hiddenAfterCloseAt) >= 400
+                    && popupLaunchState === 'idle'
+                    && window.__dialogId
+                ) {{
+                    reactivationArmed = false;
+                    sawHiddenAfterClose = false;
+                    logLauncherEvent('bitrix_chat_launcher_reactivated', {{
+                        dialogId: window.__dialogId
+                    }});
+                    window.setTimeout(function () {{
+                        openChecklist(window.__dialogId);
+                    }}, 100);
+                }}
+            }});
+
             function canUseBx24() {{
                 return !!(window.BX24 && typeof window.BX24.init === 'function');
             }}
+
+            logLauncherEvent('bitrix_chat_launcher_loaded', {{
+                initialDialogIdExists: Boolean(initialDialogId),
+                initialContextExists: Boolean(initialContextText),
+                bx24Available: canUseBx24()
+            }});
 
             if (initialDialogId) {{
                 finish(initialDialogId, 'server-post');

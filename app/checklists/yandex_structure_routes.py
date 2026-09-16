@@ -2,6 +2,8 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
 
+from app.logging_utils import write_debug_log
+from app.checklists.storage import get_checklist
 from app.checklists.utils import (
     clean_cell_value,
     normalize_checklist_key,
@@ -25,6 +27,11 @@ from app.checklists.yandex_custom_recovery import (
 from app.checklists.yandex_mirror_reconciliation import (
     reconcile_yandex_mirror_documents,
 )
+from app.checklists.yandex_binding_recovery import (
+    restore_confirmed_item_bindings,
+)
+from app.checklists.upload_jobs import resolve_document_mirror_status
+from app.yandex_disk.client import is_yandex_disk_enabled
 
 
 router = APIRouter()
@@ -93,6 +100,112 @@ async def api_get_yandex_structure_job(
     return JSONResponse({"ok": True, "job": _public_job(job)})
 
 
+@router.get("/api/checklist/yandex-recovery/state")
+async def api_get_yandex_recovery_state(
+    dialogId: str = "",
+    checklistKey: str = "id",
+    itemId: str = "",
+):
+    """Return the authoritative action for the popup Yandex control."""
+    dialog_id = normalize_dialog_id(dialogId)
+    checklist_key = normalize_checklist_key(checklistKey)
+    item_id = clean_cell_value(itemId)
+    if not dialog_id or not item_id:
+        return JSONResponse(
+            {"ok": False, "error": "dialogId and itemId are required"},
+            status_code=400,
+        )
+
+    data = get_checklist(dialog_id, checklist_key)
+    item = next(
+        (
+            dict(candidate or {})
+            for candidate in (data.get("items") or [])
+            if clean_cell_value((candidate or {}).get("id")) == item_id
+        ),
+        None,
+    )
+    if item is None:
+        return JSONResponse(
+            {"ok": False, "error": "item not found"},
+            status_code=404,
+        )
+
+    latest = get_latest_yandex_structure_job_for_item(
+        dialog_id=dialog_id,
+        checklist_key=checklist_key,
+        item_id=item_id,
+    ) or {}
+    folder_state = build_yandex_structure_item_fields(item=item, job=latest)
+    structure_status = clean_cell_value(
+        folder_state.get("yandexFolderStatus")
+    ).lower()
+
+    mirror_errors = []
+    mirror_pending = []
+    for document in item.get("documents") or []:
+        mirror = resolve_document_mirror_status(
+            document,
+            dialog_id=dialog_id,
+            checklist_key=checklist_key,
+            item_id=item_id,
+        )
+        mirror_status = clean_cell_value(mirror.get("status")).lower()
+        public_record = {
+            "documentId": clean_cell_value(document.get("id")),
+            "fileName": clean_cell_value(document.get("name")),
+            "status": mirror_status,
+            "error": clean_cell_value(mirror.get("error")),
+        }
+        if mirror_status in {"error", "failed", "cancelled", "disabled"}:
+            mirror_errors.append(public_record)
+        elif mirror_status in {"queued", "running"}:
+            mirror_pending.append(public_record)
+
+    yandex_enabled = bool(is_yandex_disk_enabled())
+    if not yandex_enabled:
+        action = "unavailable"
+    elif structure_status in {"error", "conflict", "disabled"}:
+        action = "retry"
+    elif structure_status in {"queued", "running"}:
+        action = "wait"
+    elif mirror_errors:
+        action = "retry"
+    elif mirror_pending:
+        action = "wait"
+    elif clean_cell_value(folder_state.get("yandexFolderUrl")):
+        action = "open"
+    else:
+        action = "lookup"
+
+    response = {
+        "ok": True,
+        "dialogId": dialog_id,
+        "checklistKey": checklist_key,
+        "itemId": item_id,
+        "action": action,
+        "status": structure_status,
+        "folderPath": clean_cell_value(folder_state.get("yandexFolderPath")),
+        "folderUrl": clean_cell_value(folder_state.get("yandexFolderUrl")),
+        "yandexEnabled": yandex_enabled,
+        "hasMirrorErrors": bool(mirror_errors),
+        "hasMirrorPending": bool(mirror_pending),
+        "mirrorErrors": mirror_errors,
+        "job": _public_job(latest) if latest else {},
+    }
+    write_debug_log("yandex_popup_action_state_resolved", {
+        "dialogId": dialog_id,
+        "checklistKey": checklist_key,
+        "itemId": item_id,
+        "action": action,
+        "status": structure_status,
+        "mirrorErrorCount": len(mirror_errors),
+        "mirrorPendingCount": len(mirror_pending),
+        "jobId": clean_cell_value(latest.get("job_id")),
+    })
+    return JSONResponse(response)
+
+
 @router.post("/api/checklist/yandex-structure-job/retry")
 async def api_retry_yandex_structure_job(request: Request):
     payload = await request.json()
@@ -151,21 +264,167 @@ async def api_recheck_yandex_recovery(request: Request):
             status_code=400,
         )
 
-    result = await run_in_threadpool(
-        reconcile_custom_item_yandex_folder,
+    result, status_code = await _run_manual_yandex_recovery(
         dialog_id=dialog_id,
         checklist_key=checklist_key,
         item_id=item_id,
         source="manual_conflict_recheck",
+    )
+    return JSONResponse(result, status_code=status_code)
+
+
+async def _run_manual_yandex_recovery(
+    *,
+    dialog_id: str,
+    checklist_key: str,
+    item_id: str,
+    source: str,
+) -> tuple[dict, int]:
+    latest = get_latest_yandex_structure_job_for_item(
+        dialog_id=dialog_id,
+        checklist_key=checklist_key,
+        item_id=item_id,
+    ) or {}
+    status = clean_cell_value(latest.get("status")).lower()
+
+    if status in {"queued", "running"}:
+        return {
+            "ok": True,
+            "job": _public_job(latest),
+            "files": {},
+        }, 200
+
+    try:
+        binding_recovery = await run_in_threadpool(
+            restore_confirmed_item_bindings,
+            dialog_id=dialog_id,
+            checklist_key=checklist_key,
+            item_id=item_id,
+            source=source,
+        )
+    except Exception as exc:
+        write_debug_log("yandex_manual_binding_recovery_failed", {
+            "dialogId": dialog_id,
+            "checklistKey": checklist_key,
+            "itemId": item_id,
+            "source": source,
+            "error": str(exc),
+        })
+        return {"ok": False, "error": str(exc)}, 409
+
+    latest = get_latest_yandex_structure_job_for_item(
+        dialog_id=dialog_id,
+        checklist_key=checklist_key,
+        item_id=item_id,
+    ) or latest
+    status = clean_cell_value(latest.get("status")).lower()
+
+    custom_result = await run_in_threadpool(
+        reconcile_custom_item_yandex_folder,
+        dialog_id=dialog_id,
+        checklist_key=checklist_key,
+        item_id=item_id,
+        source=source,
         enqueue=True,
     )
-    job = result.get("job") or {}
-    return JSONResponse({
-        "ok": not bool(result.get("conflict")),
-        "conflict": bool(result.get("conflict")),
-        "job": _public_job(job) if job else {},
-        "recovery": result,
-    }, status_code=409 if result.get("conflict") else 200)
+    custom_job = custom_result.get("job") or {}
+    if custom_result.get("conflict"):
+        return {
+            "ok": False,
+            "conflict": True,
+            "error": custom_job.get("error") or "Yandex folder conflict",
+            "job": _public_job(custom_job),
+            "recovery": custom_result,
+            "bindingRecovery": binding_recovery,
+        }, 409
+
+    custom_status = clean_cell_value(custom_job.get("status")).lower()
+    if custom_status in {"queued", "running"}:
+        return {
+            "ok": True,
+            "job": _public_job(custom_job),
+            "recovery": custom_result,
+            "bindingRecovery": binding_recovery,
+            "files": {},
+        }, 200
+    if custom_job:
+        latest = custom_job
+        status = custom_status
+
+    # Standard items do not use custom-folder discovery.  Preserve the
+    # existing retry contract for their failed structure jobs.
+    if status in {"error", "disabled", "cancelled"}:
+        if not clean_cell_value(latest.get("job_id")):
+            return {
+                "ok": False,
+                "error": "Structure job not found",
+                "bindingRecovery": binding_recovery,
+            }, 409
+        job = retry_yandex_structure_job(latest.get("job_id") or "")
+        persist_item_yandex_structure_state(
+            dialog_id=dialog_id,
+            checklist_key=checklist_key,
+            item_id=item_id,
+            job=job,
+        )
+        enqueue_result = enqueue_yandex_structure_job(
+            job.get("job_id") or "",
+            source=source,
+        )
+        return {
+            "ok": True,
+            "job": _public_job(job),
+            "enqueue": enqueue_result,
+            "bindingRecovery": binding_recovery,
+            "files": {},
+        }, 200
+
+    if status == "conflict":
+        return {
+            "ok": False,
+            "conflict": True,
+            "error": latest.get("error") or "Yandex folder conflict",
+            "job": _public_job(latest),
+            "recovery": custom_result,
+            "bindingRecovery": binding_recovery,
+        }, 409
+
+    files = await run_in_threadpool(
+        reconcile_yandex_mirror_documents,
+        source=source,
+        dialog_id=dialog_id,
+        checklist_key=checklist_key,
+        item_id=item_id,
+    )
+    files["requeued"] = (
+        int(files.get("queued") or 0)
+        + int(files.get("replacementContinuationQueued") or 0)
+        + int((files.get("replacementCleanup") or {}).get("queued") or 0)
+    )
+    latest = (
+        get_latest_yandex_structure_job_for_item(
+            dialog_id=dialog_id,
+            checklist_key=checklist_key,
+            item_id=item_id,
+        )
+        or latest
+    )
+    write_debug_log("yandex_manual_recovery_completed", {
+        "dialogId": dialog_id,
+        "checklistKey": checklist_key,
+        "itemId": item_id,
+        "source": source,
+        "bindingRestored": int(binding_recovery.get("restored") or 0),
+        "filesQueued": int(files.get("requeued") or 0),
+        "filesVerified": int(files.get("remoteVerified") or 0),
+    })
+    return {
+        "ok": True,
+        "job": _public_job(latest) if latest else {},
+        "recovery": custom_result,
+        "bindingRecovery": binding_recovery,
+        "files": files,
+    }, 200
 
 
 @router.post("/api/checklist/yandex-recovery/retry")
@@ -180,130 +439,10 @@ async def api_retry_yandex_recovery(request: Request):
             status_code=400,
         )
 
-    latest = get_latest_yandex_structure_job_for_item(
-        dialog_id=dialog_id,
-        checklist_key=checklist_key,
-        item_id=item_id,
-    ) or {}
-    status = clean_cell_value(latest.get("status")).lower()
-    if status == "conflict":
-        return JSONResponse({
-            "ok": False,
-            "conflict": True,
-            "error": latest.get("error") or "Yandex folder conflict",
-            "job": _public_job(latest),
-        }, status_code=409)
-
-    if status in {"error", "disabled", "cancelled"}:
-        custom_recovery = await run_in_threadpool(
-            reconcile_custom_item_yandex_folder,
-            dialog_id=dialog_id,
-            checklist_key=checklist_key,
-            item_id=item_id,
-            source="manual_structure_error_recovery",
-            enqueue=True,
-        )
-        custom_job = custom_recovery.get("job") or {}
-        if custom_recovery.get("conflict"):
-            return JSONResponse({
-                "ok": False,
-                "conflict": True,
-                "job": _public_job(custom_job),
-                "recovery": custom_recovery,
-            }, status_code=409)
-        if custom_job and clean_cell_value(custom_job.get("job_id")) != clean_cell_value(latest.get("job_id")):
-            return JSONResponse({
-                "ok": True,
-                "job": _public_job(custom_job),
-                "recovery": custom_recovery,
-                "files": {},
-            })
-
-        job = retry_yandex_structure_job(latest.get("job_id") or "")
-        persist_item_yandex_structure_state(
-            dialog_id=dialog_id,
-            checklist_key=checklist_key,
-            item_id=item_id,
-            job=job,
-        )
-        enqueue_result = enqueue_yandex_structure_job(
-            job.get("job_id") or "",
-            source="manual_combined_recovery",
-        )
-        return JSONResponse({
-            "ok": True,
-            "job": _public_job(job),
-            "enqueue": enqueue_result,
-            "files": {},
-        })
-
-    if status in {"queued", "running"}:
-        return JSONResponse({
-            "ok": True,
-            "job": _public_job(latest),
-            "files": {},
-        })
-
-    # Explicit retry may repair a confirmed move overwritten by an old popup.
-    # Do this before folder/file recovery, including the conflicting owner.
-    from app.checklists.yandex_binding_recovery import restore_confirmed_item_bindings
-    try:
-        binding_recovery = await run_in_threadpool(
-            restore_confirmed_item_bindings,
-            dialog_id=dialog_id, checklist_key=checklist_key, item_id=item_id,
-            source="manual_combined_recovery",
-        )
-    except Exception as exc:
-        return JSONResponse({"ok": False, "error": str(exc)}, status_code=409)
-
-    custom_result = await run_in_threadpool(
-        reconcile_custom_item_yandex_folder,
+    result, status_code = await _run_manual_yandex_recovery(
         dialog_id=dialog_id,
         checklist_key=checklist_key,
         item_id=item_id,
         source="manual_combined_recovery",
-        enqueue=True,
     )
-    custom_job = custom_result.get("job") or {}
-    if custom_result.get("conflict"):
-        return JSONResponse({
-            "ok": False,
-            "conflict": True,
-            "job": _public_job(custom_job),
-            "recovery": custom_result,
-        }, status_code=409)
-    if clean_cell_value(custom_job.get("status")) in {"queued", "running"}:
-        return JSONResponse({
-            "ok": True,
-            "job": _public_job(custom_job),
-            "recovery": custom_result,
-            "files": {},
-        })
-
-    files = await run_in_threadpool(
-        reconcile_yandex_mirror_documents,
-        source="manual_combined_recovery",
-        dialog_id=dialog_id,
-        checklist_key=checklist_key,
-        item_id=item_id,
-    )
-    # Keep the existing frontend refresh contract while retry now performs a
-    # full remote verification instead of blindly requeueing an upload.
-    files["requeued"] = (int(files.get("queued") or 0)
-                         + int(files.get("replacementContinuationQueued") or 0)
-                         + int((files.get("replacementCleanup") or {}).get("queued") or 0))
-    latest = (
-        get_latest_yandex_structure_job_for_item(
-            dialog_id=dialog_id,
-            checklist_key=checklist_key,
-            item_id=item_id,
-        )
-        or latest
-    )
-    return JSONResponse({
-        "ok": True,
-        "job": _public_job(latest) if latest else {},
-        "recovery": custom_result,
-        "bindingRecovery": binding_recovery,
-        "files": files,
-    })
+    return JSONResponse(result, status_code=status_code)

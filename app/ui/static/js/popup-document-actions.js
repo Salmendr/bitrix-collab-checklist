@@ -258,6 +258,11 @@ async function showYandexFolderConflict(itemId, knownJobId = '', knownJob = null
                         700
                     );
                 }
+                if (typeof loadChecklistByKey === 'function') {
+                    window.setTimeout(() => {
+                        loadChecklistByKey(currentChecklistKey).catch(() => {});
+                    }, 900);
+                }
                 setSaveState('', 'Конфликт устранён, восстановление запущено');
             } catch (error) {
                 window.alert(error && error.message || 'Ошибка проверки папок');
@@ -301,14 +306,30 @@ async function retryYandexRecovery(itemId) {
         }
     }
     renderAll();
-    if (
-        result.files
-        && Number(result.files.requeued || 0) > 0
-        && typeof loadChecklistByKey === 'function'
-    ) {
+    if (typeof loadChecklistByKey === 'function') {
         window.setTimeout(() => {
             loadChecklistByKey(currentChecklistKey).catch(() => {});
         }, 1200);
+    }
+    return result;
+}
+
+async function getYandexPopupActionState(itemId) {
+    const query = new URLSearchParams({
+        dialogId: String(dialogId || ''),
+        checklistKey: String(currentChecklistKey || 'id'),
+        itemId: String(itemId || '')
+    });
+    const response = await fetch(
+        appUrl('api/checklist/yandex-recovery/state')
+        + '?' + query.toString(),
+        { cache: 'no-store' }
+    );
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || !result.ok) {
+        throw new Error(
+            result.error || 'Не удалось проверить состояние синхронизации'
+        );
     }
     return result;
 }
@@ -607,25 +628,30 @@ function bindDocumentActions() {
             if (this.dataset.loading === '1' || this.disabled) return;
 
             const itemId = String(this.dataset.itemId || '').trim();
-            const yandexStatus = String(
-                this.dataset.yandexStatus || ''
-            ).trim().toLowerCase();
-            const hasMirrorErrors = this.dataset.hasMirrorErrors === '1';
             if (!itemId) return;
 
             this.dataset.loading = '1';
             this.classList.add('is-loading');
 
             try {
-                if (yandexStatus === 'conflict') {
-                    await showYandexFolderConflict(
+                if (typeof debugLog === 'function') {
+                    debugLog('yandex_popup_action_clicked', {
                         itemId,
-                        this.dataset.structureJobId || ''
-                    );
-                    return;
+                        renderedStatus: String(this.dataset.yandexStatus || ''),
+                        renderedMirrorErrors: this.dataset.hasMirrorErrors === '1'
+                    });
                 }
 
-                if (yandexStatus === 'error' || hasMirrorErrors) {
+                // The rendered checklist may be older than a completed worker
+                // job.  The server decides whether this click means retry or
+                // opening Yandex; stale data-* attributes are never trusted.
+                const state = await getYandexPopupActionState(itemId);
+                if (state.job && state.job.jobId) {
+                    applyYandexStructureJobToLocalItem(itemId, state.job);
+                    renderAll();
+                }
+
+                if (state.action === 'retry') {
                     const recovery = await retryYandexRecovery(itemId);
                     if (!recovery.conflict) {
                         setSaveState('', 'Повтор неуспешной синхронизации запущен');
@@ -633,11 +659,28 @@ function bindDocumentActions() {
                     return;
                 }
 
-                const storedUrl = String(
-                    this.dataset.yandexFolderUrl || ''
-                ).trim();
+                if (state.action === 'wait') {
+                    const jobId = String(
+                        state.job && state.job.jobId || ''
+                    ).trim();
+                    if (jobId) {
+                        scheduleYandexStructurePolling(itemId, jobId, 900);
+                    } else if (typeof loadChecklistByKey === 'function') {
+                        window.setTimeout(() => {
+                            loadChecklistByKey(currentChecklistKey).catch(() => {});
+                        }, 1200);
+                    }
+                    setSaveState('', 'Синхронизация уже выполняется');
+                    return;
+                }
+
+                if (state.action === 'unavailable') {
+                    throw new Error('Синхронизация с Яндекс.Диском недоступна');
+                }
+
+                const storedUrl = String(state.folderUrl || '').trim();
                 const storedPath = String(
-                    this.dataset.yandexFolderPath || ''
+                    state.folderPath || this.dataset.yandexFolderPath || ''
                 ).trim();
 
                 if (storedUrl) {

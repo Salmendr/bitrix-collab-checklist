@@ -546,6 +546,40 @@ def get_latest_document_job(
     return row_to_dict(row)
 
 
+def get_latest_document_upload_job(
+    dialog_id: str,
+    checklist_key: str,
+    item_id: str,
+    document_id: str,
+) -> dict | None:
+    """Return the latest upload job for one exact document identity."""
+    ensure_upload_jobs_table()
+    conn = get_conn()
+    try:
+        row = conn.execute(
+            """
+            SELECT *
+            FROM upload_jobs
+            WHERE dialog_id = ?
+              AND checklist_key = ?
+              AND item_id = ?
+              AND document_id = ?
+              AND job_type = 'upload'
+            ORDER BY created_at DESC, rowid DESC
+            LIMIT 1
+            """,
+            (
+                normalize_dialog_id(dialog_id),
+                normalize_checklist_key(checklist_key),
+                clean_cell_value(item_id),
+                clean_cell_value(document_id),
+            ),
+        ).fetchone()
+        return row_to_dict(row)
+    finally:
+        conn.close()
+
+
 def finish_document_upload_job_from_remote_match(
     *,
     dialog_id: str,
@@ -1194,7 +1228,13 @@ def public_job_payload(job: dict | None) -> dict:
     }
 
 
-def resolve_document_mirror_status(document: dict | None) -> dict:
+def resolve_document_mirror_status(
+    document: dict | None,
+    *,
+    dialog_id: str = "",
+    checklist_key: str = "id",
+    item_id: str = "",
+) -> dict:
     """Resolve stale document mirror fields against the actual job row.
 
     A frontend snapshot can persist ``queued`` after the worker has already
@@ -1212,6 +1252,19 @@ def resolve_document_mirror_status(document: dict | None) -> dict:
         document.get("mirrorJobId")
     )
     job = get_upload_job(job_id) if job_id else None
+    document_id = clean_cell_value(document.get("id"))
+    if (
+        not job
+        and clean_cell_value(dialog_id)
+        and clean_cell_value(item_id)
+        and document_id
+    ):
+        job = get_latest_document_upload_job(
+            dialog_id=dialog_id,
+            checklist_key=checklist_key,
+            item_id=item_id,
+            document_id=document_id,
+        )
 
     if not job:
         return {
@@ -1253,3 +1306,37 @@ def resolve_document_mirror_status(document: dict | None) -> dict:
             or effective_error != stored_error
         ),
     }
+
+
+def attach_latest_document_mirror_states(
+    data: dict,
+    *,
+    dialog_id: str,
+    checklist_key: str,
+) -> dict:
+    """Overlay durable upload-job state without persisting presentation data."""
+    enriched = dict(data or {})
+    items = [dict(item or {}) for item in (enriched.get("items") or [])]
+    for item in items:
+        item_id = clean_cell_value(item.get("id"))
+        documents = [
+            dict(document or {})
+            for document in (item.get("documents") or [])
+        ]
+        for document in documents:
+            mirror = resolve_document_mirror_status(
+                document,
+                dialog_id=dialog_id,
+                checklist_key=checklist_key,
+                item_id=item_id,
+            )
+            document["mirrorStatus"] = clean_cell_value(mirror.get("status"))
+            document["mirrorError"] = clean_cell_value(mirror.get("error"))
+            job = mirror.get("job") or {}
+            if clean_cell_value(job.get("job_id")):
+                document["mirrorJobId"] = clean_cell_value(job.get("job_id"))
+            if clean_cell_value(job.get("yandex_path")):
+                document["yandexPath"] = clean_cell_value(job.get("yandex_path"))
+        item["documents"] = documents
+    enriched["items"] = items
+    return enriched

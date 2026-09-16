@@ -30,6 +30,16 @@ from app.ui.shell import (
 
 router = APIRouter()
 
+NO_STORE_HEADERS = {
+    "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+    "Pragma": "no-cache",
+    "Expires": "0",
+}
+
+
+def no_store_html(content: str) -> HTMLResponse:
+    return HTMLResponse(content, headers=NO_STORE_HEADERS)
+
 
 def extract_dialog_id_from_form(form_data: dict) -> str:
     def pick(value) -> str:
@@ -185,7 +195,9 @@ def health(request: Request):
 
 @router.get("/", response_class=HTMLResponse)
 def home_get(dialogId: str = "", checklistKey: str = "id", mode: str = ""):
-    return app_home_html()
+    return no_store_html(
+        app_home_html(dialogId, checklistKey, f"GET / mode={mode}")
+    )
 
 
 @router.post("/", response_class=HTMLResponse)
@@ -200,17 +212,27 @@ async def home_post(request: Request):
     print("HOME EXTRACTED DIALOG ID:", dialog_id)
     print("HOME EXTRACTED CHECKLIST KEY:", checklist_key)
 
-    return app_home_html(dialog_id, checklist_key, raw_context)
+    return no_store_html(
+        app_home_html(dialog_id, checklist_key, raw_context)
+    )
 
 
 @router.get("/launch", response_class=HTMLResponse)
 def launch_get(dialogId: str = "", checklistKey: str = "id"):
-    return app_home_html()
+    return no_store_html(
+        app_home_html(dialogId, checklistKey, "GET /launch")
+    )
 
 
 @router.post("/launch", response_class=HTMLResponse)
 async def launch_post(request: Request):
-    return app_home_html()
+    form = dict(await request.form())
+    dialog_id = extract_dialog_id_from_form(form)
+    checklist_key = extract_checklist_key_from_form(form)
+    raw_context = json.dumps(form, ensure_ascii=False, indent=2)
+    return no_store_html(
+        app_home_html(dialog_id, checklist_key, raw_context)
+    )
 
 
 @router.get("/install", response_class=HTMLResponse)
@@ -314,7 +336,9 @@ async def install_post(request: Request):
 @router.get("/textarea", response_class=HTMLResponse)
 def textarea_get(dialogId: str = ""):
     dialog_id = normalize_dialog_id(dialogId)
-    return textarea_html(dialog_id, "GET /textarea")
+    return no_store_html(
+        textarea_html(dialog_id, "GET /textarea")
+    )
 
 
 @router.post("/textarea", response_class=HTMLResponse)
@@ -326,4 +350,6 @@ async def textarea_post(request: Request):
     print("TEXTAREA POST FORM:", raw_context)
     print("TEXTAREA EXTRACTED DIALOG ID:", dialog_id)
 
-    return textarea_html(dialog_id, raw_context)
+    return no_store_html(
+        textarea_html(dialog_id, raw_context)
+    )

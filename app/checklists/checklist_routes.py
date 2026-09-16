@@ -39,6 +39,7 @@ from app.checklists.documents import (
 from app.checklists.permissions import can_user_delete_files
 
 from app.checklists.upload_jobs import (
+    attach_latest_document_mirror_states,
     cancel_upload_jobs_for_document,
     create_yandex_delete_job,
 )
@@ -151,6 +152,11 @@ def api_get_checklist(dialogId: str = "", checklistKey: str = "id"):
 
     data = get_checklist(dialog_id, checklist_key)
     data = attach_latest_yandex_structure_states(
+        data,
+        dialog_id=dialog_id,
+        checklist_key=checklist_key,
+    )
+    data = attach_latest_document_mirror_states(
         data,
         dialog_id=dialog_id,
         checklist_key=checklist_key,

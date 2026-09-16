@@ -16,3 +16,8 @@ debug
 .mypy_cache
 .vscode
 .idea
+
+# Development and installer artifacts are never part of the runtime image.
+_backups/
+tests/
+tools/

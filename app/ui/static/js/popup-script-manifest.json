@@ -1,6 +1,6 @@
 {
-  "stage": "8.15.9.3",
-  "generatedAt": "2026-09-11T02:15:36+00:00",
+  "stage": "8.15.9.5",
+  "generatedAt": "2026-09-15T08:05:51+00:00",
   "loadOrder": [
     "popup-bootstrap.js",
     "checklist-action-icons.js",
@@ -97,8 +97,8 @@
       "bytes": 16034
     },
     "popup-document-actions.js": {
-      "sha256": "8919f53e54c98e7e1666b53df0bddeefc80a1d8c927581cba0b7e65a1761c37d",
-      "bytes": 25445
+      "sha256": "452fe4ae846598fb343673bde9f8a9c1ce69b8d19ec8698f6513ac0578631967",
+      "bytes": 27484
     },
     "popup-window-channel.js": {
       "sha256": "5b9abaff9f29705db8745e4737f28bfb449fc23b4ae3ef2cf47050607f2f5723",
@@ -287,7 +287,8 @@
     "Stage 8.15.8 keeps files in a local pre-upload area until the user presses the explicit Upload confirmation button.",
     "The popup upload area expands above the remaining item actions and grows by file-card rows.",
     "The public-link action is icon-only and disabled in the application interface while its backend remains unchanged.",
-    "Archive rows display the preserved original uploader and upload time rather than the later replacement actor and archive time."
+    "Archive rows display the preserved original uploader and upload time rather than the later replacement actor and archive time.",
+    "Stage 8.15.9.5 resolves the popup Yandex action from durable backend jobs before opening a folder or starting manual recovery."
   ],
   "hashMode": "utf8-lf",
   "lineEndingNote": "Hashes are calculated from bytes written to disk. This is stable for Windows CRLF and Unix LF.",
@@ -337,8 +338,8 @@
       "bytes": 12564
     },
     "popup-document-actions.js": {
-      "sha256": "8919f53e54c98e7e1666b53df0bddeefc80a1d8c927581cba0b7e65a1761c37d",
-      "bytes": 25445
+      "sha256": "452fe4ae846598fb343673bde9f8a9c1ce69b8d19ec8698f6513ac0578631967",
+      "bytes": 27484
     },
     "popup-window-channel.js": {
       "sha256": "5b9abaff9f29705db8745e4737f28bfb449fc23b4ae3ef2cf47050607f2f5723",

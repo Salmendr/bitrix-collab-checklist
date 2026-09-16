@@ -19,6 +19,10 @@ from app.checklists.yandex_context import resolve_checklist_yandex_root_path, ge
 from app.checklists.document_assignment_history import (
     attach_assignment_history_counts,
 )
+from app.checklists.upload_jobs import attach_latest_document_mirror_states
+from app.checklists.yandex_structure_state import (
+    attach_latest_yandex_structure_states,
+)
 from app.yandex_disk.client import is_yandex_disk_enabled
 from app.ui.template_engine import render_ui_template
 from app.settings import (
@@ -30,6 +34,16 @@ def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
     dialog_id = normalize_dialog_id(dialogId)
     checklist_key = normalize_checklist_key(checklistKey)
     data = get_checklist(dialog_id, checklist_key)
+    data = attach_latest_yandex_structure_states(
+        data,
+        dialog_id=dialog_id,
+        checklist_key=checklist_key,
+    )
+    data = attach_latest_document_mirror_states(
+        data,
+        dialog_id=dialog_id,
+        checklist_key=checklist_key,
+    )
     data = attach_assignment_history_counts(
         data,
         dialog_id=dialog_id,

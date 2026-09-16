@@ -375,6 +375,45 @@ def list_latest_yandex_structure_jobs_for_checklist(
     return result
 
 
+def list_yandex_structure_job_history_for_checklist(
+    *,
+    dialog_id: str,
+    checklist_key: str,
+) -> dict[str, list[dict]]:
+    """Return complete per-item history in reverse insertion order.
+
+    A later passive conflict record must not hide an earlier operation which
+    Yandex already completed.  Manual binding recovery uses this history as
+    evidence; normal UI state continues to use the latest job of any status.
+    """
+    ensure_yandex_structure_jobs_table()
+    conn = get_conn()
+    try:
+        rows = conn.execute(
+            """
+            SELECT rowid AS structure_rowid, *
+            FROM yandex_structure_jobs
+            WHERE dialog_id = ?
+              AND checklist_key = ?
+            ORDER BY item_id ASC, rowid DESC
+            """,
+            (
+                normalize_dialog_id(dialog_id),
+                normalize_checklist_key(checklist_key),
+            ),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    result: dict[str, list[dict]] = {}
+    for row in rows:
+        record = _normalize_job_record(row) or {}
+        item_id = clean_cell_value(record.get("item_id"))
+        if item_id:
+            result.setdefault(item_id, []).append(record)
+    return result
+
+
 def retarget_pending_create_item_folder_job_in_transaction(
     conn,
     *,
