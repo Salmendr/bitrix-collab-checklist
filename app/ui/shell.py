@@ -479,10 +479,6 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
             var initialDialogId = {initial_dialog_id_json};
             var initialContextText = {initial_context_text_json};
             var autoOpened = false;
-            var popupLaunchState = 'idle';
-            var reactivationArmed = false;
-            var sawHiddenAfterClose = false;
-            var hiddenAfterCloseAt = 0;
 
             function detectAppBasePath() {{
                 const path = String(window.location.pathname || '/').replace(/\\/+$/, '');
@@ -529,188 +525,17 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
                 document.getElementById('error').textContent = text || '';
             }}
 
-            const POPUP_CLOSE_HANDOFF_PREFIX = 'checklist_popup_close_handoff_v1:';
-
-            function createPopupCloseToken() {{
-                try {{
-                    if (window.crypto && typeof window.crypto.randomUUID === 'function') {{
-                        return window.crypto.randomUUID().replace(/[^a-zA-Z0-9_-]+/g, '');
-                    }}
-                }} catch (e) {{}}
-
-                return 'close_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 12);
-            }}
-
-            function getPopupCloseHandoff(closeToken) {{
-                const token = String(closeToken || '').trim();
-                if (!token) return null;
-
-                try {{
-                    const raw = localStorage.getItem(POPUP_CLOSE_HANDOFF_PREFIX + token);
-                    if (!raw) return null;
-                    const payload = JSON.parse(raw);
-                    return payload && typeof payload === 'object' ? payload : null;
-                }} catch (e) {{
-                    console.log('popup close handoff read skipped:', e);
-                    return null;
-                }}
-            }}
-
-            function clearPopupCloseHandoff(closeToken) {{
-                const token = String(closeToken || '').trim();
-                if (!token) return;
-                try {{
-                    localStorage.removeItem(POPUP_CLOSE_HANDOFF_PREFIX + token);
-                }} catch (e) {{}}
-            }}
-
-            function sleep(ms) {{
-                return new Promise(function (resolve) {{
-                    setTimeout(resolve, Math.max(0, Number(ms || 0)));
-                }});
-            }}
-
-            async function finalizeClosedChecklist(closeToken, dialogId, checklistKey) {{
-                const handoff = getPopupCloseHandoff(closeToken);
-                if (!handoff) {{
-                    return;
-                }}
-
-                const handoffDialogId = String(handoff.dialogId || '').trim();
-                const expectedDialogId = String(dialogId || '').trim();
-                const sessionId = String(handoff.sessionId || '').trim();
-                const userId = String(handoff.userId || '').trim();
-                const clientSessionId = String(handoff.clientSessionId || '').trim();
-                const updatedAt = Number(handoff.updatedAt || 0);
-
-                if (
-                    !sessionId
-                    || !handoffDialogId
-                    || (expectedDialogId && handoffDialogId !== expectedDialogId)
-                    || (updatedAt && Date.now() - updatedAt > 60 * 60 * 1000)
-                ) {{
-                    clearPopupCloseHandoff(closeToken);
-                    return;
-                }}
-
-                const payload = {{
-                    sessionId: sessionId,
-                    dialogId: handoffDialogId,
-                    userId: userId,
-                    userName: String(handoff.userName || '').trim(),
-                    clientSessionId: clientSessionId,
-                    editor: {{
-                        id: userId,
-                        name: String(handoff.userName || '').trim()
-                    }},
-                    sessions: [],
-                    reason: 'bitrix_popup_cross',
-                    closeEvent: 'bitrix_popup_cross',
-                    checklistKey: String(checklistKey || handoff.checklistKey || 'id').trim() || 'id'
-                }};
-
-                // The popup is already hidden by Bitrix. A short grace period lets
-                // in-flight mutations that reached FastAPI finish before commit.
-                await sleep(450);
-
-                const delays = [0, 500, 1400];
-                let lastError = null;
-
-                for (let index = 0; index < delays.length; index++) {{
-                    if (delays[index]) await sleep(delays[index]);
-
-                    try {{
-                        const response = await fetch(
-                            appPath('api/checklist/session/finalize'),
-                            {{
-                                method: 'POST',
-                                headers: {{ 'Content-Type': 'application/json' }},
-                                body: JSON.stringify(payload)
-                            }}
-                        );
-                        const result = await response.json().catch(function () {{ return {{}}; }});
-
-                        if (response.ok && result && result.ok && result.committed === true) {{
-                            clearPopupCloseHandoff(closeToken);
-                            return;
-                        }}
-
-                        if (response.status === 409 && result && result.error) {{
-                            const conflictText = String(result.error || '');
-                            if (
-                                conflictText.includes('rolled back')
-                                || conflictText.includes('ownership moved')
-                                || conflictText.includes('не найдена')
-                            ) {{
-                                clearPopupCloseHandoff(closeToken);
-                                return;
-                            }}
-                            lastError = new Error(conflictText);
-                            continue;
-                        }}
-
-                        throw new Error(
-                            String(result && result.error || ('HTTP ' + response.status))
-                        );
-                    }} catch (error) {{
-                        lastError = error;
-                    }}
-                }}
-
-                try {{
-                    if (navigator.sendBeacon) {{
-                        navigator.sendBeacon(
-                            appPath('api/checklist/session/finalize'),
-                            new Blob(
-                                [JSON.stringify(payload)],
-                                {{ type: 'application/json' }}
-                            )
-                        );
-                    }}
-                }} catch (e) {{}}
-
-                if (lastError) {{
-                    console.log('Bitrix popup close finalization deferred:', lastError);
-                }}
-            }}
-
-            function markPopupClosed(dialogId, checklistKey) {{
-                popupLaunchState = 'idle';
-                autoOpened = false;
-                reactivationArmed = true;
-                sawHiddenAfterClose = false;
-                hiddenAfterCloseAt = 0;
-                setMeta('Чек-лист закрыт. Можно открыть его повторно.');
-                logLauncherEvent('bitrix_chat_popup_closed', {{
-                    dialogId: dialogId,
-                    checklistKey: checklistKey
-                }});
-            }}
-
             function openChecklist(dialogId, checklistKey = 'id') {{
                 if (!dialogId) {{
                     setError('dialogId не найден');
                     return;
                 }}
-                if (popupLaunchState !== 'idle') {{
-                    setMeta('Чек-лист уже открывается...');
-                    return;
-                }}
-
-                popupLaunchState = 'opening';
-                autoOpened = true;
-                reactivationArmed = false;
-                sawHiddenAfterClose = false;
-                hiddenAfterCloseAt = 0;
                 setError('');
-
-                const closeToken = createPopupCloseToken();
 
                 try {{
                     localStorage.setItem('checklist_pending_dialog', JSON.stringify({{
                         dialogId: dialogId,
                         checklistKey: checklistKey,
-                        closeToken: closeToken,
                         ts: Date.now()
                     }}));
                 }} catch (e) {{
@@ -721,37 +546,24 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
                     if (window.BX24 && typeof window.BX24.openApplication === 'function') {{
                         logLauncherEvent('bitrix_chat_popup_open_requested', {{
                             dialogId: dialogId,
-                            checklistKey: checklistKey,
-                            closeTokenExists: Boolean(closeToken)
+                            checklistKey: checklistKey
                         }});
-                        BX24.openApplication(
-                            {{
-                                dialogId: dialogId,
-                                checklistKey: checklistKey,
-                                source: 'textarea',
-                                closeToken: closeToken
-                            }},
-                            function () {{
-                                markPopupClosed(dialogId, checklistKey);
-                                finalizeClosedChecklist(
-                                    closeToken,
-                                    dialogId,
-                                    checklistKey
-                                ).catch(function (error) {{
-                                    console.log('popup close callback error:', error);
-                                    logLauncherEvent('bitrix_chat_popup_finalize_failed', {{
-                                        error: String(error)
-                                    }});
-                                }});
-                            }}
-                        );
-                        popupLaunchState = 'open';
+
+                        // IM_TEXTAREA must hand control back to Bitrix after launch.
+                        // Supplying a close callback keeps this launcher iframe alive
+                        // and prevents the placement from handling the next icon click.
+                        // The popup commits cross-closes through pagehide/beforeunload.
+                        BX24.openApplication({{
+                            dialogId: dialogId,
+                            checklistKey: checklistKey,
+                            source: 'textarea'
+                        }});
+
+                        autoOpened = true;
                         setMeta('Открываем popup для ' + dialogId);
                         return;
                     }}
                 }} catch (e) {{
-                    popupLaunchState = 'idle';
-                    autoOpened = false;
                     setError('BX24.openApplication error: ' + String(e));
                     logLauncherEvent('bitrix_chat_popup_open_failed', {{
                         error: String(e)
@@ -761,11 +573,9 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
                 window.open(
                     appPath('popup') +
                     '?dialogId=' + encodeURIComponent(dialogId) +
-                    '&checklistKey=' + encodeURIComponent(checklistKey) +
-                    '&closeToken=' + encodeURIComponent(closeToken),
+                    '&checklistKey=' + encodeURIComponent(checklistKey),
                     '_blank'
                 );
-                popupLaunchState = 'idle';
             }}
 
             document.getElementById('openBtn').addEventListener('click', function () {{
@@ -800,30 +610,6 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
                     }}, 250);
                 }}
             }}
-
-            document.addEventListener('visibilitychange', function () {{
-                if (!reactivationArmed) return;
-                if (document.hidden) {{
-                    sawHiddenAfterClose = true;
-                    hiddenAfterCloseAt = Date.now();
-                    return;
-                }}
-                if (
-                    sawHiddenAfterClose
-                    && (Date.now() - hiddenAfterCloseAt) >= 400
-                    && popupLaunchState === 'idle'
-                    && window.__dialogId
-                ) {{
-                    reactivationArmed = false;
-                    sawHiddenAfterClose = false;
-                    logLauncherEvent('bitrix_chat_launcher_reactivated', {{
-                        dialogId: window.__dialogId
-                    }});
-                    window.setTimeout(function () {{
-                        openChecklist(window.__dialogId);
-                    }}, 100);
-                }}
-            }});
 
             function canUseBx24() {{
                 return !!(window.BX24 && typeof window.BX24.init === 'function');
