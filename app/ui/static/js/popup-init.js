@@ -3,8 +3,18 @@
                     width: 1180,
                     height: 720,
                     delays: [0, 80, 220]
+                }).then(function (resized) {
+                    debugLog('popup_frame_resize_scheduled', {
+                        resized: !!resized,
+                        frame: typeof popupBitrix.getFrameGeometry === 'function'
+                            ? popupBitrix.getFrameGeometry()
+                            : {}
+                    });
                 }).catch(function (error) {
                     console.log('Bitrix popup sizing skipped:', error);
+                    debugLog('popup_frame_resize_failed', {
+                        error: String(error && error.message || error || '')
+                    });
                 });
             }
             try {
@@ -14,7 +24,10 @@
 
                 debugLog('popup_loaded', {
                     href: window.location.href,
-                    hasDialogId: !!dialogId
+                    hasDialogId: !!dialogId,
+                    frame: typeof popupBitrix.getFrameGeometry === 'function'
+                        ? popupBitrix.getFrameGeometry()
+                        : {}
                 });
 
                 const initialFocusItemId = String(
