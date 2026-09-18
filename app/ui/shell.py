@@ -118,22 +118,6 @@ def app_home_html(
                     return (APP_BASE_PATH || '') + '/' + String(path || '').replace(/^\\/+/, '');
                 }}
 
-                function logLauncherEvent(eventName, payload) {{
-                    try {{
-                        fetch(appPath('api/debug/event'), {{
-                            method: 'POST',
-                            headers: {{ 'Content-Type': 'application/json' }},
-                            body: JSON.stringify({{
-                                event: eventName,
-                                payload: payload || {{}},
-                                href: window.location.href,
-                                ts: new Date().toISOString()
-                            }}),
-                            keepalive: true
-                        }}).catch(function () {{}});
-                    }} catch (e) {{}}
-                }}
-
                 function pickValue(searchParams, hashParams, key, fallback) {{
                     return (searchParams.get(key) || hashParams.get(key) || fallback || '').trim();
                 }}
@@ -147,11 +131,10 @@ def app_home_html(
                 function extractFromBx24() {{
                     let dialogId = '';
                     let checklistKey = '';
-                    let closeToken = '';
 
                     try {{
                         if (!(window.BX24 && typeof window.BX24.placement === 'object' && typeof window.BX24.placement.info === 'function')) {{
-                            return {{ dialogId: '', checklistKey: '', closeToken: '' }};
+                            return {{ dialogId: '', checklistKey: '' }};
                         }}
 
                         const info = window.BX24.placement.info() || {{}};
@@ -197,23 +180,6 @@ def app_home_html(
                             }}
                         }}
 
-                        const closeTokenCandidates = [
-                            options.closeToken,
-                            options.CLOSE_TOKEN,
-                            options.close_token,
-                            info.closeToken,
-                            info.CLOSE_TOKEN,
-                            info.close_token
-                        ];
-
-                        for (let i = 0; i < closeTokenCandidates.length; i++) {{
-                            const candidate = String(closeTokenCandidates[i] || '').trim();
-                            if (candidate) {{
-                                closeToken = candidate;
-                                break;
-                            }}
-                        }}
-
                         try {{
                             console.log('app_home placement.info =', info);
                         }} catch (e) {{}}
@@ -223,8 +189,7 @@ def app_home_html(
 
                     return {{
                         dialogId: dialogId,
-                        checklistKey: checklistKey || 'id',
-                        closeToken: closeToken
+                        checklistKey: checklistKey || 'id'
                     }};
                 }}
 
@@ -241,16 +206,13 @@ def app_home_html(
                     }}
                 }}
 
-                function rememberAndRedirect(dialogId, checklistKey, closeToken) {{
+                function rememberAndRedirect(dialogId, checklistKey) {{
                     if (!dialogId) return;
-
-                    const normalizedCloseToken = String(closeToken || '').trim();
 
                     try {{
                         localStorage.setItem('checklist_pending_dialog', JSON.stringify({{
                             dialogId: dialogId,
                             checklistKey: checklistKey || 'id',
-                            closeToken: normalizedCloseToken,
                             ts: Date.now()
                         }}));
                     }} catch (e) {{
@@ -260,16 +222,7 @@ def app_home_html(
                     const popupUrl =
                         appPath('popup') +
                         '?dialogId=' + encodeURIComponent(dialogId) +
-                        '&checklistKey=' + encodeURIComponent(checklistKey || 'id') +
-                        (normalizedCloseToken
-                            ? '&closeToken=' + encodeURIComponent(normalizedCloseToken)
-                            : '');
-
-                    logLauncherEvent('bitrix_application_redirect_requested', {{
-                        dialogId: dialogId,
-                        checklistKey: checklistKey || 'id',
-                        closeTokenExists: Boolean(normalizedCloseToken)
-                    }});
+                        '&checklistKey=' + encodeURIComponent(checklistKey || 'id');
 
                     resizeCurrentPopupFrame();
                     setTimeout(resizeCurrentPopupFrame, 80);
@@ -280,11 +233,6 @@ def app_home_html(
                 }}
 
                 try {{
-                    logLauncherEvent('bitrix_application_entry_loaded', {{
-                        initialDialogIdExists: Boolean(initialDialogId),
-                        initialChecklistKey: initialChecklistKey || 'id',
-                        initialContextExists: Boolean(initialContextText)
-                    }});
                     if (initialContextText) {{
                         console.log('HOME initial context:', initialContextText);
                     }}
@@ -320,50 +268,28 @@ def app_home_html(
                         ) || 'id'
                     );
 
-                    const closeToken = pickValue(
-                        searchParams,
-                        hashParams,
-                        'closeToken',
-                        localPayload && localPayload.closeToken
-                    );
-
                     const ts = Number((localPayload && localPayload.ts) || 0);
                     const age = ts ? (Date.now() - ts) : 0;
 
                     if (dialogId) {{
-                        rememberAndRedirect(dialogId, checklistKey, closeToken);
+                        rememberAndRedirect(dialogId, checklistKey);
                         return;
                     }}
 
                     if (window.BX24 && typeof window.BX24.init === 'function') {{
                         window.BX24.init(function () {{
                             const bxData = extractFromBx24();
-                            logLauncherEvent('bitrix_application_context_resolved', {{
-                                dialogIdExists: Boolean(bxData.dialogId),
-                                checklistKey: bxData.checklistKey || checklistKey || 'id',
-                                source: 'BX24'
-                            }});
                             if (bxData.dialogId) {{
-                                rememberAndRedirect(
-                                    bxData.dialogId,
-                                    bxData.checklistKey || checklistKey || 'id',
-                                    bxData.closeToken || closeToken
-                                );
+                                rememberAndRedirect(bxData.dialogId, bxData.checklistKey || checklistKey || 'id');
                                 return;
                             }}
 
                             if (localPayload && localPayload.dialogId && age < 60000) {{
                                 rememberAndRedirect(
                                     localPayload.dialogId,
-                                    normalizeChecklistKey(localPayload.checklistKey || 'id'),
-                                    localPayload.closeToken || closeToken
+                                    normalizeChecklistKey(localPayload.checklistKey || 'id')
                                 );
-                                return;
                             }}
-                            logLauncherEvent('bitrix_application_context_missing', {{
-                                localPayloadExists: Boolean(localPayload),
-                                localPayloadAgeMs: age
-                            }});
                         }});
                         return;
                     }}
@@ -371,16 +297,12 @@ def app_home_html(
                     if (localPayload && localPayload.dialogId && age < 60000) {{
                         rememberAndRedirect(
                             localPayload.dialogId,
-                            normalizeChecklistKey(localPayload.checklistKey || 'id'),
-                            localPayload.closeToken || closeToken
+                            normalizeChecklistKey(localPayload.checklistKey || 'id')
                         );
                         return;
                     }}
                 }} catch (e) {{
                     console.log('launcher redirect skipped:', e);
-                    logLauncherEvent('bitrix_application_entry_failed', {{
-                        error: String(e)
-                    }});
                 }}
             }})();
         </script>
@@ -499,24 +421,6 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
             function appPath(path) {{
                 return (APP_BASE_PATH || '') + '/' + String(path || '').replace(/^\\/+/, '');
             }}
-
-            function logLauncherEvent(eventName, payload) {{
-                try {{
-                    fetch(appPath('api/debug/event'), {{
-                        method: 'POST',
-                        headers: {{ 'Content-Type': 'application/json' }},
-                        body: JSON.stringify({{
-                            event: eventName,
-                            dialogId: String(window.__dialogId || initialDialogId || ''),
-                            payload: payload || {{}},
-                            href: window.location.href,
-                            ts: new Date().toISOString()
-                        }}),
-                        keepalive: true
-                    }}).catch(function () {{}});
-                }} catch (e) {{}}
-            }}
-
             function setMeta(text) {{
                 document.getElementById('meta').textContent = text;
             }}
@@ -530,7 +434,6 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
                     setError('dialogId не найден');
                     return;
                 }}
-                setError('');
 
                 try {{
                     localStorage.setItem('checklist_pending_dialog', JSON.stringify({{
@@ -544,30 +447,17 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
 
                 try {{
                     if (window.BX24 && typeof window.BX24.openApplication === 'function') {{
-                        logLauncherEvent('bitrix_chat_popup_open_requested', {{
-                            dialogId: dialogId,
-                            checklistKey: checklistKey
-                        }});
-
-                        // IM_TEXTAREA must hand control back to Bitrix after launch.
-                        // Supplying a close callback keeps this launcher iframe alive
-                        // and prevents the placement from handling the next icon click.
-                        // The popup commits cross-closes through pagehide/beforeunload.
                         BX24.openApplication({{
                             dialogId: dialogId,
                             checklistKey: checklistKey,
                             source: 'textarea'
                         }});
-
                         autoOpened = true;
                         setMeta('Открываем popup для ' + dialogId);
                         return;
                     }}
                 }} catch (e) {{
                     setError('BX24.openApplication error: ' + String(e));
-                    logLauncherEvent('bitrix_chat_popup_open_failed', {{
-                        error: String(e)
-                    }});
                 }}
 
                 window.open(
@@ -593,10 +483,6 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
             function finish(dialogId, sourceText) {{
                 window.__dialogId = dialogId || '';
                 setMeta('dialogId: ' + (window.__dialogId || 'не передан') + ' | source: ' + sourceText);
-                logLauncherEvent('bitrix_chat_launcher_context_resolved', {{
-                    dialogIdExists: Boolean(window.__dialogId),
-                    source: sourceText
-                }});
 
                 try {{
                     if (window.BX24 && typeof window.BX24.fitWindow === 'function') {{
@@ -614,12 +500,6 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
             function canUseBx24() {{
                 return !!(window.BX24 && typeof window.BX24.init === 'function');
             }}
-
-            logLauncherEvent('bitrix_chat_launcher_loaded', {{
-                initialDialogIdExists: Boolean(initialDialogId),
-                initialContextExists: Boolean(initialContextText),
-                bx24Available: canUseBx24()
-            }});
 
             if (initialDialogId) {{
                 finish(initialDialogId, 'server-post');
