@@ -109,30 +109,6 @@
         });
     }
 
-    function getFrameGeometry() {
-        const root = global.document && global.document.documentElement;
-        const body = global.document && global.document.body;
-
-        return {
-            innerWidth: Number(global.innerWidth || 0),
-            innerHeight: Number(global.innerHeight || 0),
-            scrollWidth: Number(
-                root && root.scrollWidth
-                || body && body.scrollWidth
-                || 0
-            ),
-            scrollHeight: Number(
-                root && root.scrollHeight
-                || body && body.scrollHeight
-                || 0
-            ),
-            visibilityState: String(
-                global.document && global.document.visibilityState
-                || ''
-            )
-        };
-    }
-
     async function fitPopup(options) {
         const initializedNow = await init();
         if (!initializedNow) {
@@ -148,18 +124,13 @@
             ? config.delays
             : [0];
 
-        function applySize(stage) {
+        function applySize() {
             try {
                 if (typeof global.BX24.resizeWindow === 'function') {
-                    if (typeof global.debugLog === 'function') {
-                        global.debugLog('popup_frame_resize_requested', {
-                            stage: String(stage || ''),
-                            requestedWidth: width,
-                            requestedHeight: height,
-                            frame: getFrameGeometry()
-                        });
-                    }
                     global.BX24.resizeWindow(width, height);
+                }
+                if (typeof global.BX24.fitWindow === 'function') {
+                    global.BX24.fitWindow();
                 }
             } catch (error) {
                 console.log('BX24 popup sizing error:', error);
@@ -169,11 +140,9 @@
         for (const delay of delays) {
             const normalizedDelay = Math.max(0, Number(delay || 0));
             if (normalizedDelay === 0) {
-                applySize('initial');
+                applySize();
             } else {
-                global.setTimeout(function () {
-                    applySize('delay-' + normalizedDelay);
-                }, normalizedDelay);
+                global.setTimeout(applySize, normalizedDelay);
             }
         }
 
@@ -186,7 +155,6 @@
         callMethod,
         getCurrentUser,
         getDialog,
-        getFrameGeometry,
         fitPopup,
         initTimeoutMs: INIT_TIMEOUT_MS
     });

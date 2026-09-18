@@ -1,6 +1,6 @@
 {
-  "stage": "8.15.9.7",
-  "generatedAt": "2026-09-17T03:00:00+00:00",
+  "stage": "8.15.9.5",
+  "generatedAt": "2026-09-15T08:05:51+00:00",
   "loadOrder": [
     "popup-bootstrap.js",
     "checklist-action-icons.js",
@@ -288,8 +288,7 @@
     "The popup upload area expands above the remaining item actions and grows by file-card rows.",
     "The public-link action is icon-only and disabled in the application interface while its backend remains unchanged.",
     "Archive rows display the preserved original uploader and upload time rather than the later replacement actor and archive time.",
-    "Stage 8.15.9.5 resolves the popup Yandex action from durable backend jobs before opening a folder or starting manual recovery.",
-    "Stage 8.15.9.7 removes conflicting fitWindow calls, sizes the Bitrix host before redirect and records popup-frame geometry for repeat-open diagnostics."
+    "Stage 8.15.9.5 resolves the popup Yandex action from durable backend jobs before opening a folder or starting manual recovery."
   ],
   "hashMode": "utf8-lf",
   "lineEndingNote": "Hashes are calculated from bytes written to disk. This is stable for Windows CRLF and Unix LF.",
@@ -307,8 +306,8 @@
       "bytes": 1717
     },
     "popup-bitrix-bridge.js": {
-      "sha256": "50618b89e64700caa5383bc63992c8a752cd8bf3336f64a512c894e0c343f9c1",
-      "bytes": 5652
+      "sha256": "88eee130a578fae63f8bab92a0d634ad06b4a6469552714f0a19dfa65fff8b45",
+      "bytes": 4488
     },
     "checklist-window-channel.js": {
       "sha256": "d45014ff74333e2be74c591b6b965fd17c520cd9077bc0b27057ded071dab625",
@@ -459,8 +458,8 @@
       "bytes": 10646
     },
     "popup-init.js": {
-      "sha256": "48e80c8b2f6727bc7e7bc8a5957cdfbd54aa11a309257ccbaec68baca2479b8f",
-      "bytes": 3006
+      "sha256": "4596fcfe86614d66f79a923ff65a5b0c8e579dabf2fb7c45b4b99646a9f42b47",
+      "bytes": 2328
     },
     "id-reminders.js": {
       "sha256": "151dc7293602d751014178a2cf61c3748edb9440e8a99455b742eac4a1951dd5",

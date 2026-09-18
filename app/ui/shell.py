@@ -97,8 +97,6 @@ def app_home_html(
                 const initialDialogId = {initial_dialog_id_json};
                 const initialChecklistKey = {initial_checklist_key_json};
                 const initialContextText = {initial_context_text_json};
-                const POPUP_WIDTH = 1180;
-                const POPUP_HEIGHT = 720;
 
                 function detectAppBasePath() {{
                     const path = String(window.location.pathname || '/').replace(/\\/+$/, '');
@@ -134,26 +132,6 @@ def app_home_html(
                             keepalive: true
                         }}).catch(function () {{}});
                     }} catch (e) {{}}
-                }}
-
-                function getFrameGeometry() {{
-                    const root = document.documentElement;
-                    const body = document.body;
-                    return {{
-                        innerWidth: Number(window.innerWidth || 0),
-                        innerHeight: Number(window.innerHeight || 0),
-                        scrollWidth: Number(
-                            root && root.scrollWidth
-                            || body && body.scrollWidth
-                            || 0
-                        ),
-                        scrollHeight: Number(
-                            root && root.scrollHeight
-                            || body && body.scrollHeight
-                            || 0
-                        ),
-                        visibilityState: String(document.visibilityState || '')
-                    }};
                 }}
 
                 function pickValue(searchParams, hashParams, key, fallback) {{
@@ -250,66 +228,17 @@ def app_home_html(
                     }};
                 }}
 
-                function resizeCurrentPopupFrame(stage) {{
+                function resizeCurrentPopupFrame() {{
                     try {{
                         if (window.BX24 && typeof window.BX24.resizeWindow === 'function') {{
-                            logLauncherEvent('bitrix_application_frame_resize_requested', {{
-                                stage: String(stage || ''),
-                                requestedWidth: POPUP_WIDTH,
-                                requestedHeight: POPUP_HEIGHT,
-                                frame: getFrameGeometry()
-                            }});
-                            window.BX24.resizeWindow(POPUP_WIDTH, POPUP_HEIGHT);
-                            return true;
+                            window.BX24.resizeWindow(1180, 720);
+                        }}
+                        if (window.BX24 && typeof window.BX24.fitWindow === 'function') {{
+                            window.BX24.fitWindow();
                         }}
                     }} catch (e) {{
                         console.log('BX24 resize skipped:', e);
                     }}
-                    return false;
-                }}
-
-                function resizeAndRedirectToPopup(popupUrl) {{
-                    let settled = false;
-                    let initTimeoutId = null;
-
-                    function run(source) {{
-                        if (settled) return;
-                        settled = true;
-
-                        if (initTimeoutId !== null) {{
-                            window.clearTimeout(initTimeoutId);
-                        }}
-
-                        resizeCurrentPopupFrame(source + ':initial');
-                        window.setTimeout(function () {{
-                            resizeCurrentPopupFrame(source + ':retry');
-                        }}, 80);
-
-                        window.setTimeout(function () {{
-                            logLauncherEvent('bitrix_application_popup_redirecting', {{
-                                source: source,
-                                frame: getFrameGeometry()
-                            }});
-                            window.location.replace(popupUrl);
-                        }}, 160);
-                    }}
-
-                    if (window.BX24 && typeof window.BX24.init === 'function') {{
-                        initTimeoutId = window.setTimeout(function () {{
-                            run('bx24-init-timeout');
-                        }}, 1200);
-
-                        try {{
-                            window.BX24.init(function () {{
-                                run('bx24-init');
-                            }});
-                            return;
-                        }} catch (e) {{
-                            console.log('BX24 popup init skipped:', e);
-                        }}
-                    }}
-
-                    run('bx24-unavailable');
                 }}
 
                 function rememberAndRedirect(dialogId, checklistKey, closeToken) {{
@@ -339,11 +268,15 @@ def app_home_html(
                     logLauncherEvent('bitrix_application_redirect_requested', {{
                         dialogId: dialogId,
                         checklistKey: checklistKey || 'id',
-                        closeTokenExists: Boolean(normalizedCloseToken),
-                        frame: getFrameGeometry()
+                        closeTokenExists: Boolean(normalizedCloseToken)
                     }});
 
-                    resizeAndRedirectToPopup(popupUrl);
+                    resizeCurrentPopupFrame();
+                    setTimeout(resizeCurrentPopupFrame, 80);
+
+                    setTimeout(function () {{
+                        window.location.replace(popupUrl);
+                    }}, 120);
                 }}
 
                 try {{
@@ -613,12 +546,9 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
                     if (window.BX24 && typeof window.BX24.openApplication === 'function') {{
                         logLauncherEvent('bitrix_chat_popup_open_requested', {{
                             dialogId: dialogId,
-                            checklistKey: checklistKey,
-                            requestedWidth: 1180,
-                            requestedHeight: 720,
-                            innerWidth: Number(window.innerWidth || 0),
-                            innerHeight: Number(window.innerHeight || 0)
+                            checklistKey: checklistKey
                         }});
+
                         // IM_TEXTAREA must hand control back to Bitrix after launch.
                         // Supplying a close callback keeps this launcher iframe alive
                         // and prevents the placement from handling the next icon click.
@@ -626,10 +556,9 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
                         BX24.openApplication({{
                             dialogId: dialogId,
                             checklistKey: checklistKey,
-                            source: 'textarea',
-                            bx24_width: 1180,
-                            bx24_title: 'Чек-лист ИД'
+                            source: 'textarea'
                         }});
+
                         autoOpened = true;
                         setMeta('Открываем popup для ' + dialogId);
                         return;
@@ -668,6 +597,12 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
                     dialogIdExists: Boolean(window.__dialogId),
                     source: sourceText
                 }});
+
+                try {{
+                    if (window.BX24 && typeof window.BX24.fitWindow === 'function') {{
+                        window.BX24.fitWindow();
+                    }}
+                }} catch (e) {{}}
 
                 if (window.__dialogId && !autoOpened) {{
                     setTimeout(function() {{
