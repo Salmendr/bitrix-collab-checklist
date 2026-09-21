@@ -4,6 +4,14 @@
         <meta charset="utf-8">
         <title>[[POPUP_FULL_TITLE]]</title>
         <script src="https://api.bitrix24.com/api/v1/"></script>
+        <script>
+            window.CHECKLIST_HOST_DIAGNOSTICS_CONFIG = Object.freeze({
+                surface: 'popup',
+                dialogId: [[POPUP_DIALOG_ID_JSON]],
+                checklistKey: [[POPUP_CHECKLIST_KEY_JSON]]
+            });
+        </script>
+        <script src="ui-static/js/checklist-host-diagnostics.js?v=8.15.9.8-popup-host-diagnostics"></script>
         <link rel="stylesheet" href="ui-static/css/popup-bootstrap.css?v=8.15.9">
         <!-- Stage 6.2: popup styles are loaded through popup-bootstrap.css. -->
     </head>

@@ -2,6 +2,7 @@
   "stage": "8.15.9.5",
   "generatedAt": "2026-09-15T08:05:51+00:00",
   "loadOrder": [
+    "checklist-host-diagnostics.js",
     "popup-bootstrap.js",
     "checklist-action-icons.js",
     "popup-api-client.js",
@@ -288,11 +289,16 @@
     "The popup upload area expands above the remaining item actions and grows by file-card rows.",
     "The public-link action is icon-only and disabled in the application interface while its backend remains unchanged.",
     "Archive rows display the preserved original uploader and upload time rather than the later replacement actor and archive time.",
-    "Stage 8.15.9.5 resolves the popup Yandex action from durable backend jobs before opening a folder or starting manual recovery."
+    "Stage 8.15.9.5 resolves the popup Yandex action from durable backend jobs before opening a folder or starting manual recovery.",
+    "Popup host diagnostics records launcher, application-frame and popup lifecycle state without changing open, close, resize, save or synchronization behavior."
   ],
   "hashMode": "utf8-lf",
   "lineEndingNote": "Hashes are calculated from bytes written to disk. This is stable for Windows CRLF and Unix LF.",
   "modules": {
+    "checklist-host-diagnostics.js": {
+      "sha256": "a45381330031913d90136373f2c4c4fcbd63ac75c06b58ebfb3a0fdad803a7d6",
+      "bytes": 20882
+    },
     "popup-bootstrap.js": {
       "sha256": "79ea9dc579d40fe407a868f22577efeced5236e4a6a28244f36d589281fe41c1",
       "bytes": 1514
@@ -306,8 +312,8 @@
       "bytes": 1717
     },
     "popup-bitrix-bridge.js": {
-      "sha256": "88eee130a578fae63f8bab92a0d634ad06b4a6469552714f0a19dfa65fff8b45",
-      "bytes": 4488
+      "sha256": "4520f60cca1342a15731a433e4b6dca3330421c20fdb0fcf6a59b42ba6b4d2d6",
+      "bytes": 7342
     },
     "checklist-window-channel.js": {
       "sha256": "d45014ff74333e2be74c591b6b965fd17c520cd9077bc0b27057ded071dab625",
@@ -358,8 +364,8 @@
       "bytes": 25202
     },
     "popup-session-enhancements.js": {
-      "sha256": "534cbd2f8b1699f68791c872c157e5f17e7a833c05748f109b870dac260201ad",
-      "bytes": 48980
+      "sha256": "7fd8e8889eadc86a9471688e5a0842997c57a7ecd00f19f04c75369fb9e6992a",
+      "bytes": 50734
     },
     "popup-edit-session.js": {
       "sha256": "8cd402644dc0c9724b46b22c725e19a572232fa81d7105a8d3c094de9d6c7c42",

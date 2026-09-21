@@ -26,6 +26,7 @@ from app.ui.shell import (
     app_home_html,
     textarea_html,
 )
+from app.ui.request_diagnostics import write_ui_request_diagnostic
 
 
 router = APIRouter()
@@ -184,7 +185,21 @@ def health(request: Request):
 
 
 @router.get("/", response_class=HTMLResponse)
-def home_get(dialogId: str = "", checklistKey: str = "id", mode: str = ""):
+def home_get(
+    request: Request,
+    dialogId: str = "",
+    checklistKey: str = "id",
+    mode: str = "",
+):
+    write_ui_request_diagnostic(
+        "popup_diag_http_application_get",
+        request,
+        extra={
+            "dialogId": normalize_dialog_id(dialogId),
+            "checklistKey": normalize_checklist_key(checklistKey),
+            "mode": str(mode or ""),
+        },
+    )
     return app_home_html()
 
 
@@ -200,16 +215,42 @@ async def home_post(request: Request):
     print("HOME EXTRACTED DIALOG ID:", dialog_id)
     print("HOME EXTRACTED CHECKLIST KEY:", checklist_key)
 
+    write_ui_request_diagnostic(
+        "popup_diag_http_application_post",
+        request,
+        form_keys=form.keys(),
+        extra={
+            "dialogId": dialog_id,
+            "checklistKey": checklist_key,
+        },
+    )
+
     return app_home_html(dialog_id, checklist_key, raw_context)
 
 
 @router.get("/launch", response_class=HTMLResponse)
-def launch_get(dialogId: str = "", checklistKey: str = "id"):
+def launch_get(
+    request: Request,
+    dialogId: str = "",
+    checklistKey: str = "id",
+):
+    write_ui_request_diagnostic(
+        "popup_diag_http_launch_get",
+        request,
+        extra={
+            "dialogId": normalize_dialog_id(dialogId),
+            "checklistKey": normalize_checklist_key(checklistKey),
+        },
+    )
     return app_home_html()
 
 
 @router.post("/launch", response_class=HTMLResponse)
 async def launch_post(request: Request):
+    write_ui_request_diagnostic(
+        "popup_diag_http_launch_post",
+        request,
+    )
     return app_home_html()
 
 
@@ -312,8 +353,13 @@ async def install_post(request: Request):
 
 
 @router.get("/textarea", response_class=HTMLResponse)
-def textarea_get(dialogId: str = ""):
+def textarea_get(request: Request, dialogId: str = ""):
     dialog_id = normalize_dialog_id(dialogId)
+    write_ui_request_diagnostic(
+        "popup_diag_http_textarea_get",
+        request,
+        extra={"dialogId": dialog_id},
+    )
     return textarea_html(dialog_id, "GET /textarea")
 
 
@@ -325,5 +371,12 @@ async def textarea_post(request: Request):
 
     print("TEXTAREA POST FORM:", raw_context)
     print("TEXTAREA EXTRACTED DIALOG ID:", dialog_id)
+
+    write_ui_request_diagnostic(
+        "popup_diag_http_textarea_post",
+        request,
+        form_keys=form.keys(),
+        extra={"dialogId": dialog_id},
+    )
 
     return textarea_html(dialog_id, raw_context)

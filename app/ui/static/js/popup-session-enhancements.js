@@ -1270,6 +1270,29 @@ function isEmbeddedBitrixPopup() {
 
 function closePopupWindow() {
     const embeddedInBitrix = isEmbeddedBitrixPopup();
+    const hostDiagnostics = window.ChecklistHostDiagnostics;
+
+    function recordPopupCloseDiagnostic(event, payload) {
+        try {
+            if (
+                hostDiagnostics
+                && typeof hostDiagnostics.record === 'function'
+            ) {
+                hostDiagnostics.record(event, payload || {}, true);
+            }
+        } catch (error) {
+            console.log('popup close diagnostics skipped:', error);
+        }
+    }
+
+    recordPopupCloseDiagnostic('popup_diag_close_requested', {
+        embeddedInBitrix,
+        hasBx24: Boolean(window.BX24),
+        hasCloseApplication: Boolean(
+            window.BX24
+            && typeof window.BX24.closeApplication === 'function'
+        )
+    });
 
     if (
         embeddedInBitrix
@@ -1277,10 +1300,22 @@ function closePopupWindow() {
         && typeof window.BX24.closeApplication === 'function'
     ) {
         try {
+            recordPopupCloseDiagnostic(
+                'popup_diag_close_application_before',
+                {}
+            );
             window.BX24.closeApplication();
+            recordPopupCloseDiagnostic(
+                'popup_diag_close_application_returned',
+                {}
+            );
             return;
         } catch (error) {
             console.log('BX24.closeApplication error:', error);
+            recordPopupCloseDiagnostic(
+                'popup_diag_close_application_error',
+                { error: String(error) }
+            );
         }
     }
 
@@ -1291,17 +1326,33 @@ function closePopupWindow() {
 
     if (hasUsableOpener) {
         try {
+            recordPopupCloseDiagnostic(
+                'popup_diag_close_window_fallback_before',
+                { hasUsableOpener }
+            );
             if (typeof window.opener.focus === 'function') {
                 window.opener.focus();
             }
             window.close();
+            recordPopupCloseDiagnostic(
+                'popup_diag_close_window_fallback_returned',
+                { closed: Boolean(window.closed) }
+            );
         } catch (error) {
             console.log('window.close error:', error);
+            recordPopupCloseDiagnostic(
+                'popup_diag_close_window_fallback_error',
+                { error: String(error) }
+            );
         }
     }
 
     window.setTimeout(function () {
         if (!window.closed) {
+            recordPopupCloseDiagnostic(
+                'popup_diag_close_reload_fallback',
+                { hasUsableOpener }
+            );
             window.location.reload();
         }
     }, hasUsableOpener ? 180 : 60);

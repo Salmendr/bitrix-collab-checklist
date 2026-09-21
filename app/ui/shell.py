@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 from urllib.parse import urlparse
 
 from fastapi import Request
@@ -12,6 +13,14 @@ from app.checklists.utils import (
     normalize_dialog_id,
     normalize_checklist_key,
 )
+
+
+_HOST_DIAGNOSTICS_SCRIPT = (
+    Path(__file__).resolve().parent
+    / "static"
+    / "js"
+    / "checklist-host-diagnostics.js"
+).read_text(encoding="utf-8")
 
 def normalize_domain(value: str) -> str:
     value = (value or "").strip()
@@ -93,10 +102,41 @@ def app_home_html(
         <title>Чек-листы проекта</title>
         <script src="https://api.bitrix24.com/api/v1/"></script>
         <script>
+            window.CHECKLIST_HOST_DIAGNOSTICS_CONFIG = Object.freeze({{
+                surface: 'application_frame',
+                dialogId: {initial_dialog_id_json},
+                checklistKey: {initial_checklist_key_json}
+            }});
+        </script>
+        <script>{_HOST_DIAGNOSTICS_SCRIPT}</script>
+        <script>
             (function () {{
                 const initialDialogId = {initial_dialog_id_json};
                 const initialChecklistKey = {initial_checklist_key_json};
                 const initialContextText = {initial_context_text_json};
+                const hostDiagnostics = window.ChecklistHostDiagnostics;
+
+                function recordHostDiagnostic(event, payload, useBeacon) {{
+                    try {{
+                        if (
+                            hostDiagnostics
+                            && typeof hostDiagnostics.record === 'function'
+                        ) {{
+                            hostDiagnostics.record(
+                                event,
+                                payload || {{}},
+                                Boolean(useBeacon)
+                            );
+                        }}
+                    }} catch (error) {{
+                        console.log('host diagnostics skipped:', error);
+                    }}
+                }}
+
+                recordHostDiagnostic('popup_diag_application_script_started', {{
+                    hasInitialDialogId: Boolean(initialDialogId),
+                    hasInitialContext: Boolean(initialContextText)
+                }});
 
                 function detectAppBasePath() {{
                     const path = String(window.location.pathname || '/').replace(/\\/+$/, '');
@@ -134,6 +174,10 @@ def app_home_html(
 
                     try {{
                         if (!(window.BX24 && typeof window.BX24.placement === 'object' && typeof window.BX24.placement.info === 'function')) {{
+                            recordHostDiagnostic(
+                                'popup_diag_application_placement_unavailable',
+                                {{}}
+                            );
                             return {{ dialogId: '', checklistKey: '' }};
                         }}
 
@@ -183,8 +227,24 @@ def app_home_html(
                         try {{
                             console.log('app_home placement.info =', info);
                         }} catch (e) {{}}
+
+                        recordHostDiagnostic(
+                            'popup_diag_application_placement_resolved',
+                            {{
+                                dialogId: dialogId,
+                                checklistKey: checklistKey || 'id',
+                                placement: String(
+                                    info.placement || info.PLACEMENT || ''
+                                ),
+                                optionKeys: Object.keys(options).sort()
+                            }}
+                        );
                     }} catch (e) {{
                         console.log('app_home extractFromBx24 error:', e);
+                        recordHostDiagnostic(
+                            'popup_diag_application_placement_error',
+                            {{ error: String(e) }}
+                        );
                     }}
 
                     return {{
@@ -194,6 +254,19 @@ def app_home_html(
                 }}
 
                 function resizeCurrentPopupFrame() {{
+                    recordHostDiagnostic(
+                        'popup_diag_application_resize_before',
+                        {{
+                            hasResizeWindow: Boolean(
+                                window.BX24
+                                && typeof window.BX24.resizeWindow === 'function'
+                            ),
+                            hasFitWindow: Boolean(
+                                window.BX24
+                                && typeof window.BX24.fitWindow === 'function'
+                            )
+                        }}
+                    );
                     try {{
                         if (window.BX24 && typeof window.BX24.resizeWindow === 'function') {{
                             window.BX24.resizeWindow(1180, 720);
@@ -201,20 +274,38 @@ def app_home_html(
                         if (window.BX24 && typeof window.BX24.fitWindow === 'function') {{
                             window.BX24.fitWindow();
                         }}
+                        recordHostDiagnostic(
+                            'popup_diag_application_resize_after',
+                            {{ requestedWidth: 1180, requestedHeight: 720 }}
+                        );
                     }} catch (e) {{
                         console.log('BX24 resize skipped:', e);
+                        recordHostDiagnostic(
+                            'popup_diag_application_resize_error',
+                            {{ error: String(e) }}
+                        );
                     }}
                 }}
 
                 function rememberAndRedirect(dialogId, checklistKey) {{
                     if (!dialogId) return;
 
+                    recordHostDiagnostic(
+                        'popup_diag_application_redirect_preparing',
+                        {{
+                            dialogId: dialogId,
+                            checklistKey: checklistKey || 'id'
+                        }}
+                    );
+
+                    let pendingDialogStored = false;
                     try {{
                         localStorage.setItem('checklist_pending_dialog', JSON.stringify({{
                             dialogId: dialogId,
                             checklistKey: checklistKey || 'id',
                             ts: Date.now()
                         }}));
+                        pendingDialogStored = true;
                     }} catch (e) {{
                         console.log('pending dialog save skipped:', e);
                     }}
@@ -224,10 +315,28 @@ def app_home_html(
                         '?dialogId=' + encodeURIComponent(dialogId) +
                         '&checklistKey=' + encodeURIComponent(checklistKey || 'id');
 
+                    recordHostDiagnostic(
+                        'popup_diag_application_redirect_scheduled',
+                        {{
+                            dialogId: dialogId,
+                            checklistKey: checklistKey || 'id',
+                            pendingDialogStored: pendingDialogStored,
+                            delayMs: 120
+                        }}
+                    );
+
                     resizeCurrentPopupFrame();
                     setTimeout(resizeCurrentPopupFrame, 80);
 
                     setTimeout(function () {{
+                        recordHostDiagnostic(
+                            'popup_diag_application_redirect_executing',
+                            {{
+                                dialogId: dialogId,
+                                checklistKey: checklistKey || 'id'
+                            }},
+                            true
+                        );
                         window.location.replace(popupUrl);
                     }}, 120);
                 }}
@@ -271,13 +380,65 @@ def app_home_html(
                     const ts = Number((localPayload && localPayload.ts) || 0);
                     const age = ts ? (Date.now() - ts) : 0;
 
+                    recordHostDiagnostic(
+                        'popup_diag_application_context_resolved',
+                        {{
+                            dialogId: dialogId,
+                            checklistKey: checklistKey,
+                            hasQueryDialogId: Boolean(
+                                searchParams.get('dialogId')
+                            ),
+                            hasHashDialogId: Boolean(
+                                hashParams.get('dialogId')
+                            ),
+                            hasInitialDialogId: Boolean(initialDialogId),
+                            hasPendingDialog: Boolean(
+                                localPayload && localPayload.dialogId
+                            ),
+                            pendingDialogAgeMs: age
+                        }}
+                    );
+
                     if (dialogId) {{
+                        if (
+                            window.BX24
+                            && typeof window.BX24.init === 'function'
+                        ) {{
+                            recordHostDiagnostic(
+                                'popup_diag_application_bx24_init_started',
+                                {{ source: 'resolved_server_context' }}
+                            );
+                            window.BX24.init(function () {{
+                                recordHostDiagnostic(
+                                    'popup_diag_application_bx24_init_completed',
+                                    {{ source: 'resolved_server_context' }}
+                                );
+                                rememberAndRedirect(
+                                    dialogId,
+                                    checklistKey
+                                );
+                            }});
+                            return;
+                        }}
+
+                        recordHostDiagnostic(
+                            'popup_diag_application_bx24_unavailable',
+                            {{ source: 'resolved_server_context' }}
+                        );
                         rememberAndRedirect(dialogId, checklistKey);
                         return;
                     }}
 
                     if (window.BX24 && typeof window.BX24.init === 'function') {{
+                        recordHostDiagnostic(
+                            'popup_diag_application_bx24_init_started',
+                            {{}}
+                        );
                         window.BX24.init(function () {{
+                            recordHostDiagnostic(
+                                'popup_diag_application_bx24_init_completed',
+                                {{}}
+                            );
                             const bxData = extractFromBx24();
                             if (bxData.dialogId) {{
                                 rememberAndRedirect(bxData.dialogId, bxData.checklistKey || checklistKey || 'id');
@@ -301,8 +462,20 @@ def app_home_html(
                         );
                         return;
                     }}
+
+                    recordHostDiagnostic(
+                        'popup_diag_application_context_missing',
+                        {{
+                            hasBx24: Boolean(window.BX24),
+                            pendingDialogAgeMs: age
+                        }}
+                    );
                 }} catch (e) {{
                     console.log('launcher redirect skipped:', e);
+                    recordHostDiagnostic(
+                        'popup_diag_application_script_error',
+                        {{ error: String(e) }}
+                    );
                 }}
             }})();
         </script>
@@ -327,6 +500,14 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
         <meta charset="utf-8">
         <title>Чек-лист ИД — textarea</title>
         <script src="https://api.bitrix24.com/api/v1/"></script>
+        <script>
+            window.CHECKLIST_HOST_DIAGNOSTICS_CONFIG = Object.freeze({{
+                surface: 'textarea_launcher',
+                dialogId: {initial_dialog_id_json},
+                checklistKey: 'id'
+            }});
+        </script>
+        <script>{_HOST_DIAGNOSTICS_SCRIPT}</script>
         <style>
             body {{
                 font-family: Arial, sans-serif;
@@ -401,6 +582,85 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
             var initialDialogId = {initial_dialog_id_json};
             var initialContextText = {initial_context_text_json};
             var autoOpened = false;
+            var hostDiagnostics = window.ChecklistHostDiagnostics;
+
+            function recordHostDiagnostic(event, payload, useBeacon) {{
+                try {{
+                    if (
+                        hostDiagnostics
+                        && typeof hostDiagnostics.record === 'function'
+                    ) {{
+                        hostDiagnostics.record(
+                            event,
+                            payload || {{}},
+                            Boolean(useBeacon)
+                        );
+                    }}
+                }} catch (error) {{
+                    console.log('host diagnostics skipped:', error);
+                }}
+            }}
+
+            recordHostDiagnostic('popup_diag_launcher_script_started', {{
+                hasInitialDialogId: Boolean(initialDialogId),
+                hasInitialContext: Boolean(initialContextText),
+                autoOpened: autoOpened
+            }});
+
+            function recordLauncherRuntimeState(source, useBeacon) {{
+                recordHostDiagnostic(
+                    'popup_diag_launcher_runtime_state',
+                    {{
+                        source: source,
+                        dialogId: window.__dialogId || '',
+                        autoOpened: autoOpened,
+                        visibilityState: String(
+                            document.visibilityState || ''
+                        ),
+                        hasFocus: typeof document.hasFocus === 'function'
+                            ? Boolean(document.hasFocus())
+                            : null
+                    }},
+                    Boolean(useBeacon)
+                );
+            }}
+
+            window.addEventListener('focus', function () {{
+                recordLauncherRuntimeState('window_focus', false);
+            }}, true);
+
+            window.addEventListener('blur', function () {{
+                recordLauncherRuntimeState('window_blur', false);
+            }}, true);
+
+            document.addEventListener('visibilitychange', function () {{
+                recordLauncherRuntimeState(
+                    'visibilitychange',
+                    Boolean(document.hidden)
+                );
+            }}, true);
+
+            window.addEventListener('pageshow', function (event) {{
+                recordHostDiagnostic(
+                    'popup_diag_launcher_pageshow_state',
+                    {{
+                        persisted: Boolean(event && event.persisted),
+                        dialogId: window.__dialogId || '',
+                        autoOpened: autoOpened
+                    }}
+                );
+            }}, true);
+
+            var launcherResizeDiagnosticTimer = null;
+            window.addEventListener('resize', function () {{
+                if (launcherResizeDiagnosticTimer !== null) {{
+                    window.clearTimeout(launcherResizeDiagnosticTimer);
+                }}
+                launcherResizeDiagnosticTimer = window.setTimeout(function () {{
+                    launcherResizeDiagnosticTimer = null;
+                    recordLauncherRuntimeState('window_resize', false);
+                }}, 100);
+            }}, true);
 
             function detectAppBasePath() {{
                 const path = String(window.location.pathname || '/').replace(/\\/+$/, '');
@@ -429,36 +689,129 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
                 document.getElementById('error').textContent = text || '';
             }}
 
-            function openChecklist(dialogId, checklistKey = 'id') {{
+            function openChecklist(
+                dialogId,
+                checklistKey = 'id',
+                trigger = 'unknown'
+            ) {{
                 if (!dialogId) {{
                     setError('dialogId не найден');
+                    recordHostDiagnostic(
+                        'popup_diag_launcher_open_rejected',
+                        {{
+                            reason: 'dialog_id_missing',
+                            trigger: trigger,
+                            autoOpened: autoOpened
+                        }}
+                    );
                     return;
                 }}
 
+                var launch = null;
+                try {{
+                    if (
+                        hostDiagnostics
+                        && typeof hostDiagnostics.startLaunch === 'function'
+                    ) {{
+                        launch = hostDiagnostics.startLaunch({{
+                            dialogId: dialogId,
+                            checklistKey: checklistKey,
+                            trigger: trigger
+                        }});
+                    }}
+                }} catch (diagnosticError) {{
+                    console.log(
+                        'launch diagnostics skipped:',
+                        diagnosticError
+                    );
+                }}
+
+                var pendingDialogStored = false;
                 try {{
                     localStorage.setItem('checklist_pending_dialog', JSON.stringify({{
                         dialogId: dialogId,
                         checklistKey: checklistKey,
                         ts: Date.now()
                     }}));
+                    pendingDialogStored = true;
                 }} catch (e) {{
                     console.log('localStorage save error:', e);
                 }}
 
                 try {{
                     if (window.BX24 && typeof window.BX24.openApplication === 'function') {{
-                        BX24.openApplication({{
+                        var startedAt = (
+                            window.performance
+                            && typeof window.performance.now === 'function'
+                        )
+                            ? window.performance.now()
+                            : Date.now();
+                        recordHostDiagnostic(
+                            'popup_diag_open_application_before',
+                            {{
+                                launchId: launch && launch.launchId || '',
+                                trigger: trigger,
+                                dialogId: dialogId,
+                                checklistKey: checklistKey,
+                                autoOpenedBefore: autoOpened,
+                                pendingDialogStored: pendingDialogStored
+                            }},
+                            true
+                        );
+
+                        var openResult = BX24.openApplication({{
                             dialogId: dialogId,
                             checklistKey: checklistKey,
                             source: 'textarea'
                         }});
                         autoOpened = true;
+                        var finishedAt = (
+                            window.performance
+                            && typeof window.performance.now === 'function'
+                        )
+                            ? window.performance.now()
+                            : Date.now();
+                        recordHostDiagnostic(
+                            'popup_diag_open_application_returned',
+                            {{
+                                launchId: launch && launch.launchId || '',
+                                trigger: trigger,
+                                elapsedMs: Math.max(
+                                    0,
+                                    Math.round(finishedAt - startedAt)
+                                ),
+                                returnType: typeof openResult,
+                                autoOpenedAfter: autoOpened
+                            }}
+                        );
                         setMeta('Открываем popup для ' + dialogId);
                         return;
                     }}
                 }} catch (e) {{
                     setError('BX24.openApplication error: ' + String(e));
+                    recordHostDiagnostic(
+                        'popup_diag_open_application_error',
+                        {{
+                            launchId: launch && launch.launchId || '',
+                            trigger: trigger,
+                            error: String(e),
+                            autoOpened: autoOpened
+                        }}
+                    );
                 }}
+
+                recordHostDiagnostic(
+                    'popup_diag_window_open_fallback',
+                    {{
+                        launchId: launch && launch.launchId || '',
+                        trigger: trigger,
+                        hasBx24: Boolean(window.BX24),
+                        hasOpenApplication: Boolean(
+                            window.BX24
+                            && typeof window.BX24.openApplication === 'function'
+                        )
+                    }}
+                );
 
                 window.open(
                     appPath('popup') +
@@ -470,8 +823,19 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
 
             document.getElementById('openBtn').addEventListener('click', function () {{
                 try {{
+                    recordHostDiagnostic(
+                        'popup_diag_launcher_button_clicked',
+                        {{
+                            dialogId: window.__dialogId || '',
+                            autoOpened: autoOpened
+                        }}
+                    );
                     if (window.__dialogId) {{
-                        openChecklist(window.__dialogId);
+                        openChecklist(
+                            window.__dialogId,
+                            'id',
+                            'manual_launcher_button'
+                        );
                     }} else {{
                         setError('dialogId ещё не определён');
                     }}
@@ -484,16 +848,59 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
                 window.__dialogId = dialogId || '';
                 setMeta('dialogId: ' + (window.__dialogId || 'не передан') + ' | source: ' + sourceText);
 
+                recordHostDiagnostic(
+                    'popup_diag_launcher_context_finished',
+                    {{
+                        dialogId: window.__dialogId,
+                        source: sourceText,
+                        autoOpened: autoOpened
+                    }}
+                );
+
                 try {{
                     if (window.BX24 && typeof window.BX24.fitWindow === 'function') {{
+                        recordHostDiagnostic(
+                            'popup_diag_launcher_fit_window_before',
+                            {{ source: sourceText }}
+                        );
                         window.BX24.fitWindow();
+                        recordHostDiagnostic(
+                            'popup_diag_launcher_fit_window_after',
+                            {{ source: sourceText }}
+                        );
                     }}
-                }} catch (e) {{}}
+                }} catch (e) {{
+                    recordHostDiagnostic(
+                        'popup_diag_launcher_fit_window_error',
+                        {{ error: String(e), source: sourceText }}
+                    );
+                }}
 
                 if (window.__dialogId && !autoOpened) {{
+                    recordHostDiagnostic(
+                        'popup_diag_launcher_auto_open_scheduled',
+                        {{
+                            dialogId: window.__dialogId,
+                            delayMs: 250,
+                            source: sourceText
+                        }}
+                    );
                     setTimeout(function() {{
-                        openChecklist(window.__dialogId);
+                        openChecklist(
+                            window.__dialogId,
+                            'id',
+                            'automatic_after_context'
+                        );
                     }}, 250);
+                }} else {{
+                    recordHostDiagnostic(
+                        'popup_diag_launcher_auto_open_skipped',
+                        {{
+                            dialogId: window.__dialogId,
+                            autoOpened: autoOpened,
+                            source: sourceText
+                        }}
+                    );
                 }}
             }}
 
@@ -502,10 +909,59 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
             }}
 
             if (initialDialogId) {{
-                finish(initialDialogId, 'server-post');
+                recordHostDiagnostic(
+                    'popup_diag_launcher_server_context_used',
+                    {{ dialogId: initialDialogId }}
+                );
+
+                if (canUseBx24()) {{
+                    try {{
+                        recordHostDiagnostic(
+                            'popup_diag_launcher_bx24_init_started',
+                            {{ source: 'server-post' }}
+                        );
+                        window.BX24.init(function () {{
+                            recordHostDiagnostic(
+                                'popup_diag_launcher_bx24_init_completed',
+                                {{ source: 'server-post' }}
+                            );
+                            finish(
+                                initialDialogId,
+                                'server-post+BX24-js'
+                            );
+                        }});
+                    }} catch (e) {{
+                        setError('BX24.init error: ' + String(e));
+                        recordHostDiagnostic(
+                            'popup_diag_launcher_bx24_init_error',
+                            {{
+                                source: 'server-post',
+                                error: String(e)
+                            }}
+                        );
+                        finish(
+                            initialDialogId,
+                            'server-post-init-failed'
+                        );
+                    }}
+                }} else {{
+                    recordHostDiagnostic(
+                        'popup_diag_launcher_bx24_unavailable',
+                        {{ source: 'server-post' }}
+                    );
+                    finish(initialDialogId, 'server-post-local');
+                }}
             }} else if (canUseBx24()) {{
                 try {{
+                    recordHostDiagnostic(
+                        'popup_diag_launcher_bx24_init_started',
+                        {{}}
+                    );
                     window.BX24.init(function () {{
+                        recordHostDiagnostic(
+                            'popup_diag_launcher_bx24_init_completed',
+                            {{}}
+                        );
                         var dialogId = '';
                         try {{
                             var info = window.BX24.placement.info() || {{}};
@@ -537,18 +993,43 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
                             try {{
                                 console.log('placement.info =', info);
                             }} catch (e) {{}}
+
+                            recordHostDiagnostic(
+                                'popup_diag_launcher_placement_resolved',
+                                {{
+                                    dialogId: dialogId,
+                                    placement: String(
+                                        info.placement
+                                        || info.PLACEMENT
+                                        || ''
+                                    ),
+                                    optionKeys: Object.keys(options).sort()
+                                }}
+                            );
                         }} catch (e) {{
                             setError('placement.info error: ' + String(e));
+                            recordHostDiagnostic(
+                                'popup_diag_launcher_placement_error',
+                                {{ error: String(e) }}
+                            );
                         }}
 
                         finish(dialogId, 'BX24-js');
                     }});
                 }} catch (e) {{
                     setError('BX24.init error: ' + String(e));
+                    recordHostDiagnostic(
+                        'popup_diag_launcher_bx24_init_error',
+                        {{ error: String(e) }}
+                    );
                     finish('', 'BX24-init-failed');
                 }}
             }} else {{
                 setError(initialContextText || 'BX24 не найден');
+                recordHostDiagnostic(
+                    'popup_diag_launcher_bx24_unavailable',
+                    {{}}
+                );
                 finish('', 'local');
             }}
         </script>
