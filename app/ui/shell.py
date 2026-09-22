@@ -583,6 +583,9 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
             var initialContextText = {initial_context_text_json};
             var autoOpened = false;
             var hasOpenedOnce = false;
+            var reactivationArmed = false;
+            var sawHiddenAfterClose = false;
+            var hiddenAfterCloseAt = 0;
             var hostDiagnostics = window.ChecklistHostDiagnostics;
 
             function recordHostDiagnostic(event, payload, useBeacon) {{
@@ -639,27 +642,52 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
                     'visibilitychange',
                     Boolean(document.hidden)
                 );
-            }}, true);
 
-            document.addEventListener('click', function () {{
+                if (!reactivationArmed) {{
+                    return;
+                }}
+
+                if (document.hidden) {{
+                    sawHiddenAfterClose = true;
+                    hiddenAfterCloseAt = Date.now();
+                    return;
+                }}
+
                 if (
-                    window.__dialogId
+                    sawHiddenAfterClose
+                    && (Date.now() - hiddenAfterCloseAt) >= 400
+                    && window.__dialogId
                     && hasOpenedOnce
                     && !autoOpened
                 ) {{
+                    reactivationArmed = false;
+                    sawHiddenAfterClose = false;
                     recordHostDiagnostic(
-                        'popup_diag_launcher_reopen_click_detected',
+                        'popup_diag_launcher_reopen_reactivation_detected',
                         {{
                             dialogId: window.__dialogId,
-                            autoOpened: autoOpened
+                            autoOpened: autoOpened,
+                            hiddenDurationMs: Date.now() - hiddenAfterCloseAt
                         }}
                     );
-                    openChecklist(
-                        window.__dialogId,
-                        'id',
-                        'automatic_after_click'
-                    );
+                    window.setTimeout(function () {{
+                        openChecklist(
+                            window.__dialogId,
+                            'id',
+                            'automatic_after_reactivation'
+                        );
+                    }}, 100);
                 }}
+            }}, true);
+
+            document.addEventListener('click', function () {{
+                recordHostDiagnostic(
+                    'popup_diag_launcher_document_click',
+                    {{
+                        dialogId: window.__dialogId || '',
+                        autoOpened: autoOpened
+                    }}
+                );
             }}, false);
 
             window.addEventListener('pageshow', function (event) {{
@@ -681,25 +709,6 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
                 launcherResizeDiagnosticTimer = window.setTimeout(function () {{
                     launcherResizeDiagnosticTimer = null;
                     recordLauncherRuntimeState('window_resize', false);
-
-                    if (
-                        window.__dialogId
-                        && hasOpenedOnce
-                        && !autoOpened
-                    ) {{
-                        recordHostDiagnostic(
-                            'popup_diag_launcher_reopen_resize_detected',
-                            {{
-                                dialogId: window.__dialogId,
-                                autoOpened: autoOpened
-                            }}
-                        );
-                        openChecklist(
-                            window.__dialogId,
-                            'id',
-                            'automatic_after_resize'
-                        );
-                    }}
                 }}, 100);
             }}, true);
 
@@ -808,6 +817,9 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
                             }},
                             function () {{
                                 autoOpened = false;
+                                reactivationArmed = true;
+                                sawHiddenAfterClose = false;
+                                hiddenAfterCloseAt = 0;
                                 recordHostDiagnostic(
                                     'popup_diag_launcher_close_callback',
                                     {{
