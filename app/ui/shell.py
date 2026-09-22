@@ -582,6 +582,7 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
             var initialDialogId = {initial_dialog_id_json};
             var initialContextText = {initial_context_text_json};
             var autoOpened = false;
+            var hasOpenedOnce = false;
             var hostDiagnostics = window.ChecklistHostDiagnostics;
 
             function recordHostDiagnostic(event, payload, useBeacon) {{
@@ -638,6 +639,19 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
                     'visibilitychange',
                     Boolean(document.hidden)
                 );
+
+                if (
+                    document.visibilityState === 'visible'
+                    && window.__dialogId
+                    && hasOpenedOnce
+                    && !autoOpened
+                ) {{
+                    openChecklist(
+                        window.__dialogId,
+                        'id',
+                        'automatic_after_reshow'
+                    );
+                }}
             }}, true);
 
             window.addEventListener('pageshow', function (event) {{
@@ -759,12 +773,28 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
                             true
                         );
 
-                        var openResult = BX24.openApplication({{
-                            dialogId: dialogId,
-                            checklistKey: checklistKey,
-                            source: 'textarea'
-                        }});
+                        var openResult = BX24.openApplication(
+                            {{
+                                dialogId: dialogId,
+                                checklistKey: checklistKey,
+                                source: 'textarea'
+                            }},
+                            function () {{
+                                autoOpened = false;
+                                recordHostDiagnostic(
+                                    'popup_diag_launcher_close_callback',
+                                    {{
+                                        launchId: launch && launch.launchId || '',
+                                        trigger: trigger,
+                                        dialogId: dialogId,
+                                        checklistKey: checklistKey
+                                    }},
+                                    true
+                                );
+                            }}
+                        );
                         autoOpened = true;
+                        hasOpenedOnce = true;
                         var finishedAt = (
                             window.performance
                             && typeof window.performance.now === 'function'
