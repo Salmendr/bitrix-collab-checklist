@@ -639,20 +639,28 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
                     'visibilitychange',
                     Boolean(document.hidden)
                 );
+            }}, true);
 
+            document.addEventListener('click', function () {{
                 if (
-                    document.visibilityState === 'visible'
-                    && window.__dialogId
+                    window.__dialogId
                     && hasOpenedOnce
                     && !autoOpened
                 ) {{
+                    recordHostDiagnostic(
+                        'popup_diag_launcher_reopen_click_detected',
+                        {{
+                            dialogId: window.__dialogId,
+                            autoOpened: autoOpened
+                        }}
+                    );
                     openChecklist(
                         window.__dialogId,
                         'id',
-                        'automatic_after_reshow'
+                        'automatic_after_click'
                     );
                 }}
-            }}, true);
+            }}, false);
 
             window.addEventListener('pageshow', function (event) {{
                 recordHostDiagnostic(
