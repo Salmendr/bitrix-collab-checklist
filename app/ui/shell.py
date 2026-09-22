@@ -171,7 +171,6 @@ def app_home_html(
                 function extractFromBx24() {{
                     let dialogId = '';
                     let checklistKey = '';
-                    let closeToken = '';
 
                     try {{
                         if (!(window.BX24 && typeof window.BX24.placement === 'object' && typeof window.BX24.placement.info === 'function')) {{
@@ -179,11 +178,7 @@ def app_home_html(
                                 'popup_diag_application_placement_unavailable',
                                 {{}}
                             );
-                            return {{
-                                dialogId: '',
-                                checklistKey: '',
-                                closeToken: ''
-                            }};
+                            return {{ dialogId: '', checklistKey: '' }};
                         }}
 
                         const info = window.BX24.placement.info() || {{}};
@@ -229,25 +224,6 @@ def app_home_html(
                             }}
                         }}
 
-                        const closeTokenCandidates = [
-                            options.closeToken,
-                            options.CLOSE_TOKEN,
-                            options.close_token,
-                            info.closeToken,
-                            info.CLOSE_TOKEN,
-                            info.close_token
-                        ];
-
-                        for (let i = 0; i < closeTokenCandidates.length; i++) {{
-                            const candidate = String(
-                                closeTokenCandidates[i] || ''
-                            ).trim();
-                            if (candidate) {{
-                                closeToken = candidate;
-                                break;
-                            }}
-                        }}
-
                         try {{
                             console.log('app_home placement.info =', info);
                         }} catch (e) {{}}
@@ -257,7 +233,6 @@ def app_home_html(
                             {{
                                 dialogId: dialogId,
                                 checklistKey: checklistKey || 'id',
-                                closeTokenPresent: Boolean(closeToken),
                                 placement: String(
                                     info.placement || info.PLACEMENT || ''
                                 ),
@@ -274,8 +249,7 @@ def app_home_html(
 
                     return {{
                         dialogId: dialogId,
-                        checklistKey: checklistKey || 'id',
-                        closeToken: closeToken
+                        checklistKey: checklistKey || 'id'
                     }};
                 }}
 
@@ -313,23 +287,14 @@ def app_home_html(
                     }}
                 }}
 
-                function rememberAndRedirect(
-                    dialogId,
-                    checklistKey,
-                    closeToken
-                ) {{
+                function rememberAndRedirect(dialogId, checklistKey) {{
                     if (!dialogId) return;
-
-                    const normalizedCloseToken = String(
-                        closeToken || ''
-                    ).trim();
 
                     recordHostDiagnostic(
                         'popup_diag_application_redirect_preparing',
                         {{
                             dialogId: dialogId,
-                            checklistKey: checklistKey || 'id',
-                            closeTokenPresent: Boolean(normalizedCloseToken)
+                            checklistKey: checklistKey || 'id'
                         }}
                     );
 
@@ -338,7 +303,6 @@ def app_home_html(
                         localStorage.setItem('checklist_pending_dialog', JSON.stringify({{
                             dialogId: dialogId,
                             checklistKey: checklistKey || 'id',
-                            closeToken: normalizedCloseToken,
                             ts: Date.now()
                         }}));
                         pendingDialogStored = true;
@@ -349,17 +313,13 @@ def app_home_html(
                     const popupUrl =
                         appPath('popup') +
                         '?dialogId=' + encodeURIComponent(dialogId) +
-                        '&checklistKey=' + encodeURIComponent(checklistKey || 'id') +
-                        (normalizedCloseToken
-                            ? '&closeToken=' + encodeURIComponent(normalizedCloseToken)
-                            : '');
+                        '&checklistKey=' + encodeURIComponent(checklistKey || 'id');
 
                     recordHostDiagnostic(
                         'popup_diag_application_redirect_scheduled',
                         {{
                             dialogId: dialogId,
                             checklistKey: checklistKey || 'id',
-                            closeTokenPresent: Boolean(normalizedCloseToken),
                             pendingDialogStored: pendingDialogStored,
                             delayMs: 120
                         }}
@@ -373,8 +333,7 @@ def app_home_html(
                             'popup_diag_application_redirect_executing',
                             {{
                                 dialogId: dialogId,
-                                checklistKey: checklistKey || 'id',
-                                closeTokenPresent: Boolean(normalizedCloseToken)
+                                checklistKey: checklistKey || 'id'
                             }},
                             true
                         );
@@ -418,13 +377,6 @@ def app_home_html(
                         ) || 'id'
                     );
 
-                    const closeToken = pickValue(
-                        searchParams,
-                        hashParams,
-                        'closeToken',
-                        localPayload && localPayload.closeToken
-                    );
-
                     const ts = Number((localPayload && localPayload.ts) || 0);
                     const age = ts ? (Date.now() - ts) : 0;
 
@@ -433,7 +385,6 @@ def app_home_html(
                         {{
                             dialogId: dialogId,
                             checklistKey: checklistKey,
-                            closeTokenPresent: Boolean(closeToken),
                             hasQueryDialogId: Boolean(
                                 searchParams.get('dialogId')
                             ),
@@ -462,11 +413,9 @@ def app_home_html(
                                     'popup_diag_application_bx24_init_completed',
                                     {{ source: 'resolved_server_context' }}
                                 );
-                                const bxData = extractFromBx24();
                                 rememberAndRedirect(
-                                    dialogId || bxData.dialogId,
-                                    checklistKey || bxData.checklistKey || 'id',
-                                    bxData.closeToken || closeToken
+                                    dialogId,
+                                    checklistKey
                                 );
                             }});
                             return;
@@ -476,11 +425,7 @@ def app_home_html(
                             'popup_diag_application_bx24_unavailable',
                             {{ source: 'resolved_server_context' }}
                         );
-                        rememberAndRedirect(
-                            dialogId,
-                            checklistKey,
-                            closeToken
-                        );
+                        rememberAndRedirect(dialogId, checklistKey);
                         return;
                     }}
 
@@ -496,19 +441,14 @@ def app_home_html(
                             );
                             const bxData = extractFromBx24();
                             if (bxData.dialogId) {{
-                                rememberAndRedirect(
-                                    bxData.dialogId,
-                                    bxData.checklistKey || checklistKey || 'id',
-                                    bxData.closeToken || closeToken
-                                );
+                                rememberAndRedirect(bxData.dialogId, bxData.checklistKey || checklistKey || 'id');
                                 return;
                             }}
 
                             if (localPayload && localPayload.dialogId && age < 60000) {{
                                 rememberAndRedirect(
                                     localPayload.dialogId,
-                                    normalizeChecklistKey(localPayload.checklistKey || 'id'),
-                                    String(localPayload.closeToken || closeToken || '')
+                                    normalizeChecklistKey(localPayload.checklistKey || 'id')
                                 );
                             }}
                         }});
@@ -518,8 +458,7 @@ def app_home_html(
                     if (localPayload && localPayload.dialogId && age < 60000) {{
                         rememberAndRedirect(
                             localPayload.dialogId,
-                            normalizeChecklistKey(localPayload.checklistKey || 'id'),
-                            String(localPayload.closeToken || closeToken || '')
+                            normalizeChecklistKey(localPayload.checklistKey || 'id')
                         );
                         return;
                     }}
@@ -644,105 +583,6 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
             var initialContextText = {initial_context_text_json};
             var autoOpened = false;
             var hostDiagnostics = window.ChecklistHostDiagnostics;
-            var POPUP_CLOSE_HANDOFF_PREFIX =
-                'checklist_popup_close_handoff_v1:';
-
-            function createPopupCloseToken() {{
-                var randomPart = '';
-                try {{
-                    randomPart = (
-                        window.crypto
-                        && typeof window.crypto.randomUUID === 'function'
-                    )
-                        ? window.crypto.randomUUID().replace(/-/g, '')
-                        : Math.random().toString(36).slice(2, 14);
-                }} catch (error) {{
-                    randomPart = Math.random().toString(36).slice(2, 14);
-                }}
-
-                return 'popup_' + Date.now() + '_' + randomPart;
-            }}
-
-            function getPopupCloseHandoff(closeToken) {{
-                var token = String(closeToken || '').trim();
-                if (!token) return null;
-
-                try {{
-                    var raw = localStorage.getItem(
-                        POPUP_CLOSE_HANDOFF_PREFIX + token
-                    );
-                    return raw ? JSON.parse(raw) : null;
-                }} catch (error) {{
-                    return null;
-                }}
-            }}
-
-            function clearPopupCloseHandoff(closeToken) {{
-                var token = String(closeToken || '').trim();
-                if (!token) return;
-
-                try {{
-                    localStorage.removeItem(
-                        POPUP_CLOSE_HANDOFF_PREFIX + token
-                    );
-                }} catch (error) {{}}
-            }}
-
-            function handleBitrixPopupClosed(
-                closeToken,
-                dialogId,
-                checklistKey,
-                launchId,
-                trigger
-            ) {{
-                autoOpened = false;
-                var handoff = getPopupCloseHandoff(closeToken);
-
-                recordHostDiagnostic(
-                    'popup_diag_launcher_close_callback',
-                    {{
-                        launchId: String(launchId || ''),
-                        trigger: String(trigger || ''),
-                        dialogId: String(dialogId || ''),
-                        checklistKey: String(checklistKey || 'id'),
-                        closeTokenPresent: Boolean(closeToken),
-                        handoffPresent: Boolean(handoff),
-                        handoffSessionPresent: Boolean(
-                            handoff && handoff.sessionId
-                        ),
-                        handoffSource: String(
-                            handoff && handoff.source || ''
-                        ),
-                        autoOpenedAfter: autoOpened
-                    }},
-                    true
-                );
-
-                setMeta(
-                    'Popup закрыт. Готов к повторному открытию: ' +
-                    String(dialogId || '')
-                );
-
-                // The popup itself remains authoritative for save/finalize via
-                // pagehide/beforeunload. The host callback only closes the
-                // Bitrix lifecycle and clears the cross-frame handoff marker.
-                window.setTimeout(function () {{
-                    var lateHandoff = getPopupCloseHandoff(closeToken);
-                    recordHostDiagnostic(
-                        'popup_diag_launcher_close_handoff_cleanup',
-                        {{
-                            launchId: String(launchId || ''),
-                            closeTokenPresent: Boolean(closeToken),
-                            handoffPresent: Boolean(lateHandoff),
-                            handoffSessionPresent: Boolean(
-                                lateHandoff && lateHandoff.sessionId
-                            )
-                        }},
-                        true
-                    );
-                    clearPopupCloseHandoff(closeToken);
-                }}, 750);
-            }}
 
             function recordHostDiagnostic(event, payload, useBeacon) {{
                 try {{
@@ -886,13 +726,11 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
                     );
                 }}
 
-                var closeToken = createPopupCloseToken();
                 var pendingDialogStored = false;
                 try {{
                     localStorage.setItem('checklist_pending_dialog', JSON.stringify({{
                         dialogId: dialogId,
                         checklistKey: checklistKey,
-                        closeToken: closeToken,
                         ts: Date.now()
                     }}));
                     pendingDialogStored = true;
@@ -916,29 +754,16 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
                                 dialogId: dialogId,
                                 checklistKey: checklistKey,
                                 autoOpenedBefore: autoOpened,
-                                closeTokenPresent: Boolean(closeToken),
                                 pendingDialogStored: pendingDialogStored
                             }},
                             true
                         );
 
-                        var openResult = BX24.openApplication(
-                            {{
-                                dialogId: dialogId,
-                                checklistKey: checklistKey,
-                                source: 'textarea',
-                                closeToken: closeToken
-                            }},
-                            function () {{
-                                handleBitrixPopupClosed(
-                                    closeToken,
-                                    dialogId,
-                                    checklistKey,
-                                    launch && launch.launchId || '',
-                                    trigger
-                                );
-                            }}
-                        );
+                        var openResult = BX24.openApplication({{
+                            dialogId: dialogId,
+                            checklistKey: checklistKey,
+                            source: 'textarea'
+                        }});
                         autoOpened = true;
                         var finishedAt = (
                             window.performance
@@ -956,7 +781,6 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
                                     Math.round(finishedAt - startedAt)
                                 ),
                                 returnType: typeof openResult,
-                                closeTokenPresent: Boolean(closeToken),
                                 autoOpenedAfter: autoOpened
                             }}
                         );
@@ -971,7 +795,6 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
                             launchId: launch && launch.launchId || '',
                             trigger: trigger,
                             error: String(e),
-                            closeTokenPresent: Boolean(closeToken),
                             autoOpened: autoOpened
                         }}
                     );
@@ -982,7 +805,6 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
                     {{
                         launchId: launch && launch.launchId || '',
                         trigger: trigger,
-                        closeTokenPresent: Boolean(closeToken),
                         hasBx24: Boolean(window.BX24),
                         hasOpenApplication: Boolean(
                             window.BX24
@@ -994,8 +816,7 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
                 window.open(
                     appPath('popup') +
                     '?dialogId=' + encodeURIComponent(dialogId) +
-                    '&checklistKey=' + encodeURIComponent(checklistKey) +
-                    '&closeToken=' + encodeURIComponent(closeToken),
+                    '&checklistKey=' + encodeURIComponent(checklistKey),
                     '_blank'
                 );
             }}
