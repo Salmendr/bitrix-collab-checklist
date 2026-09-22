@@ -583,13 +583,6 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
             var initialContextText = {initial_context_text_json};
             var autoOpened = false;
             var hasOpenedOnce = false;
-            var reactivationArmed = false;
-            var closedBaselineHeight = 0;
-            var REACTIVATION_HEIGHT_GROWTH_PX = 40;
-
-            function currentHeightMetric() {{
-                return Number(window.innerHeight || 0);
-            }}
             var hostDiagnostics = window.ChecklistHostDiagnostics;
 
             function recordHostDiagnostic(event, payload, useBeacon) {{
@@ -641,53 +634,11 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
                 recordLauncherRuntimeState('window_blur', false);
             }}, true);
 
-            function checkReactivation(source) {{
-                if (!reactivationArmed) {{
-                    return;
-                }}
-
-                var height = currentHeightMetric();
-                if (height > 0 && height < closedBaselineHeight) {{
-                    closedBaselineHeight = height;
-                }}
-
-                if (document.hidden) {{
-                    return;
-                }}
-
-                if (
-                    window.__dialogId
-                    && hasOpenedOnce
-                    && !autoOpened
-                    && height >= (closedBaselineHeight + REACTIVATION_HEIGHT_GROWTH_PX)
-                ) {{
-                    reactivationArmed = false;
-                    recordHostDiagnostic(
-                        'popup_diag_launcher_reopen_reactivation_detected',
-                        {{
-                            dialogId: window.__dialogId,
-                            autoOpened: autoOpened,
-                            source: source,
-                            baselineHeight: closedBaselineHeight,
-                            currentHeight: height
-                        }}
-                    );
-                    window.setTimeout(function () {{
-                        openChecklist(
-                            window.__dialogId,
-                            'id',
-                            'automatic_after_reactivation'
-                        );
-                    }}, 100);
-                }}
-            }}
-
             document.addEventListener('visibilitychange', function () {{
                 recordLauncherRuntimeState(
                     'visibilitychange',
                     Boolean(document.hidden)
                 );
-                checkReactivation('visibilitychange');
             }}, true);
 
             document.addEventListener('click', function () {{
@@ -719,15 +670,8 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
                 launcherResizeDiagnosticTimer = window.setTimeout(function () {{
                     launcherResizeDiagnosticTimer = null;
                     recordLauncherRuntimeState('window_resize', false);
-                    checkReactivation('window_resize');
                 }}, 100);
             }}, true);
-
-            if (window.visualViewport) {{
-                window.visualViewport.addEventListener('resize', function () {{
-                    checkReactivation('visual_viewport_resize');
-                }}, true);
-            }}
 
             function detectAppBasePath() {{
                 const path = String(window.location.pathname || '/').replace(/\\/+$/, '');
@@ -834,16 +778,13 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
                             }},
                             function () {{
                                 autoOpened = false;
-                                reactivationArmed = true;
-                                closedBaselineHeight = currentHeightMetric();
                                 recordHostDiagnostic(
                                     'popup_diag_launcher_close_callback',
                                     {{
                                         launchId: launch && launch.launchId || '',
                                         trigger: trigger,
                                         dialogId: dialogId,
-                                        checklistKey: checklistKey,
-                                        closedBaselineHeight: closedBaselineHeight
+                                        checklistKey: checklistKey
                                     }},
                                     true
                                 );
