@@ -681,6 +681,25 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
                 launcherResizeDiagnosticTimer = window.setTimeout(function () {{
                     launcherResizeDiagnosticTimer = null;
                     recordLauncherRuntimeState('window_resize', false);
+
+                    if (
+                        window.__dialogId
+                        && hasOpenedOnce
+                        && !autoOpened
+                    ) {{
+                        recordHostDiagnostic(
+                            'popup_diag_launcher_reopen_resize_detected',
+                            {{
+                                dialogId: window.__dialogId,
+                                autoOpened: autoOpened
+                            }}
+                        );
+                        openChecklist(
+                            window.__dialogId,
+                            'id',
+                            'automatic_after_resize'
+                        );
+                    }}
                 }}, 100);
             }}, true);
 
