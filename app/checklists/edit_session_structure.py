@@ -241,7 +241,8 @@ def prepare_edit_session_structure_jobs_in_transaction(
             next(
                 (
                     payload.get("oldName")
-                    for payload in rename_payloads
+                    # move-name-suffix-v1
+                    for payload in [*rename_payloads, *reorder_payloads]
                     if clean_cell_value(payload.get("oldName"))
                 ),
                 current_item.get("name"),

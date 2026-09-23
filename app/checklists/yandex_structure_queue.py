@@ -7,7 +7,10 @@ import threading
 from queue import Empty, Queue
 
 from app.logging_utils import write_debug_log
-from app.yandex_disk.client import is_yandex_disk_enabled
+from app.yandex_disk.client import (
+    is_yandex_disk_enabled,
+    yandex_disk_try_get_resource_meta,
+)
 
 from app.checklists.utils import (
     clean_cell_value,
@@ -32,10 +35,12 @@ from app.checklists.yandex_structure_jobs import (
     disable_yandex_structure_job,
     fail_yandex_structure_job,
     finish_yandex_structure_job,
+    get_latest_completed_yandex_structure_folder_path,
     get_yandex_structure_job,
     list_pending_yandex_structure_job_ids,
     mark_yandex_structure_job_conflict,
     requeue_interrupted_yandex_structure_jobs,
+    update_yandex_structure_job_source,
     update_yandex_structure_job_target,
 )
 from app.checklists.yandex_structure_state import (
@@ -64,6 +69,65 @@ def _current_item(job: dict) -> dict:
         ),
         {},
     )
+
+
+def _yandex_folder_exists(path: str) -> bool:
+    if not clean_cell_value(path):
+        return False
+    try:
+        return bool(yandex_disk_try_get_resource_meta(path))
+    except Exception:
+        return False
+
+
+def _resolve_actual_source_job(job: dict, item: dict) -> dict:
+    """Replace a stale move/rename source with the folder that really exists.
+
+    A move can be recorded while the item's create job is still running. The
+    source then points to the draft path (".../КР") although the worker has
+    created the prefixed folder (".../04_КР").
+    """
+    # move-name-suffix-v1
+    action = clean_cell_value(job.get("action"))
+    if action not in {"rename_item_folder", "move_item_folder"}:
+        return job
+    job_id = clean_cell_value(job.get("job_id"))
+    source_path = clean_cell_value(job.get("source_path"))
+    target_path = clean_cell_value(job.get("target_path"))
+    if _yandex_folder_exists(source_path):
+        return job
+    if _yandex_folder_exists(target_path):
+        # The remote move already happened; the mutation resumes it.
+        return job
+
+    candidates = [clean_cell_value(item.get("yandexFolderPath"))]
+    try:
+        candidates.append(
+            get_latest_completed_yandex_structure_folder_path(
+                dialog_id=clean_cell_value(job.get("dialog_id")),
+                checklist_key=clean_cell_value(job.get("checklist_key")),
+                item_id=clean_cell_value(job.get("item_id")),
+                exclude_job_id=job_id,
+            )
+        )
+    except Exception:
+        pass
+
+    for candidate in candidates:
+        if not candidate or candidate in {source_path, target_path}:
+            continue
+        if not _yandex_folder_exists(candidate):
+            continue
+        updated = update_yandex_structure_job_source(job_id, candidate)
+        write_debug_log("yandex_structure_job_source_resolved", {
+            "jobId": job_id,
+            "action": action,
+            "itemId": clean_cell_value(job.get("item_id")),
+            "staleSourcePath": source_path,
+            "sourcePath": candidate,
+        })
+        return updated or {**job, "source_path": candidate}
+    return job
 
 
 def _prepare_custom_job_target(job: dict, item: dict) -> dict:
@@ -108,6 +172,7 @@ def _execute_yandex_structure_mutation(job: dict) -> dict:
     checklist_key = normalize_checklist_key(job.get("checklist_key"))
     item_id = clean_cell_value(job.get("item_id"))
     item = _current_item(job)
+    job = _resolve_actual_source_job(job, item)
     job = _prepare_custom_job_target(job, item)
 
     if action == "create_item_folder":

@@ -49,6 +49,7 @@ from app.checklists.yandex_mirror_queue import enqueue_yandex_mirror_job
 from app.checklists.yandex_folders import (
     build_custom_item_yandex_folder_spec,
     build_item_yandex_move_spec,
+    build_item_yandex_relocation_spec,
     build_item_yandex_rename_spec,
     ensure_folder_and_get_public_url,
 )
@@ -1123,17 +1124,52 @@ async def api_checklist_reorder_items(request: Request):
                 ),
             )
 
+            # move-name-suffix-v1: a moved item must not duplicate a name
+            # (and a Yandex folder) that already exists in the target section.
+            name_before_move = clean_cell_value(target_item.get("name"))
+            final_item_name = name_before_move
+            name_adjusted = False
+            if source_group_id != target_group_id and name_before_move:
+                try:
+                    move_name_resolution = choose_available_item_name(
+                        name_before_move,
+                        items,
+                        group_id=target_group_id,
+                        exclude_item_id=item_id,
+                    )
+                except ValueError:
+                    move_name_resolution = {}
+                final_item_name = clean_cell_value(
+                    move_name_resolution.get("name")
+                ) or name_before_move
+                name_adjusted = final_item_name != name_before_move
+
             yandex_move_spec = {}
             if source_group_id != target_group_id:
-                yandex_move_spec = build_item_yandex_move_spec(
+                yandex_move_spec = build_item_yandex_relocation_spec(
                     dialog_id=dialog_id,
                     checklist_key=config.key,
                     item=before_item,
                     source_group_id=source_group_id,
                     target_group_id=target_group_id,
+                    old_name=name_before_move,
+                    new_name=final_item_name,
                 )
 
             target_item["group"] = target_group_id
+            if name_adjusted:
+                target_item["name"] = final_item_name
+                if not bool(target_item.get("isCustom", False)):
+                    definition_name = clean_cell_value(
+                        target_item.get("definitionName")
+                    )
+                    target_item["nameOverride"] = (
+                        ""
+                        if definition_name
+                        and final_item_name.casefold()
+                        == definition_name.casefold()
+                        else final_item_name
+                    )
 
             not_required_group_id = int(
                 config.not_required_group_id
@@ -1373,6 +1409,9 @@ async def api_checklist_reorder_items(request: Request):
                     "folderAlias": clean_cell_value(
                         yandex_move_spec.get("folderAlias")
                     ),
+                    "oldName": name_before_move,
+                    "newName": final_item_name,
+                    "nameAdjusted": name_adjusted,
                     "deferredYandexMove": bool(
                         transaction and source_group_id != target_group_id
                     ),
@@ -1496,6 +1535,9 @@ async def api_checklist_reorder_items(request: Request):
             "orderVersion": int(saved.get("orderVersion") or 0),
             "transactional": bool(transaction),
             "operation": operation,
+            "previousName": name_before_move,
+            "finalName": clean_cell_value(response_item.get("name")),
+            "nameAdjusted": name_adjusted,
             "yandexStructureJob": structure_job or {},
             "documentsDeleted": bool(
                 delete_documents_on_restore

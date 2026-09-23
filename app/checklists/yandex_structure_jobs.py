@@ -301,6 +301,49 @@ def get_latest_yandex_structure_job_for_item(
         conn.close()
 
 
+def get_latest_completed_yandex_structure_folder_path(
+    *,
+    dialog_id: str,
+    checklist_key: str,
+    item_id: str,
+    exclude_job_id: str = "",
+) -> str:
+    """Return the last folder path confirmed on Yandex Disk for an item."""
+    # move-name-suffix-v1
+    ensure_yandex_structure_jobs_table()
+    conn = get_conn()
+    try:
+        rows = conn.execute(
+            """
+            SELECT *
+            FROM yandex_structure_jobs
+            WHERE dialog_id = ?
+              AND checklist_key = ?
+              AND item_id = ?
+              AND status = 'completed'
+              AND job_id <> ?
+            ORDER BY finished_at DESC, rowid DESC
+            LIMIT 10
+            """,
+            (
+                normalize_dialog_id(dialog_id),
+                normalize_checklist_key(checklist_key),
+                clean_cell_value(item_id),
+                clean_cell_value(exclude_job_id),
+            ),
+        ).fetchall()
+    finally:
+        conn.close()
+    for row in rows:
+        record = _normalize_job_record(row) or {}
+        result = record.get("result")
+        result = result if isinstance(result, dict) else {}
+        folder_path = clean_cell_value(result.get("folderPath"))
+        if folder_path:
+            return folder_path
+    return ""
+
+
 def get_blocking_yandex_structure_job_for_item(
     *,
     dialog_id: str,
@@ -723,6 +766,35 @@ def update_yandex_structure_job_target(
             """,
             (
                 clean_cell_value(target_path),
+                now,
+                clean_cell_value(job_id),
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return get_yandex_structure_job(job_id)
+
+
+def update_yandex_structure_job_source(
+    job_id: str,
+    source_path: str,
+) -> dict | None:
+    """Replace a stale source path before the remote mutation."""
+    # move-name-suffix-v1
+    ensure_yandex_structure_jobs_table()
+    now = utc_now_iso()
+    conn = get_conn()
+    try:
+        conn.execute(
+            """
+            UPDATE yandex_structure_jobs
+            SET source_path = ?, updated_at = ?
+            WHERE job_id = ?
+              AND status IN ('queued', 'running')
+            """,
+            (
+                clean_cell_value(source_path),
                 now,
                 clean_cell_value(job_id),
             ),

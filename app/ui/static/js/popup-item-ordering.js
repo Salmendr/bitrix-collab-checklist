@@ -628,6 +628,16 @@
             const newPosition = Number(
                 updatedItem.order || targetPosition || 0
             );
+            // move-name-suffix-v1
+            if (result.nameAdjusted && result.previousName) {
+                pushSessionChange(
+                    itemId,
+                    updatedItem.name || '',
+                    'name',
+                    result.previousName,
+                    updatedItem.name || ''
+                );
+            }
             pushSessionChange(
                 itemId,
                 updatedItem.name || item.name || '',
@@ -646,7 +656,9 @@
             });
         }
 
-        setSaveState('', 'Сохранено');
+        setSaveState('', result.nameAdjusted && result.finalName
+            ? `Сохранено как «${result.finalName}»`
+            : 'Сохранено');
         renderAll();
         return result;
     }
