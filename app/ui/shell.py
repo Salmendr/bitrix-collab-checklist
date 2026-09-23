@@ -642,13 +642,24 @@ def textarea_html(initial_dialog_id: str = "", initial_context_text: str = ""):
             }}, true);
 
             document.addEventListener('click', function () {{
-                recordHostDiagnostic(
-                    'popup_diag_launcher_document_click',
-                    {{
-                        dialogId: window.__dialogId || '',
-                        autoOpened: autoOpened
-                    }}
-                );
+                if (
+                    window.__dialogId
+                    && hasOpenedOnce
+                    && !autoOpened
+                ) {{
+                    recordHostDiagnostic(
+                        'popup_diag_launcher_reopen_click_detected',
+                        {{
+                            dialogId: window.__dialogId,
+                            autoOpened: autoOpened
+                        }}
+                    );
+                    openChecklist(
+                        window.__dialogId,
+                        'id',
+                        'automatic_after_click'
+                    );
+                }}
             }}, false);
 
             window.addEventListener('pageshow', function (event) {{
