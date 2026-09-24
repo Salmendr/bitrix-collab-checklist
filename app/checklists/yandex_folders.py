@@ -1,5 +1,10 @@
 from app.checklists.yandex_scope import require_project_path, project_root
 from app.checklists.document_names import safe_file_name
+from app.checklists.subitems import (
+    is_subitem,
+    is_subitem_folder_alias,
+    subitem_mapping_name,
+)
 import re
 from pathlib import Path
 from datetime import datetime
@@ -880,6 +885,11 @@ def upsert_item_yandex_mapping(
 
     checklist_key = normalize_checklist_key(checklist_key)
     item_name = clean_cell_value(item_name)
+    subitem_alias = is_subitem_folder_alias(folder_alias)
+    if subitem_alias:
+        # A subitem may share its name with an item of the same section;
+        # its mapping is keyed by the unique folder alias only.
+        item_name = subitem_mapping_name(folder_alias)
 
     try:
         group_id = int(group_id or 0)
@@ -925,17 +935,23 @@ def upsert_item_yandex_mapping(
             mapping_group_id = 0
 
         mapping_alias = clean_cell_value(mapping.get("folderAlias"))
-        same_item = (
-            mapping_key == checklist_key
-            and mapping_group_id == group_id
-            and (
-                mapping_name.lower() == item_name.lower()
-                or (
-                    clean_cell_value(folder_alias)
-                    and mapping_alias == clean_cell_value(folder_alias)
+        if subitem_alias:
+            same_item = (
+                mapping_key == checklist_key
+                and mapping_alias == clean_cell_value(folder_alias)
+            )
+        else:
+            same_item = (
+                mapping_key == checklist_key
+                and mapping_group_id == group_id
+                and (
+                    mapping_name.lower() == item_name.lower()
+                    or (
+                        clean_cell_value(folder_alias)
+                        and mapping_alias == clean_cell_value(folder_alias)
+                    )
                 )
             )
-        )
 
         if same_item:
             updated_mappings.append({
@@ -1245,6 +1261,7 @@ def build_item_yandex_relocation_spec(
     old_name: str = "",
     new_name: str = "",
     source_path_override: str = "",
+    target_parent_path_override: str = "",
 ) -> dict:
     checklist_key = normalize_checklist_key(checklist_key)
     item = dict(item or {})
@@ -1261,7 +1278,9 @@ def build_item_yandex_relocation_spec(
     )
     source_url = clean_cell_value(item.get("yandexFolderUrl"))
 
-    if not source_path:
+    # A subitem is never looked up by name: an item of the section can have
+    # the same name, and its folder must not be moved instead.
+    if not source_path and not is_subitem(item):
         lookup_candidates = [
             (
                 source_name,
@@ -1321,7 +1340,12 @@ def build_item_yandex_relocation_spec(
         else ""
     )
     same_group = int(source_group_id or 0) == int(target_group_id or 0)
-    if same_group and normalized_source_path:
+    parent_override = clean_cell_value(target_parent_path_override)
+    if parent_override:
+        # Subitem: the folder goes into the folder of its (new) parent item.
+        target_parent = normalize_yandex_disk_path(parent_override)
+        same_group = False
+    elif same_group and normalized_source_path:
         # A pure rename must keep the exact current parent directory.  Standard
         # items can live one or more levels below the common group root (for
         # example 02_Стадия П/05_ИОС/ИОС_1).  Re-resolving the group root here
@@ -1582,7 +1606,7 @@ def build_item_yandex_rename_spec(
     source_url = clean_cell_value(item.get("yandexFolderUrl"))
     folder_alias = clean_cell_value(item.get("yandexFolderAlias"))
 
-    if not source_path:
+    if not source_path and not is_subitem(item):
         lookup_candidates = [
             (
                 clean_cell_value(old_name),
@@ -1694,6 +1718,10 @@ def rename_item_yandex_mapping(
         return
 
     checklist_key = normalize_checklist_key(checklist_key)
+    subitem_alias = is_subitem_folder_alias(folder_alias)
+    if subitem_alias:
+        old_name = subitem_mapping_name(folder_alias)
+        new_name = subitem_mapping_name(folder_alias)
     old_key = clean_cell_value(old_name).casefold()
     source_group_id = (
         int(group_id or 0)
@@ -1720,6 +1748,8 @@ def rename_item_yandex_mapping(
             and mapping_group == source_group_id
             and (mapping_name == old_key or (alias and mapping_alias == alias))
         )
+        if subitem_alias:
+            is_old = mapping_key == checklist_key and mapping_alias == alias
         if not is_old:
             mappings.append(mapping)
 

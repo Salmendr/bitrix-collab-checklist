@@ -93,12 +93,18 @@ def _normalized_item_rows(data: dict, checklist_key: str) -> list[dict]:
     }
 
     indexed_items = []
+    child_items = []
     for index, raw_item in enumerate(data.get("items") or []):
         item = raw_item if isinstance(raw_item, dict) else {}
         item_id = clean_cell_value(item.get("id"))
         if not item_id:
             continue
         group_id = _safe_int(item.get("group"))
+        parent_id = clean_cell_value(item.get("parentItemId"))
+        if parent_id:
+            # Subitems are numbered inside their parent, not in the group.
+            child_items.append((index, item_id, group_id, _safe_int(item.get("order")), parent_id))
+            continue
         indexed_items.append((index, item_id, group_id, _safe_int(item.get("order"))))
 
     indexed_items.sort(
@@ -118,6 +124,22 @@ def _normalized_item_rows(data: dict, checklist_key: str) -> list[dict]:
             "itemId": item_id,
             "groupId": group_id,
             "position": positions[group_id],
+        })
+
+    child_items.sort(
+        key=lambda entry: (
+            entry[4],
+            entry[3] if entry[3] > 0 else 100000 + entry[0],
+            entry[0],
+        )
+    )
+    child_positions: dict[str, int] = {}
+    for _, item_id, group_id, _, parent_id in child_items:
+        child_positions[parent_id] = child_positions.get(parent_id, 0) + 1
+        result.append({
+            "itemId": item_id,
+            "groupId": group_id,
+            "position": child_positions[parent_id],
         })
     return result
 
@@ -364,15 +386,13 @@ def apply_checklist_item_order(
             item["group"] = _safe_int(row.get("group_id"))
             item["order"] = _safe_int(row.get("position"))
 
-        result["items"].sort(
-            key=lambda item: (
-                group_rank.get(
-                    _safe_int(item.get("group")),
-                    100000 + _safe_int(item.get("group")),
-                ),
-                _safe_int(item.get("order"), 100000),
-                clean_cell_value(item.get("id")),
-            )
+        from app.checklists.subitems import sort_items_hierarchically
+        result["items"] = sort_items_hierarchically(
+            result["items"],
+            {
+                group_id: rank
+                for group_id, rank in group_rank.items()
+            },
         )
         result["orderVersion"] = max(
             [_safe_int(row.get("order_version")) for row in rows] or [0]
@@ -393,8 +413,12 @@ def renumber_items_by_group(
         for group_id in config.group_ids()
     }
 
+    children: list[dict] = []
     for raw_item in items:
         item = dict(raw_item or {})
+        if clean_cell_value(item.get("parentItemId")):
+            children.append(item)
+            continue
         group_id = _safe_int(item.get("group"))
         if group_id not in valid_group_ids:
             group_id = int(config.default_group_id)
@@ -413,4 +437,18 @@ def renumber_items_by_group(
         for position, item in enumerate(group_items, start=1):
             item["order"] = position
             result.append(item)
+
+    children.sort(
+        key=lambda item: (
+            clean_cell_value(item.get("parentItemId")),
+            _safe_int(item.get("order"), 100000),
+            clean_cell_value(item.get("id")),
+        )
+    )
+    child_positions: dict[str, int] = {}
+    for item in children:
+        parent_id = clean_cell_value(item.get("parentItemId"))
+        child_positions[parent_id] = child_positions.get(parent_id, 0) + 1
+        item["order"] = child_positions[parent_id]
+        result.append(item)
     return result

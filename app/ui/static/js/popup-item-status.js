@@ -199,6 +199,18 @@
 
     async function cycleItemStatus(item) {
         const current = normalizeItemStatus(item);
+        const subitemsApi = global.ChecklistPopupSubitems;
+        if (
+            current !== 'Есть'
+            && current !== 'Не требуется'
+            && subitemsApi
+            && subitemsApi.hasActiveSubitems(item)
+        ) {
+            throw new Error(
+                'Статус пункта станет «Есть» автоматически, '
+                + 'когда будут выполнены все подпункты'
+            );
+        }
         if (current === 'Есть') {
             return moveToNotRequired(item);
         }

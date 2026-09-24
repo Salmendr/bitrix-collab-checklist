@@ -62,7 +62,8 @@ def display_status_text(status: str) -> str:
 
 
 def build_progress_text(data: dict) -> str:
-    items = data.get("items") or []
+    from app.checklists.subitems import progress_items
+    items = progress_items(data.get("items") or [])
 
     active_items = [
         item for item in items

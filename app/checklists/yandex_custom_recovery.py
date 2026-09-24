@@ -283,6 +283,81 @@ def _has_ambiguous_local_identity(
     return len(matches) > 1
 
 
+def _reconcile_subitem_yandex_folder(
+    *,
+    dialog_id: str,
+    checklist_key: str,
+    item_id: str,
+    item: dict,
+    latest: dict,
+    source: str,
+    enqueue: bool,
+) -> dict:
+    """A subitem folder lives inside its parent's folder.
+
+    It is never searched by name in the section folder (an item of the
+    section may share the name). A failed job is retried: the structure
+    worker resolves the parent's current folder itself.
+    """
+    from app.checklists.yandex_structure_jobs import retry_yandex_structure_job
+    from app.checklists.yandex_structure_queue import enqueue_yandex_structure_job
+
+    folder_path = clean_cell_value(item.get("yandexFolderPath"))
+    if folder_path:
+        try:
+            if yandex_disk_try_get_resource_meta(folder_path):
+                return {"ok": True, "skipped": True, "reason": "subitem_folder_exists"}
+        except Exception:
+            pass
+
+    latest_status = clean_cell_value(latest.get("status")).lower()
+    if latest and latest_status in {"error", "conflict", "disabled", "cancelled"}:
+        job = retry_yandex_structure_job(clean_cell_value(latest.get("job_id"))) or latest
+    else:
+        item_name = clean_cell_value(item.get("name"))
+        job = create_yandex_structure_job(
+            idempotency_key=_recovery_identity(
+                dialog_id=dialog_id,
+                checklist_key=checklist_key,
+                item_id=item_id,
+                state="subitem-create",
+                paths=[folder_path],
+            ),
+            dialog_id=dialog_id,
+            checklist_key=checklist_key,
+            item_id=item_id,
+            action="create_item_folder",
+            target_path="",
+            folder_alias=(
+                clean_cell_value(item.get("yandexFolderAlias"))
+                or f"{checklist_key}_{slugify_folder_part(item_id or item_name)}"
+            ),
+            item_name=item_name,
+            group_id=int(item.get("group") or 0),
+            initial_status="queued",
+            result={"isCustom": True, "recoverySource": source},
+        )
+    persist_item_yandex_structure_state(
+        dialog_id=dialog_id,
+        checklist_key=checklist_key,
+        item_id=item_id,
+        job=job,
+    )
+    enqueue_result = {}
+    if enqueue and clean_cell_value(job.get("status")) == "queued":
+        enqueue_result = enqueue_yandex_structure_job(
+            job.get("job_id") or "",
+            source=(source if is_manual_recovery(source) else "custom_folder_recovery"),
+        )
+    return {
+        "ok": True,
+        "queued": clean_cell_value(job.get("status")) == "queued",
+        "job": job,
+        "enqueue": enqueue_result,
+        "subitem": True,
+    }
+
+
 def reconcile_custom_item_yandex_folder(
     *,
     dialog_id: str,
@@ -345,6 +420,16 @@ def reconcile_custom_item_yandex_folder(
             "job": latest,
             "enqueue": enqueue_result,
         }
+    if clean_cell_value(item.get("parentItemId")):
+        return _reconcile_subitem_yandex_folder(
+            dialog_id=dialog_id,
+            checklist_key=checklist_key,
+            item_id=item_id,
+            item=item,
+            latest=latest,
+            source=source,
+            enqueue=enqueue,
+        )
     with yandex_project_resource_guard(
         dialog_id,
         checklist_key=checklist_key,

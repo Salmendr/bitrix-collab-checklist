@@ -709,7 +709,13 @@
                     return;
                 }
 
-                const activeItems = items.filter(x => normalizeStatus(x.status) !== 'Не требуется');
+                const progressSource = (
+                    window.ChecklistPopupSubitems
+                    && typeof window.ChecklistPopupSubitems.progressItems === 'function'
+                )
+                    ? window.ChecklistPopupSubitems.progressItems(items)
+                    : items;
+                const activeItems = progressSource.filter(x => normalizeStatus(x.status) !== 'Не требуется');
                 const completedItems = activeItems.filter(x => normalizeStatus(x.status) === 'Есть');
                 const activeCount = activeItems.length;
                 const completedCount = completedItems.length;
@@ -720,6 +726,16 @@
             }
             function buildItemNameCell(item, indicatorClassName) {
                 const itemName = String(item && item.name || '');
+                const subitemsApi = window.ChecklistPopupSubitems;
+                const subitemCounter = subitemsApi
+                    ? subitemsApi.buildCounter(item)
+                    : '';
+                const statusCircleTitle = (
+                    subitemsApi && subitemsApi.statusTitle(item)
+                ) || getStatusCircleTitle(item && item.status);
+                const subitemAddTrigger = subitemsApi
+                    ? subitemsApi.buildAddTrigger(item)
+                    : '';
                 return `
                     <div class="cell-name">
                         <button
@@ -737,8 +753,8 @@
                             data-role="cycle-item-status"
                             data-item-id="${esc(item && item.id || '')}"
                             data-item-status="${esc(normalizeStatus(item && item.status))}"
-                            title="${esc(getStatusCircleTitle(item && item.status))}"
-                            aria-label="${esc(getStatusCircleTitle(item && item.status))}"
+                            title="${esc(statusCircleTitle)}"
+                            aria-label="${esc(statusCircleTitle)}"
                             ${disabledAttr()}
                         ></button>
                         <div class="item-name-wrap">
@@ -751,7 +767,9 @@
                                 aria-label="Переименовать пункт ${esc(itemName)}"
                                 ${disabledAttr()}
                             >${esc(itemName)}</button>
+                            ${subitemCounter}
                         </div>
+                        ${subitemAddTrigger}
                     </div>
                 `;
             }
@@ -1972,6 +1990,11 @@
                     .filter(item => {
                         const itemGroupId = Number(item && item.group || 0);
                         const itemIsNotRequired = normalizeStatus(item && item.status) === 'Не требуется';
+
+                        // Subitems are rendered inside their parent row block.
+                        if (String(item && item.parentItemId || '').trim()) {
+                            return false;
+                        }
 
                         if (notRequiredGroupId && targetGroupId === notRequiredGroupId) {
                             return itemGroupId === targetGroupId || itemIsNotRequired;

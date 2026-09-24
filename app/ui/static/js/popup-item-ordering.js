@@ -76,12 +76,14 @@
         document.querySelectorAll(
             '.item-order-drop-before,'
             + '.item-order-drop-after,'
-            + '.item-order-drop-group'
+            + '.item-order-drop-group,'
+            + '.item-order-drop-into'
         ).forEach(element => {
             element.classList.remove(
                 'item-order-drop-before',
                 'item-order-drop-after',
-                'item-order-drop-group'
+                'item-order-drop-group',
+                'item-order-drop-into'
             );
         });
         currentDropTarget = null;
@@ -253,7 +255,14 @@
 
         if (referenceRow && referenceRow.parentNode === groupBlock) {
             if (after) {
-                referenceRow.insertAdjacentElement('afterend', marker);
+                // Keep a parent row together with its block of subitems.
+                const next = referenceRow.nextElementSibling;
+                const anchor = (
+                    next
+                    && next.classList
+                    && next.classList.contains('subitem-block')
+                ) ? next : referenceRow;
+                anchor.insertAdjacentElement('afterend', marker);
             } else {
                 referenceRow.insertAdjacentElement('beforebegin', marker);
             }
@@ -272,6 +281,84 @@
         return element.closest('[data-order-group-id]');
     }
 
+    function parentIdOf(item) {
+        return String(item && item.parentItemId || '').trim();
+    }
+
+    function currentNotRequiredGroupId() {
+        return Number(
+            typeof getCurrentNotRequiredGroupId === 'function'
+                ? getCurrentNotRequiredGroupId()
+                : 0
+        );
+    }
+
+    function directRow(zone, itemId) {
+        if (!zone) return null;
+        return Array.from(zone.children).find(child => (
+            child.matches
+            && child.matches('.row[data-item-id]')
+            && String(child.dataset.itemId || '') === String(itemId || '')
+        )) || null;
+    }
+
+    // Top-level items drop between top-level rows only; subitems drop into
+    // a list of subitems, onto another item row (becomes its last subitem)
+    // or into "Не требуется".
+    function resolveDropContext(element) {
+        const empty = { zone: null, row: null, intoParentRow: null };
+        if (!element || !element.closest || !pointerState) return empty;
+        let zone = resolveGroupBlock(element);
+        let row = element.closest('.row[data-item-id]');
+
+        if (!pointerState.isSubitem) {
+            while (zone && zone.dataset.orderParentId) {
+                const parentId = zone.dataset.orderParentId;
+                const outer = zone.parentElement
+                    ? resolveGroupBlock(zone.parentElement)
+                    : null;
+                row = directRow(outer, parentId);
+                zone = outer;
+            }
+            const block = element.closest('.subitem-block');
+            if (zone && block && (!row || row.parentNode !== zone)) {
+                row = directRow(zone, block.dataset.subitemParentId);
+            }
+            if (row && zone && row.parentNode !== zone) {
+                row = null;
+            }
+            return { zone, row, intoParentRow: null };
+        }
+
+        if (zone && zone.dataset.orderParentId) {
+            return {
+                zone,
+                row: row && row.parentNode === zone ? row : null,
+                intoParentRow: null,
+            };
+        }
+        if (
+            zone
+            && Number(zone.dataset.orderGroupId || 0) === currentNotRequiredGroupId()
+        ) {
+            return {
+                zone,
+                row: row && row.parentNode === zone ? row : null,
+                intoParentRow: null,
+            };
+        }
+        if (
+            row
+            && zone
+            && row.parentNode === zone
+            && !row.classList.contains('not-required')
+            && String(row.dataset.itemId || '') !== String(pointerState.itemId || '')
+        ) {
+            return { zone: null, row: null, intoParentRow: row };
+        }
+        return empty;
+    }
+
     function buildDropSignature(groupBlock, row, after) {
         const groupId = String(
             groupBlock && groupBlock.dataset.orderGroupId || ''
@@ -284,10 +371,27 @@
         if (!pointerState || !pointerState.started) return;
 
         const element = document.elementFromPoint(clientX, clientY);
-        const row = element && element.closest
-            ? element.closest('.row[data-item-id]')
-            : null;
-        const groupBlock = resolveGroupBlock(element);
+        const resolved = resolveDropContext(element);
+        const row = resolved.row;
+        const groupBlock = resolved.zone;
+
+        if (resolved.intoParentRow) {
+            const parentRow = resolved.intoParentRow;
+            const signature = `into:${parentRow.dataset.itemId || ''}`;
+            if (signature === currentDropSignature) {
+                return;
+            }
+            clearDropHighlights();
+            parentRow.classList.add('item-order-drop-into');
+            currentDropTarget = {
+                groupBlock: null,
+                row: null,
+                after: true,
+                intoParentRow: parentRow,
+            };
+            currentDropSignature = signature;
+            return;
+        }
 
         if (row && groupBlock) {
             const rect = row.getBoundingClientRect();
@@ -419,6 +523,16 @@
         pointerState.row = document.querySelector(
             `.row[data-item-id="${CSS.escape(pointerState.itemId)}"]`
         );
+        const draggedItem = getItem(pointerState.itemId);
+        pointerState.isSubitem = !!parentIdOf(draggedItem);
+        pointerState.subitemBlock = pointerState.isSubitem
+            ? null
+            : document.querySelector(
+                `.subitem-block[data-subitem-parent-id="${CSS.escape(pointerState.itemId)}"]`
+            );
+        if (pointerState.subitemBlock) {
+            pointerState.subitemBlock.classList.add('item-order-drag-source');
+        }
         if (pointerState.row) {
             const sourceRect = pointerState.row.getBoundingClientRect();
             const nameElement = pointerState.row.querySelector('.item-name');
@@ -460,6 +574,9 @@
         removeDragGhost();
         if (restoreSource && state && state.row) {
             state.row.classList.remove('item-order-drag-source');
+        }
+        if (state && state.subitemBlock) {
+            state.subitemBlock.classList.remove('item-order-drag-source');
         }
         releasePointerCapture(state);
         if (dragFrameId) {
@@ -524,6 +641,12 @@
                     itemId,
                     targetGroupId,
                     targetPosition,
+                    targetParentId: (
+                        options
+                        && options.targetParentId !== undefined
+                    )
+                        ? String(options.targetParentId)
+                        : undefined,
                     orderVersion: Number(currentOrderVersion || 0),
                     itemsState: (Array.isArray(items) ? items : []).map(
                         currentItem => ({
@@ -754,8 +877,19 @@
         );
         let targetGroupId = 0;
         let targetPosition = 0;
+        let targetParentId;
 
-        if (wasStarted && dropTarget && dropTarget.groupBlock) {
+        if (wasStarted && dropTarget && dropTarget.intoParentRow) {
+            const parentItem = getItem(dropTarget.intoParentRow.dataset.itemId);
+            if (parentItem) {
+                targetGroupId = Number(parentItem.group || 0);
+                targetParentId = String(parentItem.id || '');
+                targetPosition = (Array.isArray(items) ? items : []).filter(entry => (
+                    parentIdOf(entry) === targetParentId
+                    && String(entry.id || '') !== String(state.itemId || '')
+                )).length + 1;
+            }
+        } else if (wasStarted && dropTarget && dropTarget.groupBlock) {
             targetGroupId = Number(
                 dropTarget.groupBlock.dataset.orderGroupId || 0
             );
@@ -763,6 +897,9 @@
                 dropTarget.groupBlock,
                 state.itemId
             );
+            if (dropTarget.groupBlock.dataset.orderParentId) {
+                targetParentId = String(dropTarget.groupBlock.dataset.orderParentId);
+            }
         }
 
         const sourceItem = getItem(state.itemId);
@@ -770,6 +907,7 @@
             sourceItem
             && Number(sourceItem.group || 0) === targetGroupId
             && Number(sourceItem.order || 0) === targetPosition
+            && parentIdOf(sourceItem) === String(targetParentId || '')
         );
         const shouldReturnToOrigin = (
             !wasStarted
@@ -800,11 +938,18 @@
             state.row.classList.remove('item-order-drag-source');
         }
 
+        if (state.subitemBlock) {
+            state.subitemBlock.classList.remove('item-order-drag-source');
+        }
+
         try {
             await submitReorder(
                 state.itemId,
                 targetGroupId,
-                targetPosition
+                targetPosition,
+                targetParentId === undefined
+                    ? {}
+                    : { targetParentId }
             );
         } catch (error) {
             console.error('item reorder failed:', error);

@@ -50,12 +50,27 @@ def _archive_version_from(operation: dict, side: str) -> dict:
 def _item_name(operation: dict, final_items: dict[str, dict]) -> str:
     item_id = clean_cell_value(operation.get("itemId"))
     final_item = final_items.get(item_id) or {}
-    return (
+    name = (
         clean_cell_value(final_item.get("name"))
         or clean_cell_value(_item_from(operation, "after").get("name"))
         or clean_cell_value(_item_from(operation, "before").get("name"))
         or "Без названия"
     )
+    parent_id = clean_cell_value(
+        final_item.get("parentItemId")
+        or _item_from(operation, "after").get("parentItemId")
+    )
+    parent_name = clean_cell_value(
+        (final_items.get(parent_id) or {}).get("name")
+    ) if parent_id else ""
+    return f"{parent_name} › {name}" if parent_name else name
+
+
+def _parent_name(parent_id: Any, final_items: dict[str, dict]) -> str:
+    normalized = clean_cell_value(parent_id)
+    if not normalized:
+        return ""
+    return clean_cell_value((final_items.get(normalized) or {}).get("name"))
 
 
 def _status_text(value: Any) -> str:
@@ -79,8 +94,11 @@ def _order_text(
     checklist_key: str,
     group_id: Any,
     position: Any,
+    parent_name: str = "",
 ) -> str:
     title = _group_title(checklist_key, group_id)
+    if parent_name:
+        title = f"{title} / {parent_name}"
     numeric_position = _safe_int(position)
     if numeric_position > 0:
         return f"{title} / позиция {numeric_position}"
@@ -414,11 +432,19 @@ def normalize_session_operations(
                 checklist_key,
                 before.get("groupId") or before_item.get("group"),
                 before.get("position") or before_item.get("order"),
+                _parent_name(
+                    before.get("parentItemId") or before_item.get("parentItemId"),
+                    final_items,
+                ),
             )
             new_order = _order_text(
                 checklist_key,
                 after.get("groupId") or after_item.get("group"),
                 after.get("position") or after_item.get("order"),
+                _parent_name(
+                    after.get("parentItemId") or after_item.get("parentItemId"),
+                    final_items,
+                ),
             )
             _upsert_scalar(
                 scalar_changes,
@@ -556,7 +582,13 @@ def normalize_session_operations(
         final_item = final_items.get(added_item_id) or {}
         final_name = clean_cell_value(final_item.get("name"))
         if final_name:
-            added["itemName"] = final_name
+            parent_name = _parent_name(
+                final_item.get("parentItemId"),
+                final_items,
+            )
+            added["itemName"] = (
+                f"{parent_name} › {final_name}" if parent_name else final_name
+            )
             added["newValue"] = final_name
         scalar_changes.pop((added_item_id, "name"), None)
         scalar_changes.pop((added_item_id, "order"), None)

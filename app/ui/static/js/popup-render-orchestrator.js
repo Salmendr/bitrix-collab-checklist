@@ -119,6 +119,12 @@ function bindEvents(rendererEntry) {
 }
 
 function renderAll() {
+    if (
+        window.ChecklistPopupSubitems
+        && typeof window.ChecklistPopupSubitems.beforeRender === 'function'
+    ) {
+        window.ChecklistPopupSubitems.beforeRender();
+    }
     const rendererEntry = resolvePopupRenderer();
 
     rendererEntry.renderer.render(rendererEntry.context);

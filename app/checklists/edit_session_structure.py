@@ -15,6 +15,10 @@ from app.checklists.yandex_folders import (
     build_custom_item_yandex_folder_spec,
     build_item_yandex_relocation_spec,
 )
+from app.checklists.yandex_subfolders import (
+    build_subitem_target_path,
+    guess_parent_folder_path,
+)
 from app.checklists.yandex_structure_jobs import (
     ensure_yandex_structure_jobs_table,
     insert_yandex_structure_job_in_transaction,
@@ -159,6 +163,23 @@ def prepare_edit_session_structure_jobs_in_transaction(
                 item_name=item_name,
                 item_id=item_id,
             )
+            add_parent_id = clean_cell_value(current_item.get("parentItemId"))
+            if add_parent_id:
+                # Subitem folder: inside the parent's folder (re-resolved by
+                # the worker at execution time).
+                spec["targetPath"] = build_subitem_target_path(
+                    guess_parent_folder_path(
+                        dialog_id,
+                        checklist_key,
+                        _load_current_item_in_transaction(
+                            conn,
+                            dialog_id=dialog_id,
+                            checklist_key=checklist_key,
+                            item_id=add_parent_id,
+                        ),
+                    ),
+                    item_name,
+                )
             initial_status = (
                 "queued" if spec.get("enabled") else "disabled"
             )
@@ -260,6 +281,31 @@ def prepare_edit_session_structure_jobs_in_transaction(
             )
         )
         target_group_id = int(current_item.get("group") or 0)
+        source_parent_id = clean_cell_value(
+            next(
+                (
+                    payload.get("sourceParentId")
+                    for payload in reorder_payloads
+                    if "sourceParentId" in payload
+                ),
+                current_item.get("parentItemId"),
+            )
+        )
+        target_parent_id = clean_cell_value(current_item.get("parentItemId"))
+        target_parent_path = (
+            guess_parent_folder_path(
+                dialog_id,
+                checklist_key,
+                _load_current_item_in_transaction(
+                    conn,
+                    dialog_id=dialog_id,
+                    checklist_key=checklist_key,
+                    item_id=target_parent_id,
+                ),
+            )
+            if target_parent_id and target_parent_id != source_parent_id
+            else ""
+        )
         source_path = clean_cell_value(
             next(
                 (
@@ -283,6 +329,7 @@ def prepare_edit_session_structure_jobs_in_transaction(
             old_name=old_name,
             new_name=final_name,
             source_path_override=source_path,
+            target_parent_path_override=target_parent_path,
         )
 
         retargeted = (
@@ -306,7 +353,10 @@ def prepare_edit_session_structure_jobs_in_transaction(
             jobs.append(retargeted)
             continue
 
-        moved = source_group_id != target_group_id
+        moved = (
+            source_group_id != target_group_id
+            or source_parent_id != target_parent_id
+        )
         renamed = old_name != final_name
         if not moved and not renamed:
             skipped.append({

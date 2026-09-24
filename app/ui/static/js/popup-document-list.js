@@ -38,18 +38,31 @@ function buildDocumentCell(item) {
 
     const documents = getItemDocuments(item);
     const itemId = String(item && item.id || '');
+    const subitemsApi = window.ChecklistPopupSubitems || null;
+    const isSubitem = !!String(item && item.parentItemId || '').trim();
+    // A parent item opens its folder also when only its subitems have files:
+    // the folder page lists the subfolders.
+    const hasSubitemDocuments = !!(
+        subitemsApi
+        && !isSubitem
+        && subitemsApi.hasSubitemDocuments(item)
+    );
     const editingAllowed = (
         typeof isEditingAllowed !== 'function'
         || isEditingAllowed()
     );
-    const folderViewUrl = String(item.folderUrl || '').trim() || (documents.length ? (
+    const folderViewUrl = String(item.folderUrl || '').trim() || ((documents.length || hasSubitemDocuments) ? (
         appUrl('api/checklist/folder')
         + '?dialogId=' + encodeURIComponent(dialogId)
         + '&checklistKey=' + encodeURIComponent(currentChecklistKey)
         + '&itemId=' + encodeURIComponent(itemId)
     ) : '');
     const showDocumentActions = documents.length > 0;
-    const showViewFolder = showDocumentActions && !!folderViewUrl;
+    const showViewFolder = (
+        !isSubitem
+        && (showDocumentActions || hasSubitemDocuments)
+        && !!folderViewUrl
+    );
     const yandexFolderStatus = normalizeYandexFolderStatus(
         item && item.yandexFolderStatus
     );
@@ -70,7 +83,7 @@ function buildDocumentCell(item) {
     ).trim();
     // The item Yandex action follows the same visibility rule for
     // standard and custom items: no current documents means no button.
-    const showYandexAction = showDocumentActions;
+    let showYandexAction = showDocumentActions || hasSubitemDocuments;
     const stageYandexAvailability = (
         typeof getCurrentStageYandexAvailability === 'function'
             ? getCurrentStageYandexAvailability()
@@ -87,6 +100,10 @@ function buildDocumentCell(item) {
     const yandexDisabled = yandexFolderStatus === 'disabled';
     const yandexConflict = yandexFolderStatus === 'conflict';
     const yandexRetry = yandexFolderStatus === 'error' || hasMirrorErrors;
+    if (isSubitem) {
+        // A subitem has no own folder link: only a retry after an error.
+        showYandexAction = yandexRetry || yandexConflict;
+    }
     const yandexButtonDisabled = (
         stageYandexDisabled
         || yandexPending
@@ -241,20 +258,6 @@ function buildDocumentCell(item) {
                     ${iconSvg('upload')}
                 </button>
 
-                <button
-                    class="doc-share-btn checklist-action-button checklist-action-button-share"
-                    type="button"
-                    data-role="share-folder"
-                    data-item-id="${esc(itemId)}"
-                    data-item-name="${esc(String(item && item.name || 'Пункт'))}"
-                    title="Поделиться ссылкой — временно недоступно"
-                    aria-label="Поделиться ссылкой — временно недоступно"
-                    aria-disabled="true"
-                    disabled
-                >
-                    ${iconSvg('share')}
-                </button>
-
                 ${showViewFolder ? `
                     <button
                         class="doc-btn doc-icon-btn checklist-action-button checklist-action-button-folder"
@@ -269,21 +272,6 @@ function buildDocumentCell(item) {
                         ${editingAllowed ? '' : 'disabled'}
                     >
                         ${iconSvg('folder')}
-                    </button>
-                ` : ''}
-
-                ${showDocumentActions ? `
-                    <button
-                        class="doc-icon-btn checklist-action-button checklist-action-button-bell"
-                        type="button"
-                        data-role="notify-documents-disabled"
-                        data-item-id="${esc(itemId)}"
-                        title="Оповещения временно недоступны"
-                        aria-label="Оповещения временно недоступны"
-                        aria-disabled="true"
-                        disabled
-                    >
-                        ${iconSvg('bell')}
                     </button>
                 ` : ''}
 
@@ -310,6 +298,8 @@ function buildDocumentCell(item) {
                         ${iconSvg('yandex')}
                     </button>
                 ` : ''}
+
+                ${subitemsApi ? subitemsApi.buildToggle(item) : ''}
             </div>
 
             ${yandexStateText ? `

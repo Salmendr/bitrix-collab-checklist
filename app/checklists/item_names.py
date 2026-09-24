@@ -60,15 +60,24 @@ def choose_available_item_name(
     *,
     group_id: int,
     exclude_item_id: str = '',
+    parent_item_id: str = '',
 ) -> dict:
+    """Pick a free name among siblings.
+
+    Siblings are the top-level items of the group, or the subitems of
+    ``parent_item_id``: their folders share one parent folder on Yandex Disk.
+    """
     requested = validate_item_name(requested_name)
     normalized_exclude_id = clean_cell_value(exclude_item_id)
+    normalized_parent_id = clean_cell_value(parent_item_id)
     used_name_keys: set[str] = set()
     used_folder_keys: set[str] = set()
 
     for raw_item in items or []:
         item = raw_item if isinstance(raw_item, dict) else {}
         if clean_cell_value(item.get('id')) == normalized_exclude_id:
+            continue
+        if clean_cell_value(item.get('parentItemId')) != normalized_parent_id:
             continue
         try:
             item_group_id = int(item.get('group') or 0)

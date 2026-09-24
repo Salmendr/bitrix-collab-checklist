@@ -431,8 +431,26 @@
         }
     }
 
+    // Only decisions and errors are sent; the server applies the same list.
+    const ESSENTIAL_EVENTS = new Set([
+        'popup_diag_launch_created',
+        'popup_diag_launcher_reopen_click_detected',
+        'popup_diag_launcher_close_callback',
+        'popup_diag_close_requested',
+        'popup_diag_surface_unhandled_rejection'
+    ]);
+
+    function isEssentialEvent(event) {
+        const name = String(event || '');
+        return ESSENTIAL_EVENTS.has(name)
+            || /_(error|failed)$/.test(name);
+    }
+
     function record(event, details, useBeacon) {
         eventSequence += 1;
+        if (!isEssentialEvent(event)) {
+            return false;
+        }
         const snapshot = buildSnapshot();
         snapshot.eventSequence = eventSequence;
 

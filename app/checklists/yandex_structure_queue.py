@@ -151,6 +151,11 @@ def _prepare_custom_job_target(job: dict, item: dict) -> dict:
         if source_parent == target_parent and not preserve_name:
             preserve_name = source_name
 
+    # The new parent (e.g. the "Не требуется" section folder) may not exist
+    # yet; prefix allocation lists its children.
+    from app.checklists.yandex_folders import ensure_yandex_folder_chain
+    ensure_yandex_folder_chain(target_parent)
+
     resolved_target = build_stable_custom_folder_target_path(
         parent_path=target_parent,
         item_name=clean_cell_value(job.get("item_name")),
@@ -172,6 +177,8 @@ def _execute_yandex_structure_mutation(job: dict) -> dict:
     checklist_key = normalize_checklist_key(job.get("checklist_key"))
     item_id = clean_cell_value(job.get("item_id"))
     item = _current_item(job)
+    from app.checklists.yandex_subfolders import retarget_subitem_job
+    job = retarget_subitem_job(job, item)
     job = _resolve_actual_source_job(job, item)
     job = _prepare_custom_job_target(job, item)
 
@@ -324,6 +331,19 @@ def process_yandex_structure_job(job_id: str) -> dict:
                 job={**job, "status": "completed", "error": "", "result": result},
             )
             completed = finish_yandex_structure_job(job_id, result=result)
+
+            # Subfolders moved together with the parent folder.
+            try:
+                from app.checklists.yandex_subfolders import (
+                    rebase_subitem_folders_after_parent_job,
+                )
+                rebase_subitem_folders_after_parent_job(job, result)
+            except Exception as rebase_exc:
+                write_debug_log("yandex_subitem_rebase_failed", {
+                    "jobId": job_id,
+                    "itemId": item_id,
+                    "error": str(rebase_exc),
+                })
 
         # File uploads for the same item are durable but deliberately kept out
         # of the in-memory mirror queue until the folder mutation completes.

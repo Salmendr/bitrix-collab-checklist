@@ -43,6 +43,12 @@ if (!popupConceptRendererCommon) {
                             </div>
                             <div class="td">${buildDocumentCell(item)}</div>
                         </div>
+                        ${window.ChecklistPopupSubitems
+                            ? window.ChecklistPopupSubitems.buildBlock(item, {
+                                gridClass,
+                                indicator: entry => indicatorClass(entry.status)
+                            })
+                            : ''}
                     `;
                 }).join('');
 

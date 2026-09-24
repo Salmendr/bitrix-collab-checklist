@@ -13,6 +13,12 @@ from app.checklists.utils import (
     normalize_checklist_key,
 )
 
+from app.checklists.subitems import (
+    apply_item_hierarchy,
+    build_hierarchy_fields,
+    progress_items,
+)
+
 from app.checklists.documents import (
     migrate_legacy_document_fields,
     normalize_documents_list,    normalize_detached_archive_series,
@@ -595,6 +601,7 @@ def normalize_checklist_data(data: dict, checklist_key: str = "id") -> dict:
                 "folderUrl": folder_url,
                 **build_normalized_yandex_structure_fields(item),
                 **build_not_required_return_fields(item),
+                **build_hierarchy_fields(item),
                 "documents": documents,
                 "archivedDocumentSeries": normalize_detached_archive_series(
                     item.get("archivedDocumentSeries")
@@ -705,8 +712,11 @@ def normalize_checklist_data(data: dict, checklist_key: str = "id") -> dict:
 
 
     if checklist_key != "id":
-        normalized_items = normalize_config_table_items(config)
-        progress = calculate_progress(normalized_items)
+        normalized_items = apply_item_hierarchy(
+            normalize_config_table_items(config),
+            config.not_required_group_id,
+        )
+        progress = calculate_progress(progress_items(normalized_items))
         return build_normalized_checklist_payload(data, config, normalized_items, progress)
 
     config = get_checklist_config("id")
@@ -780,6 +790,7 @@ def normalize_checklist_data(data: dict, checklist_key: str = "id") -> dict:
             "folderUrl": folder_url,
             **build_normalized_yandex_structure_fields(item),
             **build_not_required_return_fields(item),
+            **build_hierarchy_fields(item),
             "documents": documents,
             "archivedDocumentSeries": normalize_detached_archive_series(
                 item.get("archivedDocumentSeries")
@@ -876,6 +887,10 @@ def normalize_checklist_data(data: dict, checklist_key: str = "id") -> dict:
                     item.get("name"),
                     item.get("id"),
                 )
-    progress = calculate_progress(normalized_items)
+    normalized_items = apply_item_hierarchy(
+        normalized_items,
+        config.not_required_group_id,
+    )
+    progress = calculate_progress(progress_items(normalized_items))
 
     return build_normalized_checklist_payload(data, config, normalized_items, progress)

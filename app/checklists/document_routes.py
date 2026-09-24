@@ -1564,7 +1564,11 @@ def api_checklist_item_yandex_folder(
         })
 
     try:
-        folder_data = get_item_yandex_folder(
+        # A subitem is never resolved by name: an item of the section can
+        # share its name.
+        folder_data = None if clean_cell_value(
+            target_item.get("parentItemId")
+        ) else get_item_yandex_folder(
             dialog_id,
             checklist_key,
             clean_cell_value(target_item.get("name")),
@@ -2022,34 +2026,121 @@ def _build_folder_actions_html(
                 id="folderUploadInput"
                 multiple
             >
-            <button
-                class="folder-action-button checklist-action-button checklist-action-button-share"
-                type="button"
-                id="folderShareBtn"
-                data-role="share-folder"
-                data-permanent-disabled="1"
-                title="Поделиться ссылкой — временно недоступно"
-                aria-label="Поделиться ссылкой — временно недоступно"
-                aria-disabled="true"
-                disabled
-            >
-                <span data-checklist-icon="share"></span>
-            </button>
-            <button
-                class="folder-action-button checklist-action-button checklist-action-button-bell"
-                type="button"
-                id="folderNotificationBtn"
-                data-role="notify-documents-disabled"
-                data-permanent-disabled="1"
-                title="Оповещения временно недоступны"
-                aria-label="Оповещения временно недоступны"
-                aria-disabled="true"
-                disabled
-            >
-                <span data-checklist-icon="bell"></span>
-            </button>
+            <!-- Share and notification buttons are hidden until the features return. -->
             {yandex_link_html}
         </div>
+    '''
+
+
+def _files_count_text(count: int) -> str:
+    tail = count % 100
+    if 11 <= tail <= 14:
+        word = "файлов"
+    elif count % 10 == 1:
+        word = "файл"
+    elif count % 10 in (2, 3, 4):
+        word = "файла"
+    else:
+        word = "файлов"
+    return f"{count} {word}"
+
+
+def _build_folder_subfolders_html(
+    *,
+    items: list[dict],
+    parent_item_id: str,
+    dialog_id: str,
+    checklist_key: str,
+    app_base_path: str,
+    session_id: str,
+    user_id: str,
+    user_name: str,
+) -> str:
+    """Subfolders of subitems below the files of the parent item."""
+    from app.checklists.subitems import children_of
+
+    children = children_of(items, parent_item_id)
+    if not children:
+        return ""
+
+    blocks: list[str] = []
+    for child in children:
+        child_id = clean_cell_value(child.get("id"))
+        child_name = html.escape(clean_cell_value(child.get("name")) or "Подпункт")
+        child_documents = normalize_documents_list(child.get("documents"))
+        status = clean_cell_value(child.get("status"))
+        status_class = "done" if status == "Есть" else "open"
+        status_text = "Есть" if status == "Есть" else "Нет"
+        subfolder_url = (
+            f"{app_base_path}/api/checklist/folder"
+            f"?dialogId={quote(dialog_id, safe='')}"
+            f"&checklistKey={quote(checklist_key, safe='')}"
+            f"&itemId={quote(child_id, safe='')}"
+            f"&sessionId={quote(session_id, safe='')}"
+            f"&userId={quote(user_id, safe='')}"
+            f"&userName={quote(user_name, safe='')}"
+        )
+
+        file_rows = []
+        for doc in child_documents:
+            doc_id = str(doc.get("id") or "")
+            doc_name = html.escape(str(doc.get("name") or "Файл"))
+            open_url = build_document_view_url(
+                dialog_id,
+                checklist_key,
+                child_id,
+                doc_id,
+            )
+            file_rows.append(f'''
+                <li class="folder-subfolder-file">
+                    <a
+                        class="folder-subfolder-file-name"
+                        href="{html.escape(open_url)}"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        title="Открыть файл: {doc_name}"
+                    >{doc_name}</a>
+                    <span class="folder-subfolder-file-meta">{html.escape(format_file_size(doc.get("size") or 0))}</span>
+                    <span class="folder-subfolder-file-meta">{html.escape(format_document_uploaded_at(doc.get("uploadedAt") or doc.get("modifiedAt")))}</span>
+                    <span class="folder-subfolder-file-meta">{html.escape(clean_cell_value(doc.get("uploadedByName")) or "—")}</span>
+                    <a
+                        class="folder-download-button checklist-action-button checklist-action-button-download"
+                        href="{html.escape(open_url + "&download=1")}"
+                        download
+                        title="Скачать файл"
+                        aria-label="Скачать файл {doc_name}"
+                    ><span data-checklist-icon="download"></span></a>
+                </li>
+            ''')
+
+        files_html = (
+            f'<ul class="folder-subfolder-files">{"".join(file_rows)}</ul>'
+            if file_rows
+            else '<div class="folder-subfolder-empty">В подпапке пока нет файлов</div>'
+        )
+        blocks.append(f'''
+            <details class="folder-subfolder" data-subfolder-item-id="{html.escape(child_id)}">
+                <summary class="folder-subfolder-summary">
+                    <span class="folder-subfolder-chevron" aria-hidden="true"></span>
+                    <span class="folder-subfolder-icon" aria-hidden="true">📁</span>
+                    <span class="folder-subfolder-name">{child_name}</span>
+                    <span class="folder-subfolder-count">{_files_count_text(len(child_documents))}</span>
+                    <span class="folder-subfolder-status folder-subfolder-status--{status_class}">{status_text}</span>
+                </summary>
+                <div class="folder-subfolder-body">
+                    {files_html}
+                    <a class="folder-subfolder-open" href="{html.escape(subfolder_url)}">
+                        Открыть подпапку (замена и архив файлов)
+                    </a>
+                </div>
+            </details>
+        ''')
+
+    return f'''
+        <section class="folder-subfolders" aria-labelledby="folderSubfoldersTitle">
+            <h2 id="folderSubfoldersTitle" class="folder-subfolders-title">Подпапки</h2>
+            {"".join(blocks)}
+        </section>
     '''
 
 
@@ -2113,12 +2204,24 @@ def api_checklist_folder(
     documents = normalize_documents_list(
         target_item.get("documents")
     )
-    yandex_folder_data = get_item_yandex_folder(
-        dialog_id,
-        checklist_key,
-        clean_cell_value(target_item.get("name")),
-        group_id=int(target_item.get("group") or 0),
-    )
+    if clean_cell_value(target_item.get("parentItemId")):
+        # Subitem folder: only its own stored path, never a name lookup.
+        from app.checklists.storage import get_project_storage_context
+        subitem_path = clean_cell_value(target_item.get("yandexFolderPath"))
+        yandex_folder_data = {
+            "folder": {
+                "path": subitem_path,
+                "url": clean_cell_value(target_item.get("yandexFolderUrl")),
+            },
+            "context": get_project_storage_context(dialog_id) or {},
+        } if subitem_path else None
+    else:
+        yandex_folder_data = get_item_yandex_folder(
+            dialog_id,
+            checklist_key,
+            clean_cell_value(target_item.get("name")),
+            group_id=int(target_item.get("group") or 0),
+        )
     yandex_folder = (
         yandex_folder_data or {}
     ).get("folder") or {}
@@ -2158,10 +2261,20 @@ def api_checklist_folder(
     app_base_path = normalize_base_path(
         APP_BASE_PATH
     )
+    subfolders_html = _build_folder_subfolders_html(
+        items=items,
+        parent_item_id=item_id,
+        dialog_id=dialog_id,
+        checklist_key=checklist_key,
+        app_base_path=app_base_path,
+        session_id=clean_cell_value(sessionId),
+        user_id=clean_cell_value(userId),
+        user_name=clean_cell_value(userName),
+    )
     ui_static_base_url = (
         f"{app_base_path}/ui-static"
     )
-    ui_asset_version = "8.15.9"
+    ui_asset_version = "8.16-subitems"
     popup_url = (
         f"{app_base_path}/popup"
         f"?dialogId={quote(dialog_id, safe='')}"
@@ -2238,6 +2351,7 @@ def api_checklist_folder(
             ),
             "FOLDER_ACTIONS_HTML": folder_actions_html,
             "FOLDER_TABLE_HTML": table_html,
+            "FOLDER_SUBFOLDERS_HTML": subfolders_html,
             "FOLDER_BOOTSTRAP_JSON": (
                 _safe_json_for_inline_script(
                     bootstrap_payload

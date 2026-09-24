@@ -64,6 +64,9 @@ def item_folder(dialog_id: str, checklist_key: str, item: dict,
     explicit = clean_cell_value(item.get("yandexFolderPath"))
     if explicit and is_inside(explicit, root):
         return canonical_path(explicit)
+    if clean_cell_value(item.get("parentItemId")):
+        # Never resolve a subitem by name: an item of the section may share it.
+        raise YandexScopeError("Папка подпункта на Яндекс.Диске ещё не создана")
     folders = (context.get("yandexDisk") or {}).get("folders") or {}
     alias = clean_cell_value(item.get("yandexFolderAlias"))
     key = normalize_checklist_key(checklist_key)

@@ -71,6 +71,12 @@ from app.yandex_disk.client import is_yandex_disk_enabled
 
 from app.checklists.checklist_mutation_guard import checklist_mutation_guard
 from app.checklists.item_names import choose_available_item_name
+from app.checklists.subitems import children_of, parent_id_of
+from app.checklists.yandex_subfolders import (
+    build_subitem_target_path,
+    guess_parent_folder_path,
+    new_subitem_id,
+)
 from app.checklists.item_order import (
     get_checklist_order_version,
     renumber_items_by_group,
@@ -516,10 +522,11 @@ async def api_checklist_add_item(request: Request):
     config = get_checklist_config(checklist_key)
     group_id = int(payload.get("groupId") or 0)
     requested_name = clean_cell_value(payload.get("name"))
+    parent_item_id = clean_cell_value(payload.get("parentItemId"))
 
     if not dialog_id:
         return JSONResponse({"ok": False, "error": "dialogId is required"}, status_code=400)
-    if not config.has_custom_item_group(group_id):
+    if not parent_item_id and not config.has_custom_item_group(group_id):
         return JSONResponse({"ok": False, "error": "invalid groupId"}, status_code=400)
 
     try:
@@ -541,18 +548,54 @@ async def api_checklist_add_item(request: Request):
                 )
 
             items = data.get("items", []) or []
+            parent_item = None
+            if parent_item_id:
+                parent_item = next(
+                    (
+                        item for item in items
+                        if clean_cell_value(item.get("id")) == parent_item_id
+                    ),
+                    None,
+                )
+                parent_error = ""
+                if not parent_item:
+                    parent_error = "Пункт для подпункта не найден"
+                elif clean_cell_value(parent_item.get("parentItemId")):
+                    parent_error = "Подпункт нельзя добавить внутрь подпункта"
+                elif (
+                    normalize_status(parent_item.get("status")) == "Не требуется"
+                    or int(parent_item.get("group") or 0)
+                    == int(config.not_required_group_id)
+                ):
+                    parent_error = (
+                        "Пункт находится в разделе «Не требуется» — "
+                        "подпункт добавить нельзя"
+                    )
+                if parent_error:
+                    return JSONResponse(
+                        {"ok": False, "error": parent_error},
+                        status_code=400,
+                    )
+                group_id = int(parent_item.get("group") or 0)
+
             name_resolution = choose_available_item_name(
                 requested_name,
                 items,
                 group_id=group_id,
+                parent_item_id=parent_item_id,
             )
             name = name_resolution["name"]
-            group_items = [
+            sibling_items = [
                 item for item in items
                 if int(item.get("group") or 0) == group_id
+                and clean_cell_value(item.get("parentItemId")) == parent_item_id
             ]
-            next_order = len(group_items) + 1
-            new_item_id = f"{config.key}_g{group_id}_custom_{uuid.uuid4().hex[:8]}"
+            next_order = len(sibling_items) + 1
+            new_item_id = (
+                new_subitem_id(config.key, group_id)
+                if parent_item_id
+                else f"{config.key}_g{group_id}_custom_{uuid.uuid4().hex[:8]}"
+            )
             yandex_structure_spec = build_custom_item_yandex_folder_spec(
                 dialog_id=dialog_id,
                 checklist_key=config.key,
@@ -560,6 +603,12 @@ async def api_checklist_add_item(request: Request):
                 item_name=name,
                 item_id=new_item_id,
             )
+            if parent_item:
+                # The worker places it into the parent's current folder.
+                yandex_structure_spec["targetPath"] = build_subitem_target_path(
+                    guess_parent_folder_path(dialog_id, config.key, parent_item),
+                    name,
+                )
             initial_yandex_status = (
                 "queued" if yandex_structure_spec.get("enabled") else "disabled"
             )
@@ -595,6 +644,7 @@ async def api_checklist_add_item(request: Request):
                 "definitionName": "",
                 "definitionGroupId": 0,
                 "nameOverride": "",
+                "parentItemId": parent_item_id,
             }
 
             items.append(new_item)
@@ -623,6 +673,7 @@ async def api_checklist_add_item(request: Request):
                 item_id=new_item_id,
                 payload={
                     "groupId": group_id,
+                    "parentItemId": parent_item_id,
                     "name": name,
                     "requestedName": name_resolution["requestedName"],
                     "nameAdjusted": bool(name_resolution["adjusted"]),
@@ -692,6 +743,10 @@ async def api_checklist_add_item(request: Request):
             "yandexStructureJob": yandex_structure_job or {},
             "operation": operation,
         }
+        if parent_item_id:
+            # A new subitem can change the derived status of its parent.
+            response_payload["items"] = saved.get("items") or []
+            response_payload["orderVersion"] = int(saved.get("orderVersion") or 0)
         if yandex_folder_warning:
             response_payload["yandexFolderWarning"] = yandex_folder_warning
         return JSONResponse(response_payload)
@@ -758,6 +813,7 @@ async def api_checklist_rename_item(request: Request):
                 items,
                 group_id=group_id,
                 exclude_item_id=item_id,
+                parent_item_id=parent_id_of(target_item),
             )
             old_name = clean_cell_value(target_item.get("name"))
             new_name = name_resolution["name"]
@@ -1086,27 +1142,70 @@ async def api_checklist_reorder_items(request: Request):
             source_group_id = int(target_item.get("group") or 0)
             source_position = int(target_item.get("order") or 0)
             before_item = copy.deepcopy(target_item)
+            not_required_group_id = int(config.not_required_group_id)
 
-            source_items = sorted(
-                [
-                    item
-                    for item in items
-                    if int(item.get("group") or 0) == source_group_id
-                    and clean_cell_value(item.get("id")) != item_id
-                ],
-                key=lambda item: (
-                    int(item.get("order") or 100000),
-                    clean_cell_value(item.get("id")),
-                ),
-            )
-            target_items = (
-                source_items
-                if source_group_id == target_group_id
-                else sorted(
+            # Subitems: the scope of an item is (group, parent). Top-level
+            # items have parent "". A subitem moves inside/between parents,
+            # goes to "Не требуется" as a detached item and returns to the
+            # parent it was taken from.
+            items_by_id = {
+                clean_cell_value(item.get("id")): item
+                for item in items
+            }
+
+            def valid_parent(candidate_id: str) -> dict | None:
+                candidate = items_by_id.get(clean_cell_value(candidate_id))
+                if (
+                    not candidate
+                    or clean_cell_value(candidate.get("id")) == item_id
+                    or parent_id_of(candidate)
+                    or normalize_status(candidate.get("status")) == "Не требуется"
+                    or int(candidate.get("group") or 0) == not_required_group_id
+                ):
+                    return None
+                return candidate
+
+            source_parent_id = parent_id_of(target_item)
+            target_parent_id = ""
+            if "targetParentId" in payload:
+                target_parent_id = clean_cell_value(payload.get("targetParentId"))
+                if target_parent_id:
+                    if children_of(items, item_id):
+                        return JSONResponse(
+                            {"ok": False, "error": "Пункт с подпунктами нельзя сделать подпунктом"},
+                            status_code=400,
+                        )
+                    target_parent = valid_parent(target_parent_id)
+                    if not target_parent:
+                        return JSONResponse(
+                            {"ok": False, "error": "Пункт для переноса подпункта недоступен"},
+                            status_code=400,
+                        )
+                    target_group_id = int(target_parent.get("group") or 0)
+            elif (
+                source_group_id == not_required_group_id
+                and target_group_id != not_required_group_id
+                and clean_cell_value(target_item.get("notRequiredReturnParentId"))
+            ):
+                return_parent = valid_parent(
+                    target_item.get("notRequiredReturnParentId")
+                )
+                if return_parent:
+                    target_parent_id = clean_cell_value(return_parent.get("id"))
+                    target_group_id = int(return_parent.get("group") or 0)
+            elif source_parent_id and target_group_id != not_required_group_id:
+                return JSONResponse(
+                    {"ok": False, "error": "Подпункт можно перенести только в другой пункт или в «Не требуется»"},
+                    status_code=400,
+                )
+
+            def scope_items(group_id: int, parent_id: str) -> list[dict]:
+                return sorted(
                     [
                         item
                         for item in items
-                        if int(item.get("group") or 0) == target_group_id
+                        if int(item.get("group") or 0) == group_id
+                        and parent_id_of(item) == parent_id
                         and clean_cell_value(item.get("id")) != item_id
                     ],
                     key=lambda item: (
@@ -1114,6 +1213,17 @@ async def api_checklist_reorder_items(request: Request):
                         clean_cell_value(item.get("id")),
                     ),
                 )
+
+            same_scope = (
+                source_group_id == target_group_id
+                and source_parent_id == target_parent_id
+            )
+            scope_changed = not same_scope
+            source_items = scope_items(source_group_id, source_parent_id)
+            target_items = (
+                source_items
+                if same_scope
+                else scope_items(target_group_id, target_parent_id)
             )
 
             insertion_position = max(
@@ -1125,17 +1235,18 @@ async def api_checklist_reorder_items(request: Request):
             )
 
             # move-name-suffix-v1: a moved item must not duplicate a name
-            # (and a Yandex folder) that already exists in the target section.
+            # (and a Yandex folder) that already exists among its new siblings.
             name_before_move = clean_cell_value(target_item.get("name"))
             final_item_name = name_before_move
             name_adjusted = False
-            if source_group_id != target_group_id and name_before_move:
+            if scope_changed and name_before_move:
                 try:
                     move_name_resolution = choose_available_item_name(
                         name_before_move,
                         items,
                         group_id=target_group_id,
                         exclude_item_id=item_id,
+                        parent_item_id=target_parent_id,
                     )
                 except ValueError:
                     move_name_resolution = {}
@@ -1145,7 +1256,7 @@ async def api_checklist_reorder_items(request: Request):
                 name_adjusted = final_item_name != name_before_move
 
             yandex_move_spec = {}
-            if source_group_id != target_group_id:
+            if scope_changed:
                 yandex_move_spec = build_item_yandex_relocation_spec(
                     dialog_id=dialog_id,
                     checklist_key=config.key,
@@ -1154,9 +1265,24 @@ async def api_checklist_reorder_items(request: Request):
                     target_group_id=target_group_id,
                     old_name=name_before_move,
                     new_name=final_item_name,
+                    target_parent_path_override=(
+                        guess_parent_folder_path(
+                            dialog_id,
+                            config.key,
+                            items_by_id.get(target_parent_id),
+                        )
+                        if target_parent_id
+                        else ""
+                    ),
                 )
 
             target_item["group"] = target_group_id
+            target_item["parentItemId"] = target_parent_id
+            if target_parent_id:
+                target_item["notRequiredReturnParentId"] = ""
+            # Subitems travel with their parent between sections.
+            for child in children_of(items, item_id):
+                child["group"] = target_group_id
             if name_adjusted:
                 target_item["name"] = final_item_name
                 if not bool(target_item.get("isCustom", False)):
@@ -1171,10 +1297,6 @@ async def api_checklist_reorder_items(request: Request):
                         else final_item_name
                     )
 
-            not_required_group_id = int(
-                config.not_required_group_id
-            )
-
             if (
                 target_group_id == not_required_group_id
                 and source_group_id != not_required_group_id
@@ -1182,6 +1304,7 @@ async def api_checklist_reorder_items(request: Request):
                 target_item["notRequiredReturnGroupId"] = (
                     source_group_id
                 )
+                target_item["notRequiredReturnParentId"] = source_parent_id
                 target_item["notRequiredReturnPosition"] = (
                     source_position
                 )
@@ -1280,12 +1403,13 @@ async def api_checklist_reorder_items(request: Request):
                 )
                 target_item["notRequiredReturnGroupId"] = 0
                 target_item["notRequiredReturnPosition"] = 0
+                target_item["notRequiredReturnParentId"] = ""
                 target_item["notRequiredReturnStatus"] = ""
                 target_item["notRequiredReturnPriority"] = ""
                 target_item["notRequiredReturnPlan"] = ""
                 target_item["notRequiredReturnFact"] = ""
 
-            if source_group_id != target_group_id:
+            if scope_changed:
                 target_item["yandexFolderTargetPath"] = clean_cell_value(
                     yandex_move_spec.get("targetPath")
                 )
@@ -1318,22 +1442,15 @@ async def api_checklist_reorder_items(request: Request):
 
             for item in items:
                 current_id = clean_cell_value(item.get("id"))
-                if current_id == item_id:
-                    continue
                 if (
-                    int(item.get("group") or 0) == target_group_id
-                    and current_id in target_ids
-                ):
-                    continue
-                if (
-                    source_group_id != target_group_id
-                    and int(item.get("group") or 0) == source_group_id
-                    and current_id in source_ids
+                    current_id == item_id
+                    or current_id in target_ids
+                    or current_id in source_ids
                 ):
                     continue
                 reordered_items.append(item)
 
-            if source_group_id != target_group_id:
+            if scope_changed:
                 reordered_items.extend(source_items)
             reordered_items.extend(target_items)
             reordered_items = renumber_items_by_group(
@@ -1342,7 +1459,7 @@ async def api_checklist_reorder_items(request: Request):
             )
 
             unchanged = (
-                source_group_id == target_group_id
+                same_scope
                 and source_position == insertion_position
             )
             if unchanged:
@@ -1383,12 +1500,14 @@ async def api_checklist_reorder_items(request: Request):
                 before={
                     "item": before_item,
                     "groupId": source_group_id,
+                    "parentItemId": source_parent_id,
                     "position": source_position,
                     "orderVersion": current_order_version,
                 },
                 after={
                     "item": updated_item,
                     "groupId": target_group_id,
+                    "parentItemId": target_parent_id,
                     "position": int(updated_item.get("order") or insertion_position),
                     "orderVersion": saved_order_version,
                 },
@@ -1398,6 +1517,8 @@ async def api_checklist_reorder_items(request: Request):
                 payload={
                     "sourceGroupId": source_group_id,
                     "targetGroupId": target_group_id,
+                    "sourceParentId": source_parent_id,
+                    "targetParentId": target_parent_id,
                     "sourcePosition": source_position,
                     "targetPosition": insertion_position,
                     "sourcePath": clean_cell_value(
@@ -1413,7 +1534,7 @@ async def api_checklist_reorder_items(request: Request):
                     "newName": final_item_name,
                     "nameAdjusted": name_adjusted,
                     "deferredYandexMove": bool(
-                        transaction and source_group_id != target_group_id
+                        transaction and scope_changed
                     ),
                     "restoreFromNotRequired": bool(
                         restore_from_not_required
@@ -1440,7 +1561,7 @@ async def api_checklist_reorder_items(request: Request):
 
         structure_job = None
         structure_warning = ""
-        if not transaction and source_group_id != target_group_id:
+        if not transaction and scope_changed:
             try:
                 pending_create = retarget_pending_create_item_folder_job(
                     dialog_id=dialog_id,

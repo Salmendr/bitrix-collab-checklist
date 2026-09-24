@@ -1,0 +1,217 @@
+/* Subitems: items nested inside an item (one level, Todoist-like). */
+
+.cell-name {
+    position: relative;
+}
+
+.subitem-counter {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-top: 4px;
+    color: #667085;
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1;
+}
+
+.subitem-counter.is-complete {
+    color: #16a34a;
+}
+
+.subitem-counter-icon {
+    width: 13px;
+    height: 13px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.4;
+    stroke-linecap: round;
+}
+
+/* Green "+" that appears on the right edge of the item name on hover. */
+/* Overlay: it must not take width from the item name. */
+.subitem-add-trigger {
+    appearance: none;
+    position: absolute;
+    top: 50%;
+    right: -4px;
+    z-index: 3;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    margin-top: -10px;
+    padding: 0;
+    border: 0;
+    border-radius: 999px;
+    background: #22c55e;
+    color: #fff;
+    box-shadow:
+        0 0 0 2px #ffffff,
+        0 1px 4px rgba(22, 163, 74, 0.45);
+    cursor: pointer;
+    opacity: 0;
+    transform: scale(0.85);
+    transition: opacity 120ms ease, transform 120ms ease, background 120ms ease;
+}
+
+.row:hover > .td > .cell-name > .subitem-add-trigger,
+.subitem-add-trigger:focus-visible {
+    opacity: 1;
+    transform: scale(1);
+}
+
+.row:not(:hover) > .td > .cell-name > .subitem-add-trigger:not(:focus-visible) {
+    pointer-events: none;
+}
+
+.subitem-add-trigger:hover:not(:disabled) {
+    background: #16a34a;
+}
+
+.subitem-add-trigger:focus-visible {
+    outline: 2px solid rgba(34, 197, 94, 0.5);
+    outline-offset: 2px;
+}
+
+.subitem-add-trigger:disabled {
+    display: none;
+}
+
+.subitem-add-plus {
+    font-size: 16px;
+    font-weight: 700;
+    line-height: 1;
+    margin-top: -1px;
+}
+
+.subitem-add-label {
+    position: absolute;
+    right: 0;
+    bottom: calc(100% + 6px);
+    z-index: 5;
+    padding: 4px 8px;
+    border-radius: 6px;
+    background: #1f2937;
+    color: #fff;
+    font-size: 11px;
+    font-weight: 600;
+    white-space: nowrap;
+    pointer-events: none;
+    opacity: 0;
+    transform: translateY(2px);
+    transition: opacity 120ms ease, transform 120ms ease;
+}
+
+.subitem-add-trigger:hover .subitem-add-label,
+.subitem-add-trigger:focus-visible .subitem-add-label {
+    opacity: 1;
+    transform: translateY(0);
+}
+
+body.item-order-dragging .subitem-add-trigger {
+    display: none;
+}
+
+/* Chevron at the end of the item buttons. */
+.subitem-toggle {
+    appearance: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 28px;
+    width: 28px;
+    height: 28px;
+    margin-left: auto;
+    padding: 0;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: #667085;
+    cursor: pointer;
+}
+
+.subitem-toggle:hover {
+    background: #f2f4f7;
+    color: #344054;
+}
+
+.subitem-toggle:focus-visible {
+    outline: 2px solid #84adff;
+    outline-offset: 1px;
+}
+
+.subitem-toggle svg {
+    width: 16px;
+    height: 16px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.8;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    transition: transform 140ms ease;
+}
+
+.subitem-toggle.is-expanded svg {
+    transform: rotate(90deg);
+}
+
+/* Nested rows. */
+.subitem-list[hidden] {
+    display: none !important;
+}
+
+.subitem-row {
+    background: #fcfdfe;
+}
+
+.subitem-row > .td:first-child {
+    padding-left: 34px;
+}
+
+.subitem-row .status-indicator {
+    width: 22px;
+    min-width: 22px;
+    height: 22px;
+    flex-basis: 22px;
+}
+
+.subitem-row .item-name-edit-trigger {
+    font-weight: 600;
+}
+
+.subitem-add-row {
+    padding-left: 46px;
+    background: #fcfdfe;
+}
+
+.subitem-add-cancel {
+    appearance: none;
+    flex: 0 0 28px;
+    width: 28px;
+    height: 28px;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: #667085;
+    font-size: 18px;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.subitem-add-cancel:hover {
+    background: #f2f4f7;
+    color: #344054;
+}
+
+/* Drop a subitem onto another item: it becomes its last subitem. */
+.row.item-order-drop-into {
+    outline: 2px dashed rgba(34, 197, 94, 0.7);
+    outline-offset: -3px;
+    background: rgba(34, 197, 94, 0.06);
+}
+
+.subitem-list.item-order-drop-group {
+    outline-color: rgba(34, 197, 94, 0.6);
+}
