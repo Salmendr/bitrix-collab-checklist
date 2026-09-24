@@ -2010,7 +2010,12 @@
                     stageYandexFolderAlias: String(configMeta.stageYandexFolderAlias || savedMeta.stageYandexFolderAlias || ''),
                     layoutMode: String(configMeta.layoutMode || savedMeta.layoutMode || 'generic'),
                     bimGroupId: Number(configMeta.bimGroupId || savedMeta.bimGroupId || 0),
-                    bimPlacement: String(configMeta.bimPlacement || savedMeta.bimPlacement || '')
+                    bimPlacement: String(configMeta.bimPlacement || savedMeta.bimPlacement || ''),
+                    panelGroupIds: Array.isArray(configMeta.panelGroupIds)
+                        ? configMeta.panelGroupIds
+                        : Array.isArray(savedMeta.panelGroupIds)
+                            ? savedMeta.panelGroupIds
+                            : []
                 };
             }
 

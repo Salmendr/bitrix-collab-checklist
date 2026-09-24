@@ -78,8 +78,8 @@
       "bytes": 6711
     },
     "popup-core.js": {
-      "sha256": "69adbece5c857934ee2d6b4e00afabd0a8e0eee758059f69c5da0563a0965494",
-      "bytes": 103464
+      "sha256": "abf13af02f77fadb2664599ca586344fe2af419f34821c8cd95a62f1081754aa",
+      "bytes": 103743
     },
     "popup-document-list.js": {
       "sha256": "e74d38adc05ca2c34f4774e16d5063603e3d7dfd034318f3ed30819203fed7ee",
@@ -182,8 +182,8 @@
       "bytes": 4388
     },
     "popup-renderer-generic.js": {
-      "sha256": "0fa7bb881a44d3e0ecf9fd14fc1bcce92fc48e90cf1f244388003ee726974125",
-      "bytes": 6583
+      "sha256": "abbe17ae8612c24cecaa9dead809bee2a856d164bbdd0b84fd09c6ed3f53e764",
+      "bytes": 7960
     },
     "popup-renderer-configured-bim.js": {
       "sha256": "b266fb19a1f1f46e34a5c84b9b646c79563983b77f6bb5799889776a6f605194",
@@ -290,7 +290,8 @@
     "The public-link action is icon-only and disabled in the application interface while its backend remains unchanged.",
     "Archive rows display the preserved original uploader and upload time rather than the later replacement actor and archive time.",
     "Stage 8.15.9.5 resolves the popup Yandex action from durable backend jobs before opening a folder or starting manual recovery.",
-    "Popup host diagnostics records launcher, application-frame and popup lifecycle state without changing open, close, resize, save or synchronization behavior."
+    "Popup host diagnostics records launcher, application-frame and popup lifecycle state without changing open, close, resize, save or synchronization behavior.",
+    "Stage 8.15.10 adds the Design checklist and optional explicit popup columns (panelGroupIds)."
   ],
   "hashMode": "utf8-lf",
   "lineEndingNote": "Hashes are calculated from bytes written to disk. This is stable for Windows CRLF and Unix LF.",
@@ -328,8 +329,8 @@
       "bytes": 6711
     },
     "popup-core.js": {
-      "sha256": "69adbece5c857934ee2d6b4e00afabd0a8e0eee758059f69c5da0563a0965494",
-      "bytes": 103464
+      "sha256": "abf13af02f77fadb2664599ca586344fe2af419f34821c8cd95a62f1081754aa",
+      "bytes": 103743
     },
     "popup-document-list.js": {
       "sha256": "52a3b95cdd786a00a7ca161d80dc08d2aaf121f40c026abaa3c84234c713af17",
@@ -428,8 +429,8 @@
       "bytes": 4388
     },
     "popup-renderer-generic.js": {
-      "sha256": "0fa7bb881a44d3e0ecf9fd14fc1bcce92fc48e90cf1f244388003ee726974125",
-      "bytes": 6583
+      "sha256": "abbe17ae8612c24cecaa9dead809bee2a856d164bbdd0b84fd09c6ed3f53e764",
+      "bytes": 7960
     },
     "popup-renderer-configured-bim.js": {
       "sha256": "b266fb19a1f1f46e34a5c84b9b646c79563983b77f6bb5799889776a6f605194",

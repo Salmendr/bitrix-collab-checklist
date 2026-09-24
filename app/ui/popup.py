@@ -148,6 +148,7 @@ def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
             "layoutMode": checklist_config.layout_mode,
             "bimGroupId": checklist_config.bim_group_id,
             "bimPlacement": checklist_config.bim_placement,
+            "panelGroupIds": [list(panel) for panel in checklist_config.panel_group_ids],
         }
 
     checklist_layout_meta_json = json.dumps(
