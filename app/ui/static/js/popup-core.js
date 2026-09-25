@@ -1193,7 +1193,8 @@
                 itemId,
                 file,
                 checklistKey = currentChecklistKey,
-                editSessionId = ''
+                editSessionId = '',
+                placement = null
             ) {
                 const targetKey = String(
                     checklistKey
@@ -1239,7 +1240,15 @@
                     fileSize: Number(file && file.size || 0),
                     fileType: String(file && file.type || ''),
                     source: 'popup',
-                    sessionId: String(editSessionId || '').trim()
+                    sessionId: String(editSessionId || '').trim(),
+                    // Folder uploads: the folder inside the (sub)item and
+                    // the name of the dropped folder (chat summary).
+                    relativeFolder: String(
+                        placement && placement.relativeFolder || ''
+                    ),
+                    folderUploadRoot: String(
+                        placement && placement.folderUploadRoot || ''
+                    )
                 });
             }
 
@@ -1390,6 +1399,18 @@
                     'requireEditSession',
                     '1'
                 );
+                if (context.relativeFolder) {
+                    formData.append(
+                        'relativeFolder',
+                        context.relativeFolder
+                    );
+                }
+                if (context.folderUploadRoot) {
+                    formData.append(
+                        'folderUploadRoot',
+                        context.folderUploadRoot
+                    );
+                }
 
                 return await new Promise(function (resolve, reject) {
                     const xhr = new XMLHttpRequest();
@@ -2033,7 +2054,12 @@
                     stageYandexFolderAlias: String(configMeta.stageYandexFolderAlias || savedMeta.stageYandexFolderAlias || ''),
                     layoutMode: String(configMeta.layoutMode || savedMeta.layoutMode || 'generic'),
                     bimGroupId: Number(configMeta.bimGroupId || savedMeta.bimGroupId || 0),
-                    bimPlacement: String(configMeta.bimPlacement || savedMeta.bimPlacement || '')
+                    bimPlacement: String(configMeta.bimPlacement || savedMeta.bimPlacement || ''),
+                    panelGroupIds: Array.isArray(configMeta.panelGroupIds)
+                        ? configMeta.panelGroupIds
+                        : Array.isArray(savedMeta.panelGroupIds)
+                            ? savedMeta.panelGroupIds
+                            : []
                 };
             }
 

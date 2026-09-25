@@ -334,17 +334,129 @@ async function getYandexPopupActionState(itemId) {
     return result;
 }
 
+function popupItemIsTopLevel(item) {
+    return !String(item && item.parentItemId || '').trim()
+        && !String(item && item.notRequiredReturnParentId || '').trim();
+}
+
+async function postPopupFolderApi(path, body) {
+    const identity = (
+        typeof getCurrentEditorIdentity === 'function'
+            ? getCurrentEditorIdentity()
+            : { userId: '', userName: 'Пользователь' }
+    );
+    const editSessionId = await requireEditingSession('загрузка папки');
+    const response = await fetch(appUrl(path), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            dialogId,
+            checklistKey: currentChecklistKey,
+            sessionId: editSessionId,
+            requireEditSession: true,
+            actingUserId: identity.userId || '',
+            actingUserName: identity.userName || 'Пользователь',
+            ...body
+        })
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || !result.ok) {
+        throw new Error(result && result.error || 'Не удалось создать папку');
+    }
+    return result;
+}
+
+// Plans a staged folder upload in the popup: subitems for folders dropped
+// into an item, plain folders inside a subitem, empty folders created.
+async function planPopupFolderUpload(parentItem, files, emptyDirs) {
+    const planner = window.ChecklistFolderUploadPlanner;
+    const itemId = String(parentItem && parentItem.id || '');
+    const plainPlacements = files.map(file => ({
+        file,
+        itemId,
+        relativeFolder: '',
+        folderUploadRoot: ''
+    }));
+    if (!planner || !planner.hasFolders(files, emptyDirs)) {
+        return { placements: plainPlacements, failures: [], structureChanged: false };
+    }
+    const subitemsApi = window.ChecklistPopupSubitems;
+    const topLevel = popupItemIsTopLevel(parentItem);
+    let structureChanged = false;
+    const result = await planner.plan({
+        files,
+        emptyDirs,
+        target: {
+            itemId,
+            topLevel,
+            relativeFolder: '',
+            subitems: topLevel && subitemsApi
+                ? subitemsApi.getSubitems(itemId).map(child => ({
+                    id: String(child.id || ''),
+                    name: String(child.name || '')
+                }))
+                : []
+        },
+        async ensureSubitem(name) {
+            const created = await postPopupFolderApi('api/checklist/add-item', {
+                groupId: Number(parentItem.group || 0),
+                parentItemId: itemId,
+                name
+            });
+            if (!created.item) {
+                throw new Error('Не удалось создать подпункт «' + name + '»');
+            }
+            if (Array.isArray(created.items)) {
+                items = created.items;
+                if (typeof rawItems !== 'undefined') rawItems = created.items;
+            }
+            if (created.orderVersion) {
+                currentOrderVersion = Number(created.orderVersion) || currentOrderVersion;
+            }
+            pushSessionChange(
+                created.item.id,
+                String(parentItem.name || '') + ' › ' + created.item.name,
+                'add-item',
+                '',
+                created.item.name
+            );
+            if (subitemsApi) subitemsApi.setExpanded(itemId, true);
+            structureChanged = true;
+            return { id: String(created.item.id || ''), name: String(created.item.name || name) };
+        },
+        async createFolder(folder) {
+            const parts = String(folder.path || '').split('/').filter(Boolean);
+            const name = parts.pop();
+            const created = await postPopupFolderApi('api/checklist/folders/create', {
+                itemId: folder.itemId,
+                parentFolder: parts.join('/'),
+                name,
+                folderUploadRoot: folder.root || ''
+            });
+            if (created.created) {
+                pushSessionChange(folder.itemId, '', 'folder', '', folder.path);
+                structureChanged = true;
+            }
+        }
+    });
+    return { ...result, structureChanged };
+}
+
 async function uploadPopupStagedFiles(
     inputElement,
     files,
-    stagingController
+    stagingController,
+    extras = {}
 ) {
     const itemId = String(
         inputElement && inputElement.dataset.itemId || ''
     );
     const selectedFiles = Array.from(files || []);
+    const selectedEmptyDirs = Array.isArray(extras && extras.emptyDirs)
+        ? extras.emptyDirs.slice()
+        : [];
 
-    if (!selectedFiles.length) {
+    if (!selectedFiles.length && !selectedEmptyDirs.length) {
         return { keepState: true };
     }
 
@@ -361,6 +473,11 @@ async function uploadPopupStagedFiles(
         === itemId
     ));
 
+    const initialStatuses = new Map(items.map(item => [
+        String(item && item.id || ''),
+        normalizeStatus(item && item.status)
+    ]));
+
     const batchContext = Object.freeze({
         dialogId: String(dialogId || ''),
         checklistKey: selectedChecklistKey,
@@ -376,20 +493,31 @@ async function uploadPopupStagedFiles(
         )
     });
 
-    const uploadPlans = selectedFiles.map(file => {
+    const planned = await planPopupFolderUpload(
+        selectedItem || { id: itemId },
+        selectedFiles,
+        selectedEmptyDirs
+    );
+    if (planned.structureChanged) {
+        renderAll();
+    }
+
+    const uploadPlans = planned.placements.map(placement => {
         const context = captureUploadContext(
-            itemId,
-            file,
+            placement.itemId,
+            placement.file,
             selectedChecklistKey,
-            editSessionId
+            editSessionId,
+            placement
         );
 
         return {
             context,
-            file,
+            file: placement.file,
+            itemId: placement.itemId,
             promise: uploadDocument(
-                itemId,
-                file,
+                placement.itemId,
+                placement.file,
                 context
             )
         };
@@ -403,14 +531,10 @@ async function uploadPopupStagedFiles(
             itemId: batchContext.itemId,
             itemName: batchContext.itemName,
             filesCount: uploadPlans.length,
+            emptyFoldersCount: selectedEmptyDirs.length,
             uploadIds: uploadPlans.map(
                 plan => plan.context.uploadId
-            ),
-            files: uploadPlans.map(plan => ({
-                name: plan.context.fileName,
-                size: plan.context.fileSize,
-                type: plan.context.fileType
-            }))
+            )
         }
     );
 
@@ -437,25 +561,56 @@ async function uploadPopupStagedFiles(
                     ? uploadPlans[index].file
                     : null
             ))
+            .filter(Boolean)
+            .concat(
+                planned.failures
+                    .map(failure => failure.file)
+                    .filter(Boolean)
+            );
+        const failedEmptyDirs = planned.failures
+            .map(failure => failure.emptyDir)
             .filter(Boolean);
 
         stagingController.replaceFiles(
             failedFiles,
-            { expanded: failedFiles.length > 0 }
+            {
+                expanded: failedFiles.length > 0 || failedEmptyDirs.length > 0,
+                emptyDirs: failedEmptyDirs
+            }
         );
 
-        if (successfulUploads.length) {
+        if (successfulUploads.length || planned.structureChanged) {
             const refreshedChecklist = (
                 await loadChecklistSnapshotForUpload(
                     batchContext
                 )
             );
 
-            recordCompletedUploadBatch(
-                batchContext,
-                successfulUploads,
-                refreshedChecklist
-            );
+            // One batch per target (sub)item: its own status change.
+            const byItem = new Map();
+            successfulUploads.forEach(entry => {
+                const targetId = String(entry.context.itemId || itemId);
+                if (!byItem.has(targetId)) byItem.set(targetId, []);
+                byItem.get(targetId).push(entry);
+            });
+            if (!byItem.size) byItem.set(itemId, []);
+            byItem.forEach((entries, targetId) => {
+                const targetItem = items.find(item => (
+                    String(item && item.id || '') === targetId
+                ));
+                recordCompletedUploadBatch(
+                    Object.freeze({
+                        ...batchContext,
+                        itemId: targetId,
+                        itemName: String(targetItem && targetItem.name || batchContext.itemName),
+                        initialStatus: initialStatuses.has(targetId)
+                            ? initialStatuses.get(targetId)
+                            : ''
+                    }),
+                    entries,
+                    refreshedChecklist
+                );
+            });
         }
 
         debugLog(
@@ -466,22 +621,25 @@ async function uploadPopupStagedFiles(
                 itemId: batchContext.itemId,
                 filesCount: uploadPlans.length,
                 successfulCount: successfulUploads.length,
-                failedCount: failedUploads.length,
+                failedCount: failedUploads.length + planned.failures.length,
                 currentChecklistKey
             }
         );
 
-        if (failedUploads.length) {
-            const firstError = failedUploads[0].reason;
+        const failedCount = failedUploads.length + planned.failures.length;
+        if (failedCount) {
+            const firstError = failedUploads.length
+                ? failedUploads[0].reason
+                : planned.failures[0].error;
 
             setSaveState(
                 'error',
                 (
-                    failedUploads.length === 1
-                        ? 'Ошибка загрузки файла'
+                    failedCount === 1
+                        ? String(firstError && firstError.message || 'Ошибка загрузки файла')
                         : (
-                            'Не загружено файлов: '
-                            + failedUploads.length
+                            'Не загружено: '
+                            + failedCount
                         )
                 )
             );
@@ -554,11 +712,12 @@ function bindDocumentActions() {
                     || isEditingAllowed()
                 );
             },
-            onConfirm(files, controller) {
+            onConfirm(files, controller, extras) {
                 return uploadPopupStagedFiles(
                     input,
                     files,
-                    controller
+                    controller,
+                    extras
                 );
             },
             onError(error) {

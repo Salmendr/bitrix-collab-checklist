@@ -283,6 +283,25 @@ async function returnToChecklistItem(options) {
     await loadChecklistByKey(targetChecklistKey);
     await waitForChecklistRender();
 
+    // A subitem is rendered only while its parent is expanded.
+    const subitemsApi = window.ChecklistPopupSubitems;
+    const targetItem = (Array.isArray(items) ? items : []).find(item => (
+        String(item && item.id || '') === targetItemId
+    ));
+    const parentItemId = String(
+        targetItem && targetItem.parentItemId || ''
+    ).trim();
+    if (
+        parentItemId
+        && subitemsApi
+        && typeof subitemsApi.isExpanded === 'function'
+        && !subitemsApi.isExpanded(parentItemId)
+    ) {
+        subitemsApi.setExpanded(parentItemId, true);
+        renderAll();
+        await waitForChecklistRender();
+    }
+
     const itemElement = findRenderedChecklistItem(targetItemId);
     if (itemElement) {
         try {

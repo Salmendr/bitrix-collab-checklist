@@ -1248,7 +1248,27 @@ async def api_checklist_reorder_items(request: Request):
                         exclude_item_id=item_id,
                         parent_item_id=target_parent_id,
                     )
-                except ValueError:
+                except ValueError as name_exc:
+                    # Never keep a silent duplicate among the new siblings.
+                    name_key = name_before_move.casefold()
+                    if any(
+                        clean_cell_value(item.get("name")).casefold() == name_key
+                        and clean_cell_value(item.get("id")) != item_id
+                        and int(item.get("group") or 0) == target_group_id
+                        and parent_id_of(item) == target_parent_id
+                        for item in items
+                    ):
+                        return JSONResponse(
+                            {
+                                "ok": False,
+                                "error": (
+                                    "Не удалось подобрать свободное название "
+                                    f"для переноса: {name_exc}. "
+                                    "Переименуйте пункт и повторите перенос."
+                                ),
+                            },
+                            status_code=400,
+                        )
                     move_name_resolution = {}
                 final_item_name = clean_cell_value(
                     move_name_resolution.get("name")

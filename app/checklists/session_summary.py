@@ -73,6 +73,38 @@ def _parent_name(parent_id: Any, final_items: dict[str, dict]) -> str:
     return clean_cell_value((final_items.get(normalized) or {}).get("name"))
 
 
+def _plural(count: int, one: str, few: str, many: str) -> str:
+    tail = count % 100
+    if 11 <= tail <= 14:
+        word = many
+    elif count % 10 == 1:
+        word = one
+    elif count % 10 in (2, 3, 4):
+        word = few
+    else:
+        word = many
+    return f"{count} {word}"
+
+
+def _files_text(count: int) -> str:
+    return _plural(int(count or 0), "файл", "файла", "файлов")
+
+
+def _folders_text(count: int) -> str:
+    return _plural(int(count or 0), "папка", "папки", "папок")
+
+
+def _folder_is_within(path: str, folder: str) -> bool:
+    path_key = clean_cell_value(path).casefold()
+    base_key = clean_cell_value(folder).casefold()
+    return bool(base_key) and (path_key == base_key or path_key.startswith(base_key + "/"))
+
+
+def _folder_ancestors(value: Any) -> list[str]:
+    parts = [part for part in clean_cell_value(value).split("/") if part]
+    return ["/".join(parts[: index + 1]) for index in range(len(parts))]
+
+
 def _status_text(value: Any) -> str:
     normalized = normalize_status(clean_cell_value(value))
     return normalized or "Нет"
@@ -360,6 +392,12 @@ def normalize_session_operations(
 
     scalar_changes: OrderedDict[tuple, dict] = OrderedDict()
     document_states: OrderedDict[tuple, dict] = OrderedDict()
+    # Files of one uploaded folder are summarized in one line.
+    folder_upload_roots: dict[tuple, dict] = {}
+    folder_uploads: OrderedDict[tuple, dict] = OrderedDict()
+    folder_changes: list[dict] = []
+    # Files removed together with their folder are reported by the folder line.
+    removed_with_folder: set[tuple] = set()
     archive_deletes: OrderedDict[tuple, dict] = OrderedDict()
     added_items: OrderedDict[str, dict] = OrderedDict()
 
@@ -511,6 +549,16 @@ def normalize_session_operations(
             continue
 
         if operation_type == "document_upload":
+            folder_root = clean_cell_value(payload.get("folderUploadRoot"))
+            if folder_root:
+                identity = _document_identity(
+                    operation,
+                    _document_from(operation, "after"),
+                )
+                folder_upload_roots[(item_id, identity)] = {
+                    "root": folder_root,
+                    "relativeFolder": clean_cell_value(payload.get("relativeFolder")),
+                }
             _touch_document_state(
                 document_states,
                 operation=operation,
@@ -542,6 +590,82 @@ def normalize_session_operations(
                 action="remove",
                 before_document=_document_from(operation, "before"),
             )
+            continue
+
+        if operation_type in {
+            "checklist_folder_create",
+            "checklist_folder_move",
+            "checklist_folder_delete",
+        }:
+            folder_root = clean_cell_value(payload.get("folderUploadRoot"))
+            if operation_type == "checklist_folder_create" and folder_root:
+                group = folder_uploads.setdefault((item_id, folder_root), {
+                    "sequenceNo": sequence_no,
+                    "itemId": item_id,
+                    "itemName": item_name,
+                    "root": folder_root,
+                    "files": 0,
+                    "folders": set(),
+                })
+                for ancestor in _folder_ancestors(payload.get("relativeFolder")):
+                    group["folders"].add(ancestor.casefold())
+                continue
+            if operation_type == "checklist_folder_create":
+                field, old_value, new_value = (
+                    "folder-create", "", clean_cell_value(payload.get("relativeFolder"))
+                )
+            elif operation_type == "checklist_folder_move":
+                field, old_value, new_value = (
+                    "folder-move",
+                    clean_cell_value(payload.get("sourceFolder")),
+                    clean_cell_value(payload.get("targetFolder")),
+                )
+                # A folder created in this session is reported once, under
+                # its final name, instead of «created» + «renamed».
+                created_here = False
+                for change in folder_changes:
+                    if change["field"] != "folder-create" or change["itemId"] != item_id:
+                        continue
+                    if _folder_is_within(change["newValue"], old_value):
+                        if change["newValue"].casefold() == old_value.casefold():
+                            created_here = True
+                        change["newValue"] = new_value + change["newValue"][len(old_value):]
+                if created_here:
+                    continue
+            else:
+                count = _safe_int(payload.get("documentCount"))
+                for series_id in payload.get("documentSeriesIds") or []:
+                    removed_with_folder.add((item_id, clean_cell_value(series_id)))
+                field, old_value, new_value = (
+                    "folder-delete",
+                    clean_cell_value(payload.get("relativeFolder")),
+                    "Удалена" + (f" ({_files_text(count)})" if count else ""),
+                )
+                # Created and deleted within the session: nothing to report.
+                created_here = any(
+                    change["field"] == "folder-create"
+                    and change["itemId"] == item_id
+                    and change["newValue"].casefold() == old_value.casefold()
+                    for change in folder_changes
+                )
+                folder_changes[:] = [
+                    change for change in folder_changes
+                    if not (
+                        change["field"] == "folder-create"
+                        and change["itemId"] == item_id
+                        and _folder_is_within(change["newValue"], old_value)
+                    )
+                ]
+                if created_here:
+                    continue
+            folder_changes.append({
+                "sequenceNo": sequence_no,
+                "field": field,
+                "itemId": item_id,
+                "itemName": item_name,
+                "oldValue": old_value,
+                "newValue": new_value,
+            })
             continue
 
         if operation_type == "archive_version_delete":
@@ -614,10 +738,34 @@ def normalize_session_operations(
             continue
 
         if not initial_exists and final_exists:
+            upload_root = folder_upload_roots.get(
+                (clean_cell_value(state.get("itemId")), clean_cell_value(state.get("seriesId")))
+            )
+            if upload_root:
+                group = folder_uploads.setdefault(
+                    (clean_cell_value(state.get("itemId")), upload_root["root"]),
+                    {
+                        "sequenceNo": _safe_int(state.get("sequenceNo")),
+                        "itemId": clean_cell_value(state.get("itemId")),
+                        "itemName": clean_cell_value(state.get("itemName")),
+                        "root": upload_root["root"],
+                        "files": 0,
+                        "folders": set(),
+                    },
+                )
+                group["files"] += 1
+                for ancestor in _folder_ancestors(upload_root["relativeFolder"]):
+                    group["folders"].add(ancestor.casefold())
+                continue
             field = "document-add"
             old_value = ""
             new_value = final_name or "Файл"
         elif initial_exists and not final_exists:
+            if (
+                clean_cell_value(state.get("itemId")),
+                clean_cell_value(state.get("seriesId")),
+            ) in removed_with_folder:
+                continue
             field = "document-remove"
             old_value = initial_name or "Файл"
             new_value = "Удалён"
@@ -662,6 +810,19 @@ def normalize_session_operations(
         })
 
     normalized.extend(archive_deletes.values())
+    normalized.extend(folder_changes)
+    for group in folder_uploads.values():
+        parts = [_files_text(group["files"])]
+        if group["folders"]:
+            parts.append(_folders_text(len(group["folders"])))
+        normalized.append({
+            "sequenceNo": group["sequenceNo"],
+            "field": "folder-upload",
+            "itemId": group["itemId"],
+            "itemName": group["itemName"],
+            "oldValue": "",
+            "newValue": f"«{group['root']}»: " + ", ".join(parts),
+        })
     normalized.sort(key=lambda change: (
         _safe_int(change.get("sequenceNo")),
         clean_cell_value(change.get("field")),

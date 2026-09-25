@@ -1,5 +1,5 @@
 {
-  "stage": "8.15.9",
+  "stage": "8.17-folders",
   "hashMode": "utf8-lf",
   "modules": {
     "checklist-window-channel.js": {
@@ -11,8 +11,8 @@
       "bytes": 5819
     },
     "folder-core.js": {
-      "sha256": "0cc4ebadfc95ed976782b6dde435b13ad987c3e3763749f37c5e01b4ecad551d",
-      "bytes": 18019
+      "sha256": "e1a832aca22f3276433acbaa095a8b8af4b77d0d8575fabf3572fa63047de400",
+      "bytes": 18484
     },
     "public-folder-share.js": {
       "sha256": "0a76ada593bbad042556d0cf528f0f167681694c523f8a652cac9b7737325338",
@@ -43,12 +43,12 @@
       "bytes": 14797
     },
     "upload-staging.js": {
-      "sha256": "b963077085f916aadd7fce4018336de4db638822e4a8fe6544f2a47f03538fad",
-      "bytes": 16034
+      "sha256": "2d9de930f7e62c800648c1f159322ee45eee7dcde8a13cf54ad1f115269fec47",
+      "bytes": 27238
     },
     "folder-uploads.js": {
-      "sha256": "073f4d5c86000841d80298ed25224e049bf0c8e8a0ab893871172140e5daf308",
-      "bytes": 27244
+      "sha256": "3524e1c8d5d1877731a18251821ff9dec0fa9d1d337c93a2b73f481cc8c724f4",
+      "bytes": 33533
     },
     "folder-replacement.js": {
       "sha256": "f268582ac9d4455855215d1bbed8f9b865717da3048b21f440bde02ab526c352",
@@ -57,6 +57,14 @@
     "folder-archive-ui.js": {
       "sha256": "d222b142237700fc9f230fc99d796d258c72b4261f929b2a9f906c68d96361ef",
       "bytes": 10282
+    },
+    "folder-upload-planner.js": {
+      "sha256": "c4eb5210b37145959f2733c815defba63c15f11bd5b8617476b5f719df930cfb",
+      "bytes": 6389
+    },
+    "folder-tree-actions.js": {
+      "sha256": "72d11d931fba1e46613a6a236027073a407cfdd51b31ff8b2272b60b44c19234",
+      "bytes": 16550
     }
   },
   "loadOrder": [
@@ -71,9 +79,11 @@
     "document-assignment-history.js",
     "folder-upload-progress.js",
     "upload-staging.js",
+    "folder-upload-planner.js",
     "folder-uploads.js",
     "folder-replacement.js",
-    "folder-archive-ui.js"
+    "folder-archive-ui.js",
+    "folder-tree-actions.js"
   ],
   "notes": [
     "The item-folder page uses the same ChecklistActionIcons registry as the popup.",
@@ -109,7 +119,8 @@
     "Stage 8.15.7.1 restores an icon-only current-file download control immediately after Replace and an equivalent control for every archive version.",
     "Stage 8.15.8 renders the item-folder pre-upload area below the file table and scrolls it into view from the header Upload action.",
     "Dropped and selected files remain local file cards until explicit confirmation; failed files stay staged for retry.",
-    "The folder public-link action is icon-only, permanently disabled in the current interface and cannot be re-enabled by edit-session refresh."
+    "The folder public-link action is icon-only, permanently disabled in the current interface and cannot be re-enabled by edit-session refresh.",
+    "Stage 8.17 shows a Yandex-like path bar, the folder tree with a view action per folder, nested folder pages and folder create/rename/move/delete/ZIP actions."
   ],
-  "generatedAt": "2026-09-11T02:15:36+00:00"
+  "generatedAt": "2026-09-25T03:45:29+00:00"
 }

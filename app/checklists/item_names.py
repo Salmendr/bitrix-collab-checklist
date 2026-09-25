@@ -93,7 +93,14 @@ def choose_available_item_name(
 
     base_name = _base_name_for_suffix(requested)
     for index in range(1, 10000):
-        candidate = requested if index == 1 else f'{base_name} ({index})'
+        if index == 1:
+            candidate = requested
+        else:
+            # A name of maximal length must still get a free suffix:
+            # shorten the base so that " (N)" fits into the limit.
+            suffix = f' ({index})'
+            base = base_name[:MAX_ITEM_NAME_LENGTH - len(suffix)].rstrip()
+            candidate = f'{base or base_name[:1]}{suffix}'
         candidate = validate_item_name(candidate)
         if normalize_item_name_key(candidate) in used_name_keys:
             continue

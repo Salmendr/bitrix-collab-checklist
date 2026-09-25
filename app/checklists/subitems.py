@@ -43,12 +43,16 @@ def subitem_mapping_name(folder_alias: str) -> str:
 
 
 def build_hierarchy_fields(item: dict | None) -> dict:
+    from app.checklists.document_folders import item_subfolders
+
     source = item or {}
     return {
         "parentItemId": clean_cell_value(source.get("parentItemId")),
         "notRequiredReturnParentId": clean_cell_value(
             source.get("notRequiredReturnParentId")
         ),
+        # Every folder inside the item, including empty ones.
+        "subfolders": item_subfolders(source),
     }
 
 

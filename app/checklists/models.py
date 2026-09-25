@@ -31,6 +31,8 @@ class ChecklistConfig:
     layout_mode: str = "generic"
     bim_group_id: int = 0
     bim_placement: str = ""
+    # Optional explicit columns of the popup: ((1,), (2,), (3, 5)).
+    panel_group_ids: tuple[tuple[int, ...], ...] = ()
 
     def group_ids(self) -> tuple[int, ...]:
         return tuple(group.id for group in self.groups)

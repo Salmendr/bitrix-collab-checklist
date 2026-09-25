@@ -185,6 +185,24 @@
                 });
             }
 
+            if (
+                messageType === 'checklist-document-changed'
+                && data.folderChange
+                && typeof data.folderChange === 'object'
+            ) {
+                // Folder operations of the item window; the chat summary is
+                // built by the server from the edit-session operations.
+                nextChanges.push({
+                    field: 'folder',
+                    itemId: sourceItemId,
+                    itemName,
+                    oldValue: String(data.folderChange.oldValue || ''),
+                    newValue: String(data.folderChange.newValue || '')
+                });
+
+                externalChangeAdded = true;
+            }
+
             if (messageType === 'checklist-document-replaced') {
                 const replacement = (
                     data.replacement

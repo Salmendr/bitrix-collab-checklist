@@ -122,12 +122,24 @@ def attach_latest_yandex_structure_states(
         checklist_key=checklist_key,
     )
 
+    from app.checklists.yandex_structure_jobs import subfolder_job_item_id
     for index, item in enumerate(items):
         item_id = clean_cell_value(item.get("id"))
         items[index] = apply_yandex_structure_job_to_item(
             item,
             latest.get(item_id),
         )
+        # A failed job of the item's inner folders is shown on the item, so
+        # the Yandex button offers the retry. It never changes the stored
+        # folder of the item itself.
+        subfolder_job = latest.get(subfolder_job_item_id(item_id)) or {}
+        if clean_cell_value(subfolder_job.get("status")) in {"error", "conflict"}:
+            items[index].update({
+                "yandexFolderStatus": "error",
+                "yandexFolderError": clean_cell_value(subfolder_job.get("error")),
+                "yandexStructureAction": clean_cell_value(subfolder_job.get("action")),
+                "yandexStructureJobId": clean_cell_value(subfolder_job.get("job_id")),
+            })
 
     enriched["items"] = items
     return enriched

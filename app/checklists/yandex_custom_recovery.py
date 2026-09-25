@@ -303,12 +303,10 @@ def _reconcile_subitem_yandex_folder(
     from app.checklists.yandex_structure_queue import enqueue_yandex_structure_job
 
     folder_path = clean_cell_value(item.get("yandexFolderPath"))
-    if folder_path:
-        try:
-            if yandex_disk_try_get_resource_meta(folder_path):
-                return {"ok": True, "skipped": True, "reason": "subitem_folder_exists"}
-        except Exception:
-            pass
+    # A request error must not be taken for "folder is missing": that would
+    # queue a second folder for the same subitem.
+    if folder_path and yandex_disk_try_get_resource_meta(folder_path):
+        return {"ok": True, "skipped": True, "reason": "subitem_folder_exists"}
 
     latest_status = clean_cell_value(latest.get("status")).lower()
     if latest and latest_status in {"error", "conflict", "disabled", "cancelled"}:

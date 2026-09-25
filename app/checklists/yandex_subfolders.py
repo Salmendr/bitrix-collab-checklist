@@ -78,12 +78,11 @@ def ensure_parent_folder_path(
     from app.yandex_disk.client import yandex_disk_try_get_resource_meta
 
     def exists(path: str) -> bool:
+        # Request errors (auth, network) propagate: the job fails with the
+        # real reason instead of creating a folder in a guessed place.
         if not path:
             return False
-        try:
-            return bool(yandex_disk_try_get_resource_meta(path))
-        except Exception:
-            return False
+        return bool(yandex_disk_try_get_resource_meta(path))
 
     parent_id = clean_cell_value(parent.get("id"))
     candidates = [

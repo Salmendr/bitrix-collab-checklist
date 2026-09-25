@@ -12,6 +12,7 @@ from app.yandex_disk.client import (
     yandex_disk_delete_path,
 )
 
+from app.checklists.document_folders import normalize_relative_folder
 from app.checklists.utils import (
     clean_cell_value,
     normalize_dialog_id,
@@ -522,6 +523,11 @@ def normalize_document_record(doc: dict) -> dict:
         ),
         "yandexFolderAlias": clean_cell_value(
             doc.get("yandexFolderAlias")
+        ),
+        # Folder inside the item ("" = item root), see document_folders.py.
+        "relativeFolder": normalize_relative_folder(
+            doc.get("relativeFolder"),
+            strict=False,
         ),
     }
 

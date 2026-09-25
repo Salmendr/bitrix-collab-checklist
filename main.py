@@ -20,6 +20,7 @@ from app.checklists.session_routes import router as session_router
 from app.checklists.project_routes import router as project_router
 from app.integrations.n8n_routes import router as n8n_router
 from app.checklists.checklist_routes import router as checklist_router
+from app.checklists.folder_routes import router as folder_router
 from app.checklists.document_routes import router as document_router
 from app.checklists.archive_routes import router as archive_router
 from app.checklists.version_link_routes import (
@@ -169,6 +170,7 @@ app.include_router(project_curator_router)
 app.include_router(notification_delivery_router)
 app.include_router(document_assignment_history_router)
 app.include_router(yandex_structure_router)
+app.include_router(folder_router)
 # Страховочный вызов при импорте модуля
 init_db()
 ensure_notification_delivery_schema()

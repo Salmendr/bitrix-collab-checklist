@@ -1,6 +1,6 @@
 {
-  "stage": "8.16-subitems",
-  "generatedAt": "2026-09-15T08:05:51+00:00",
+  "stage": "8.17-folders",
+  "generatedAt": "2026-09-25T03:45:29+00:00",
   "loadOrder": [
     "checklist-host-diagnostics.js",
     "popup-bootstrap.js",
@@ -16,6 +16,7 @@
     "document-assignment-history.js",
     "public-folder-share.js",
     "upload-staging.js",
+    "folder-upload-planner.js",
     "popup-document-actions.js",
     "popup-window-channel.js",
     "popup-upload-progress.js",
@@ -75,16 +76,16 @@
       "bytes": 5273
     },
     "popup-document-refresh.js": {
-      "sha256": "6a6e6455b9e186e29e0ac841518b536d2b34e7a7bd3c1270b058ddd54222f55b",
-      "bytes": 6711
+      "sha256": "c96bb2f1c0cef23ff9fc1f59244ea1c4ffba68294047cb00cc2b20280eda5aa2",
+      "bytes": 7935
     },
     "popup-core.js": {
-      "sha256": "9a64cb6b95fcd839cde465abdd00cbc19c87f543891d3e07baf53a4550ab9883",
-      "bytes": 104549
+      "sha256": "463a5b7dd5bedc02116a1ecd506babaca19a21197525c707073732b491096e20",
+      "bytes": 105713
     },
     "popup-document-list.js": {
-      "sha256": "8171a5c38c3610582124dae7fad26adc33abe35366b1d5d43f806caecde58507",
-      "bytes": 14889
+      "sha256": "d630fde6e0f7d928e47c07495e77da8207a22252190dfae65b7b2684746802cd",
+      "bytes": 18821
     },
     "document-assignment-history.js": {
       "sha256": "8ca593270b9e1e0170187046f5480c5fc8a7237c8dc62d1a89677e4f17d65e62",
@@ -95,12 +96,12 @@
       "bytes": 12564
     },
     "upload-staging.js": {
-      "sha256": "b963077085f916aadd7fce4018336de4db638822e4a8fe6544f2a47f03538fad",
-      "bytes": 16034
+      "sha256": "2d9de930f7e62c800648c1f159322ee45eee7dcde8a13cf54ad1f115269fec47",
+      "bytes": 27238
     },
     "popup-document-actions.js": {
-      "sha256": "452fe4ae846598fb343673bde9f8a9c1ce69b8d19ec8698f6513ac0578631967",
-      "bytes": 27484
+      "sha256": "2ec5decc69b13d60eb3a34eb199122d2ca45b98966a66aae5a5f8f9c0176e72c",
+      "bytes": 33871
     },
     "popup-window-channel.js": {
       "sha256": "5b9abaff9f29705db8745e4737f28bfb449fc23b4ae3ef2cf47050607f2f5723",
@@ -111,8 +112,8 @@
       "bytes": 11655
     },
     "popup-upload-manager.js": {
-      "sha256": "9bc371f02307f0d22c2b1744ed45c66d21922eb325d35e214bf10656c1e6ebb0",
-      "bytes": 19540
+      "sha256": "8548246cc9b4c6cbd0807d363c500c083d081cbed946ac541b4114fb5395e87b",
+      "bytes": 19742
     },
     "popup-document-replacement.js": {
       "sha256": "f7ed236bf2952b8ee12fa0d1809ae9f075f41a7d4476bd499f943c7bfa957ef9",
@@ -127,8 +128,8 @@
       "bytes": 15502
     },
     "popup-inactivity.js": {
-      "sha256": "039f89a3adaea08cd3e3f8c3e6529bca4b3b85ad2860f22ae2ef29d20932c8d8",
-      "bytes": 6563
+      "sha256": "33cde6a8c908ac04b78a1bbdca5f97d8ac2dbacb7ba5d09f09662bd947fbe9c6",
+      "bytes": 6427
     },
     "bitrix-user-picker.js": {
       "sha256": "e69ee7af0913383cda4f02ba83279c64fe4650715532eee91176c47cfe57b1c9",
@@ -159,8 +160,8 @@
       "bytes": 2095
     },
     "popup-event-window-sync.js": {
-      "sha256": "4d3f9c3de4aeb4e92ef532f0912d1edbba29958bb5bf3739bee6d047bc5333a7",
-      "bytes": 9717
+      "sha256": "9dd01158bcd5003a25306b7b0f10cca6a42d9741cfefd35d316a064fe4789f22",
+      "bytes": 10422
     },
     "popup-event-session.js": {
       "sha256": "f157ba9da7f7a60478796aebefa61b025226f00d97f239f333f2a423c416d4ae",
@@ -183,8 +184,8 @@
       "bytes": 4636
     },
     "popup-renderer-generic.js": {
-      "sha256": "91dbf67f1d58f88fad6cda26f6873f66ef0c1aa7eba2fc61f22a1b7cc6055f78",
-      "bytes": 6835
+      "sha256": "8a26371b55b0ab35fdf6b045c2946eead6003a97061d039e278d62961f6b5678",
+      "bytes": 8212
     },
     "popup-renderer-configured-bim.js": {
       "sha256": "b266fb19a1f1f46e34a5c84b9b646c79563983b77f6bb5799889776a6f605194",
@@ -215,8 +216,8 @@
       "bytes": 2244
     },
     "popup-render-orchestrator.js": {
-      "sha256": "890f22295191ca6756b6486311d9ec4e0f4ae1e9a5ded93f50ad41afd90e8177",
-      "bytes": 10837
+      "sha256": "86ab13ffcb37e2357753db83118df63af3827d4b747ebd48607fabdfc3e338b6",
+      "bytes": 11479
     },
     "popup-init.js": {
       "sha256": "4596fcfe86614d66f79a923ff65a5b0c8e579dabf2fb7c45b4b99646a9f42b47",
@@ -293,7 +294,9 @@
     "Stage 8.15.9.5 resolves the popup Yandex action from durable backend jobs before opening a folder or starting manual recovery.",
     "Popup host diagnostics records launcher, application-frame and popup lifecycle state without changing open, close, resize, save or synchronization behavior.",
     "Stage 8.16 adds one level of subitems (Todoist-like): nested rows, sibling-unique names, derived parent status, subfolders inside the parent Yandex folder, subfolder list on the item folder page.",
-    "Stage 8.16 hides the share and notification buttons and records only essential popup diagnostics."
+    "Stage 8.16 hides the share and notification buttons and records only essential popup diagnostics.",
+    "Stage 8.16.2 adds the Design checklist and optional explicit popup columns (panelGroupIds).",
+    "Stage 8.17 uploads whole folders: a folder dropped into an item becomes a subitem, deeper levels become folders of the subitem; empty folders are kept."
   ],
   "hashMode": "utf8-lf",
   "lineEndingNote": "Hashes are calculated from bytes written to disk. This is stable for Windows CRLF and Unix LF.",
@@ -327,16 +330,16 @@
       "bytes": 5273
     },
     "popup-document-refresh.js": {
-      "sha256": "6a6e6455b9e186e29e0ac841518b536d2b34e7a7bd3c1270b058ddd54222f55b",
-      "bytes": 6711
+      "sha256": "c96bb2f1c0cef23ff9fc1f59244ea1c4ffba68294047cb00cc2b20280eda5aa2",
+      "bytes": 7935
     },
     "popup-core.js": {
-      "sha256": "9a64cb6b95fcd839cde465abdd00cbc19c87f543891d3e07baf53a4550ab9883",
-      "bytes": 104549
+      "sha256": "463a5b7dd5bedc02116a1ecd506babaca19a21197525c707073732b491096e20",
+      "bytes": 105713
     },
     "popup-document-list.js": {
-      "sha256": "8171a5c38c3610582124dae7fad26adc33abe35366b1d5d43f806caecde58507",
-      "bytes": 14889
+      "sha256": "d630fde6e0f7d928e47c07495e77da8207a22252190dfae65b7b2684746802cd",
+      "bytes": 18821
     },
     "document-assignment-history.js": {
       "sha256": "8ca593270b9e1e0170187046f5480c5fc8a7237c8dc62d1a89677e4f17d65e62",
@@ -347,8 +350,8 @@
       "bytes": 12564
     },
     "popup-document-actions.js": {
-      "sha256": "452fe4ae846598fb343673bde9f8a9c1ce69b8d19ec8698f6513ac0578631967",
-      "bytes": 27484
+      "sha256": "2ec5decc69b13d60eb3a34eb199122d2ca45b98966a66aae5a5f8f9c0176e72c",
+      "bytes": 33871
     },
     "popup-window-channel.js": {
       "sha256": "5b9abaff9f29705db8745e4737f28bfb449fc23b4ae3ef2cf47050607f2f5723",
@@ -359,8 +362,8 @@
       "bytes": 11655
     },
     "popup-upload-manager.js": {
-      "sha256": "9bc371f02307f0d22c2b1744ed45c66d21922eb325d35e214bf10656c1e6ebb0",
-      "bytes": 19540
+      "sha256": "8548246cc9b4c6cbd0807d363c500c083d081cbed946ac541b4114fb5395e87b",
+      "bytes": 19742
     },
     "popup-document-replacement.js": {
       "sha256": "f7ed236bf2952b8ee12fa0d1809ae9f075f41a7d4476bd499f943c7bfa957ef9",
@@ -375,8 +378,8 @@
       "bytes": 15502
     },
     "popup-inactivity.js": {
-      "sha256": "039f89a3adaea08cd3e3f8c3e6529bca4b3b85ad2860f22ae2ef29d20932c8d8",
-      "bytes": 6563
+      "sha256": "33cde6a8c908ac04b78a1bbdca5f97d8ac2dbacb7ba5d09f09662bd947fbe9c6",
+      "bytes": 6427
     },
     "bitrix-user-picker.js": {
       "sha256": "e69ee7af0913383cda4f02ba83279c64fe4650715532eee91176c47cfe57b1c9",
@@ -407,8 +410,8 @@
       "bytes": 2095
     },
     "popup-event-window-sync.js": {
-      "sha256": "4d3f9c3de4aeb4e92ef532f0912d1edbba29958bb5bf3739bee6d047bc5333a7",
-      "bytes": 9717
+      "sha256": "9dd01158bcd5003a25306b7b0f10cca6a42d9741cfefd35d316a064fe4789f22",
+      "bytes": 10422
     },
     "popup-event-session.js": {
       "sha256": "f157ba9da7f7a60478796aebefa61b025226f00d97f239f333f2a423c416d4ae",
@@ -431,8 +434,8 @@
       "bytes": 4636
     },
     "popup-renderer-generic.js": {
-      "sha256": "91dbf67f1d58f88fad6cda26f6873f66ef0c1aa7eba2fc61f22a1b7cc6055f78",
-      "bytes": 6835
+      "sha256": "8a26371b55b0ab35fdf6b045c2946eead6003a97061d039e278d62961f6b5678",
+      "bytes": 8212
     },
     "popup-renderer-configured-bim.js": {
       "sha256": "b266fb19a1f1f46e34a5c84b9b646c79563983b77f6bb5799889776a6f605194",
@@ -463,8 +466,8 @@
       "bytes": 2244
     },
     "popup-render-orchestrator.js": {
-      "sha256": "890f22295191ca6756b6486311d9ec4e0f4ae1e9a5ded93f50ad41afd90e8177",
-      "bytes": 10837
+      "sha256": "86ab13ffcb37e2357753db83118df63af3827d4b747ebd48607fabdfc3e338b6",
+      "bytes": 11479
     },
     "popup-init.js": {
       "sha256": "4596fcfe86614d66f79a923ff65a5b0c8e579dabf2fb7c45b4b99646a9f42b47",
@@ -477,6 +480,10 @@
     "popup-subitems.js": {
       "sha256": "92ac7a527b6611a372379091cfbbe2262386b600eccc8fe3f7e0905974a156c2",
       "bytes": 17498
+    },
+    "folder-upload-planner.js": {
+      "sha256": "c4eb5210b37145959f2733c815defba63c15f11bd5b8617476b5f719df930cfb",
+      "bytes": 6389
     }
   }
 }

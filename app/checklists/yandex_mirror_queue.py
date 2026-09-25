@@ -1081,8 +1081,14 @@ def process_upload_job(job: dict):
     data, item, document = found
     folder_path = require_exclusive_item_folder(dialog_id, checklist_key, item, data.get("items", []))
     file_name = clean_cell_value(document.get("name")) or file_name
-    # Old duplicated names must not overwrite another current document.
-    same_names = [d for d in item.get("documents", [])
+    from app.checklists.document_folders import (
+        document_relative_folder,
+        documents_in_folder,
+    )
+    file_subfolder = document_relative_folder(document)
+    # Old duplicated names must not overwrite another current document of
+    # the same folder.
+    same_names = [d for d in documents_in_folder(item.get("documents", []), file_subfolder)
                   if clean_cell_value(d.get("name")).casefold() == file_name.casefold()]
     if len(same_names) > 1:
         raise RuntimeError("В пункте есть несколько файлов с одинаковым именем. Переименуйте один из файлов перед синхронизацией.")
@@ -1139,6 +1145,7 @@ def process_upload_job(job: dict):
         item_folder_alias=clean_cell_value(item.get("yandexFolderAlias")),
         progress_callback=on_upload_progress,
         allow_replace=allow_replace,
+        file_subfolder=file_subfolder,
     )
 
     if not result.get("ok"):

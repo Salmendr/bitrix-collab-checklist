@@ -37,6 +37,7 @@ def get_project_checklists_from_config() -> list[dict]:
             "layoutMode": config.layout_mode,
             "bimGroupId": config.bim_group_id,
             "bimPlacement": config.bim_placement,
+            "panelGroupIds": [list(panel) for panel in config.panel_group_ids],
         }
         for config in list_checklist_configs()
     ]

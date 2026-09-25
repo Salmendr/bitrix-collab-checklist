@@ -1,4 +1,4 @@
-const POPUP_UPLOAD_MAX_ACTIVE = 9;
+const POPUP_UPLOAD_MAX_ACTIVE = 10;
 const POPUP_UPLOAD_PROGRESS_EMIT_MS = 140;
 const POPUP_UPLOAD_MAX_ATTEMPTS = 12;
 
@@ -86,6 +86,9 @@ function createPopupUploadManager(options = {}) {
             documentId: String(source.documentId || ''),
             documentName: String(source.documentName || ''),
             sessionId: String(source.sessionId || '').trim(),
+            // Folder uploads: target folder inside the (sub)item.
+            relativeFolder: String(source.relativeFolder || ''),
+            folderUploadRoot: String(source.folderUploadRoot || ''),
             queueKey: queueKeyForContext(source),
             queueLimit: Math.max(
                 1,

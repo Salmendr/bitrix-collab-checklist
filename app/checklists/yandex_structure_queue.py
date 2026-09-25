@@ -71,62 +71,75 @@ def _current_item(job: dict) -> dict:
     )
 
 
-def _yandex_folder_exists(path: str) -> bool:
-    if not clean_cell_value(path):
-        return False
-    try:
-        return bool(yandex_disk_try_get_resource_meta(path))
-    except Exception:
-        return False
+SOURCE_FOLDER_UNAVAILABLE_ERROR = "Yandex source folder path is unavailable"
 
 
 def _resolve_actual_source_job(job: dict, item: dict) -> dict:
     """Replace a stale move/rename source with the folder that really exists.
 
-    A move can be recorded while the item's create job is still running. The
-    source then points to the draft path (".../КР") although the worker has
-    created the prefixed folder (".../04_КР").
+    Called only after the mutation reported that neither the recorded source
+    nor the target exists, so a normal move costs no extra request. A move
+    can be recorded while the item's create job is still running: the source
+    then points to the draft path (".../КР") although the worker has created
+    the prefixed folder (".../04_КР"). Errors of Yandex requests (auth,
+    network) are not hidden: they propagate and fail the job as they are.
     """
     # move-name-suffix-v1
-    action = clean_cell_value(job.get("action"))
-    if action not in {"rename_item_folder", "move_item_folder"}:
-        return job
     job_id = clean_cell_value(job.get("job_id"))
     source_path = clean_cell_value(job.get("source_path"))
     target_path = clean_cell_value(job.get("target_path"))
-    if _yandex_folder_exists(source_path):
-        return job
-    if _yandex_folder_exists(target_path):
-        # The remote move already happened; the mutation resumes it.
-        return job
 
-    candidates = [clean_cell_value(item.get("yandexFolderPath"))]
-    try:
-        candidates.append(
-            get_latest_completed_yandex_structure_folder_path(
-                dialog_id=clean_cell_value(job.get("dialog_id")),
-                checklist_key=clean_cell_value(job.get("checklist_key")),
-                item_id=clean_cell_value(job.get("item_id")),
-                exclude_job_id=job_id,
-            )
-        )
-    except Exception:
-        pass
-
+    candidates = [
+        clean_cell_value(item.get("yandexFolderPath")),
+        get_latest_completed_yandex_structure_folder_path(
+            dialog_id=clean_cell_value(job.get("dialog_id")),
+            checklist_key=clean_cell_value(job.get("checklist_key")),
+            item_id=clean_cell_value(job.get("item_id")),
+            exclude_job_id=job_id,
+        ),
+    ]
+    checked: set[str] = set()
     for candidate in candidates:
-        if not candidate or candidate in {source_path, target_path}:
+        if not candidate or candidate in {source_path, target_path} or candidate in checked:
             continue
-        if not _yandex_folder_exists(candidate):
+        checked.add(candidate)
+        if not yandex_disk_try_get_resource_meta(candidate):
             continue
-        updated = update_yandex_structure_job_source(job_id, candidate)
+        updated = update_yandex_structure_job_source(job_id, candidate) or {
+            **job,
+            "source_path": candidate,
+        }
+        # A rename stays inside its folder: keep the real numeric prefix.
+        if (
+            clean_cell_value(job.get("action")) == "rename_item_folder"
+            and "/" in target_path
+            and candidate.rsplit("/", 1)[0] == target_path.rsplit("/", 1)[0]
+        ):
+            from app.checklists.yandex_folders import (
+                _preserve_standard_folder_prefix,
+            )
+            renamed_target = (
+                candidate.rsplit("/", 1)[0]
+                + "/"
+                + _preserve_standard_folder_prefix(
+                    candidate.rsplit("/", 1)[1],
+                    clean_cell_value(job.get("item_name")),
+                )
+            )
+            if renamed_target != target_path:
+                updated = update_yandex_structure_job_target(
+                    job_id,
+                    renamed_target,
+                ) or {**updated, "target_path": renamed_target}
         write_debug_log("yandex_structure_job_source_resolved", {
             "jobId": job_id,
-            "action": action,
+            "action": clean_cell_value(job.get("action")),
             "itemId": clean_cell_value(job.get("item_id")),
             "staleSourcePath": source_path,
             "sourcePath": candidate,
+            "targetPath": clean_cell_value(updated.get("target_path")),
         })
-        return updated or {**job, "source_path": candidate}
+        return updated
     return job
 
 
@@ -176,11 +189,33 @@ def _execute_yandex_structure_mutation(job: dict) -> dict:
     dialog_id = normalize_dialog_id(job.get("dialog_id"))
     checklist_key = normalize_checklist_key(job.get("checklist_key"))
     item_id = clean_cell_value(job.get("item_id"))
+    from app.checklists.yandex_structure_jobs import SUBFOLDER_ACTIONS
+    if action in SUBFOLDER_ACTIONS:
+        from app.checklists.yandex_item_subfolders import execute_subfolder_job
+        return execute_subfolder_job(job)
     item = _current_item(job)
     from app.checklists.yandex_subfolders import retarget_subitem_job
     job = retarget_subitem_job(job, item)
-    job = _resolve_actual_source_job(job, item)
     job = _prepare_custom_job_target(job, item)
+    try:
+        return _run_yandex_structure_mutation(job)
+    except RuntimeError as exc:
+        if (
+            action not in {"rename_item_folder", "move_item_folder"}
+            or str(exc) != SOURCE_FOLDER_UNAVAILABLE_ERROR
+        ):
+            raise
+        resolved = _resolve_actual_source_job(job, item)
+        if resolved is job:
+            raise
+        return _run_yandex_structure_mutation(resolved)
+
+
+def _run_yandex_structure_mutation(job: dict) -> dict:
+    action = clean_cell_value(job.get("action"))
+    dialog_id = normalize_dialog_id(job.get("dialog_id"))
+    checklist_key = normalize_checklist_key(job.get("checklist_key"))
+    item_id = clean_cell_value(job.get("item_id"))
 
     if action == "create_item_folder":
         if not can_create_custom_item_yandex_folder(dialog_id, checklist_key):
@@ -267,11 +302,8 @@ def process_yandex_structure_job(job_id: str) -> dict:
     })
 
     try:
-        if action not in {
-            "create_item_folder",
-            "rename_item_folder",
-            "move_item_folder",
-        }:
+        from app.checklists.yandex_structure_jobs import SUPPORTED_STRUCTURE_ACTIONS
+        if action not in SUPPORTED_STRUCTURE_ACTIONS:
             raise RuntimeError(
                 f"Yandex structure action is not implemented: {action}"
             )
@@ -364,14 +396,16 @@ def process_yandex_structure_job(job_id: str) -> dict:
                     checklist_key=checklist_key, item_id=item_id,
                 )
             else:
+                from app.checklists.yandex_structure_jobs import real_item_id as _real_item_id
                 recovery_result = requeue_current_yandex_file_failures(
-                    dialog_id=dialog_id, checklist_key=checklist_key, item_id=item_id,
+                    dialog_id=dialog_id, checklist_key=checklist_key, item_id=_real_item_id(item_id),
                     source='yandex_structure_completed',
                 )
+            from app.checklists.yandex_structure_jobs import real_item_id
             pending_result = enqueue_pending_yandex_mirror_jobs_for_item(
                 dialog_id=dialog_id,
                 checklist_key=checklist_key,
-                item_id=item_id,
+                item_id=real_item_id(item_id),
                 source="yandex_structure_completed",
             )
         except Exception as release_exc:

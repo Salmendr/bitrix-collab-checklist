@@ -15,7 +15,6 @@
     let warningVisible = false;
     let finalizing = false;
     let checkTimer = null;
-    let lastServerNoteAt = 0;
 
     const warning = global.document.createElement('div');
     warning.className = 'popup-inactivity-warning';
@@ -29,9 +28,6 @@
         const api = global.ChecklistPopupEditSession;
         if (api && typeof api.noteActivity === 'function') {
             api.noteActivity(new Date(activityAt).toISOString());
-        }
-        if (activityAt - lastServerNoteAt >= 5000) {
-            lastServerNoteAt = activityAt;
         }
     }
 

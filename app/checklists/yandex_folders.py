@@ -2217,6 +2217,7 @@ def mirror_document_file_to_yandex(
     item_folder_alias: str = "",
     progress_callback=None,
     allow_replace: bool = False,
+    file_subfolder: str = "",
 ) -> dict:
     if not is_yandex_disk_enabled():
         return {
@@ -2290,7 +2291,17 @@ def mirror_document_file_to_yandex(
                 folder_alias=folder_alias, folder_name=folder_path.rsplit('/', 1)[-1],
                 folder_path=folder_path, folder_url=folder_url, group_id=int(item_group or 0),
             )
-        target_path = build_yandex_file_target_path(folder_path, filename)
+        # A file of a nested folder goes below the item folder; the item's
+        # own binding above always stays the item folder itself.
+        upload_folder_path = folder_path
+        if clean_cell_value(file_subfolder):
+            from app.checklists.document_folders import join_yandex_folder
+            upload_folder_path = require_project_path(
+                dialog_id,
+                join_yandex_folder(folder_path, file_subfolder),
+            )
+            ensure_upload_folder(dialog_id, upload_folder_path)
+        target_path = build_yandex_file_target_path(upload_folder_path, filename)
 
         # Recheck in the worker, not just when a job was queued. A prior PUT
         # can have succeeded before a timeout/restart or a database failure.

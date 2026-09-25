@@ -162,6 +162,14 @@ async def api_get_yandex_recovery_state(
         elif mirror_status in {"queued", "running"}:
             mirror_pending.append(public_record)
 
+    from app.checklists.yandex_structure_jobs import subfolder_job_item_id
+    subfolder_latest = get_latest_yandex_structure_job_for_item(
+        dialog_id=dialog_id,
+        checklist_key=checklist_key,
+        item_id=subfolder_job_item_id(item_id),
+    ) or {}
+    if clean_cell_value(subfolder_latest.get("status")).lower() in {"error", "conflict"}:
+        structure_status = "error"
     yandex_enabled = bool(is_yandex_disk_enabled())
     if not yandex_enabled:
         action = "unavailable"
@@ -280,6 +288,23 @@ async def _run_manual_yandex_recovery(
     item_id: str,
     source: str,
 ) -> tuple[dict, int]:
+    from app.checklists.yandex_structure_jobs import subfolder_job_item_id
+    subfolder_latest = get_latest_yandex_structure_job_for_item(
+        dialog_id=dialog_id,
+        checklist_key=checklist_key,
+        item_id=subfolder_job_item_id(item_id),
+    ) or {}
+    if clean_cell_value(subfolder_latest.get("status")).lower() == "error":
+        # Retry the failed inner-folder job first; queued uploads follow it.
+        retried = retry_yandex_structure_job(
+            clean_cell_value(subfolder_latest.get("job_id"))
+        ) or subfolder_latest
+        enqueue_yandex_structure_job(
+            clean_cell_value(retried.get("job_id")),
+            source=source,
+        )
+        return {"ok": True, "job": _public_job(retried), "files": {}}, 200
+
     latest = get_latest_yandex_structure_job_for_item(
         dialog_id=dialog_id,
         checklist_key=checklist_key,

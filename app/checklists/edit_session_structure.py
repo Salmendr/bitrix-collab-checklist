@@ -52,6 +52,76 @@ def _load_current_item_in_transaction(
     return {}
 
 
+SUBFOLDER_OPERATION_ACTIONS = {
+    "checklist_folder_create": "create_item_subfolder",
+    "checklist_folder_move": "move_item_subfolder",
+    "checklist_folder_delete": "delete_item_subfolder",
+}
+
+
+def _prepare_subfolder_jobs_in_transaction(conn, *, session_id: str, now: str) -> list[dict]:
+    """One job per folder operation, in the order the user made them.
+
+    They run after the item jobs of the same commit (insertion order) and
+    before the item's file uploads, which wait for them.
+    """
+    from app.checklists.yandex_structure_jobs import subfolder_job_item_id
+    from app.yandex_disk.client import is_yandex_disk_enabled
+
+    rows = conn.execute(
+        """
+        SELECT *
+        FROM edit_session_operations
+        WHERE session_id = ?
+          AND status = 'applied'
+          AND operation_type IN (
+              'checklist_folder_create',
+              'checklist_folder_move',
+              'checklist_folder_delete'
+          )
+        ORDER BY sequence_no ASC
+        """,
+        (session_id,),
+    ).fetchall()
+    enabled = bool(is_yandex_disk_enabled())
+    jobs = []
+    for row in rows:
+        operation = dict(row)
+        payload = stable_json_loads(operation.get("payload_json") or "", {})
+        payload = payload if isinstance(payload, dict) else {}
+        operation_id = clean_cell_value(operation.get("operation_id"))
+        item_id = clean_cell_value(operation.get("item_id"))
+        action = SUBFOLDER_OPERATION_ACTIONS[
+            clean_cell_value(operation.get("operation_type"))
+        ]
+        job = insert_yandex_structure_job_in_transaction(
+            conn,
+            idempotency_key=(
+                f"edit-session:{session_id}:folder-op:{operation_id}"
+            ),
+            session_id=session_id,
+            operation_id=operation_id,
+            dialog_id=normalize_dialog_id(operation.get("dialog_id")),
+            checklist_key=normalize_checklist_key(operation.get("checklist_key")),
+            item_id=subfolder_job_item_id(item_id),
+            action=action,
+            target_path="",
+            item_name=clean_cell_value(
+                payload.get("relativeFolder") or payload.get("targetFolder")
+            ),
+            initial_status="queued" if enabled else "disabled",
+            error="" if enabled else "yandex disk is disabled",
+            result={
+                "relativeFolder": clean_cell_value(payload.get("relativeFolder")),
+                "sourceFolder": clean_cell_value(payload.get("sourceFolder")),
+                "targetFolder": clean_cell_value(payload.get("targetFolder")),
+            },
+            now=now,
+        )
+        jobs.append(job)
+    return jobs
+
+
 def prepare_edit_session_structure_jobs_in_transaction(
     conn,
     *,
@@ -430,6 +500,14 @@ def prepare_edit_session_structure_jobs_in_transaction(
             now=now,
         )
         jobs.append(job)
+
+    jobs.extend(
+        _prepare_subfolder_jobs_in_transaction(
+            conn,
+            session_id=normalized_session_id,
+            now=now,
+        )
+    )
 
     return {
         "ok": True,

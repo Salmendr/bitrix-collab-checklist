@@ -164,6 +164,40 @@ function resetTablePanelsForGeneric(panelCount) {
     });
 }
 
+// Columns configured per checklist (panelGroupIds), e.g. [[1], [2], [3, 5]].
+function getExplicitGenericPanels(visibleGroups) {
+    const meta = typeof getCurrentChecklistLayoutMeta === 'function'
+        ? getCurrentChecklistLayoutMeta()
+        : {};
+    const configured = Array.isArray(meta && meta.panelGroupIds)
+        ? meta.panelGroupIds.filter(panel => Array.isArray(panel) && panel.length)
+        : [];
+    if (!configured.length || configured.length > 3) {
+        return null;
+    }
+    const byId = new Map(
+        (Array.isArray(visibleGroups) ? visibleGroups : []).map(
+            group => [Number(group && group.id || 0), group]
+        )
+    );
+    const used = new Set();
+    const panels = configured.map(panel => panel
+        .map(groupId => {
+            const group = byId.get(Number(groupId || 0));
+            if (group) used.add(Number(group.id));
+            return group;
+        })
+        .filter(Boolean)
+    );
+    // A group missing from the configuration is never hidden.
+    (Array.isArray(visibleGroups) ? visibleGroups : []).forEach(group => {
+        if (!used.has(Number(group && group.id || 0))) {
+            panels[panels.length - 1].push(group);
+        }
+    });
+    return panels;
+}
+
 function renderGenericTables() {
     if (!leftTableEl || !middleTableEl || !rightTableEl || !tablesGridEl) {
         throw new Error('generic table containers not found');
@@ -176,9 +210,12 @@ function renderGenericTables() {
     );
 
     const visibleGroups = activeGroups.length ? activeGroups : (Array.isArray(groups) ? groups : []).slice(0, 1);
-    const panelCount = Math.min(Math.max(visibleGroups.length, 1), 3);
+    const explicitPanels = getExplicitGenericPanels(visibleGroups);
+    const panelCount = explicitPanels
+        ? explicitPanels.length
+        : Math.min(Math.max(visibleGroups.length, 1), 3);
     const targetTables = [leftTableEl, middleTableEl, rightTableEl];
-    const groupedPanels = splitGroupsIntoPanels(visibleGroups, panelCount);
+    const groupedPanels = explicitPanels || splitGroupsIntoPanels(visibleGroups, panelCount);
 
     resetTablePanelsForGeneric(panelCount);
 

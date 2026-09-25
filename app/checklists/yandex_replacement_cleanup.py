@@ -108,14 +108,18 @@ def resolve_replacement_delete(replacement, probe):
     if len(successors) != 1:
         raise ReplacementCleanupConflict('Не найдена текущая версия серии. Удаление старого файла остановлено.')
     successor = successors[0]
+    # Both versions live in the folder of the series inside the item.
+    from app.checklists.document_folders import document_yandex_folder, documents_in_folder, document_relative_folder
+    file_folder = document_yandex_folder(folder, successor)
     new_name = _file_name(successor.get('name'))
-    new_path = require_project_path(dialog_id, folder + '/' + new_name)
+    new_path = require_project_path(dialog_id, file_folder + '/' + new_name)
     _verify_file(new_path, new_name, successor, probe(new_path))
     old_name = _file_name(replacement.get('old_file_name'))
-    old_path = require_project_path(dialog_id, folder + '/' + old_name)
+    old_path = require_project_path(dialog_id, file_folder + '/' + old_name)
     if old_path == new_path:
         return {'path': old_path, 'action': 'same_path_protected'}
-    if any(clean_cell_value(d.get('name')).casefold() == old_name.casefold() for d in documents):
+    same_folder_documents = documents_in_folder(documents, document_relative_folder(successor))
+    if any(clean_cell_value(d.get('name')).casefold() == old_name.casefold() for d in same_folder_documents):
         raise ReplacementCleanupConflict('Имя старой версии уже используется текущим файлом пункта. Удаление остановлено.')
     if path_used_by_current_document(dialog_id, old_path):
         raise ReplacementCleanupConflict('На старую версию ссылается текущий документ. Удаление остановлено.')
@@ -233,7 +237,11 @@ def may_overwrite_relocated_version(replacement, item, folder, probe):
     if not old_name or old_name != new_name:
         return False
     require_project_path(replacement['dialog_id'], replacement.get('old_yandex_path') or '')
-    path = require_project_path(replacement['dialog_id'], folder + '/' + _file_name(old_name))
+    from app.checklists.document_folders import document_yandex_folder
+    successor = next((d for d in (item.get('documents') or [])
+                      if d.get('id') == replacement.get('new_document_id')), {})
+    path = require_project_path(replacement['dialog_id'],
+                                document_yandex_folder(folder, successor) + '/' + _file_name(old_name))
     meta = probe(path)
     if meta is None:
         return False

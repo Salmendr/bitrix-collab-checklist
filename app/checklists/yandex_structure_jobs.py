@@ -17,7 +17,30 @@ SUPPORTED_STRUCTURE_ACTIONS = frozenset({
     "create_item_folder",
     "rename_item_folder",
     "move_item_folder",
+    # Folders inside an item (see document_folders.py). Their jobs use the
+    # pseudo item id "<itemId>::subfolders" so that they never replace the
+    # item's own folder state.
+    "create_item_subfolder",
+    "move_item_subfolder",
+    "delete_item_subfolder",
 })
+SUBFOLDER_JOB_SUFFIX = "::subfolders"
+SUBFOLDER_ACTIONS = frozenset({
+    "create_item_subfolder",
+    "move_item_subfolder",
+    "delete_item_subfolder",
+})
+
+
+def subfolder_job_item_id(item_id: str) -> str:
+    return clean_cell_value(item_id) + SUBFOLDER_JOB_SUFFIX
+
+
+def real_item_id(job_item_id: str) -> str:
+    value = clean_cell_value(job_item_id)
+    if value.endswith(SUBFOLDER_JOB_SUFFIX):
+        return value[: -len(SUBFOLDER_JOB_SUFFIX)]
+    return value
 TERMINAL_STRUCTURE_STATUSES = frozenset({
     "completed",
     "error",
@@ -350,36 +373,37 @@ def get_blocking_yandex_structure_job_for_item(
     checklist_key: str,
     item_id: str,
 ) -> dict | None:
-    """Return an unfinished folder mutation that must precede file upload."""
+    """Return an unfinished folder mutation that must precede file upload.
+
+    Both the item's own folder job and the job of its inner folders count:
+    a later success of one must not hide the other one still pending.
+    """
     ensure_yandex_structure_jobs_table()
+    base_item_id = real_item_id(item_id)
     conn = get_conn()
     try:
-        row = conn.execute(
-            """
-            SELECT *
-            FROM yandex_structure_jobs
-            WHERE dialog_id = ?
-              AND checklist_key = ?
-              AND item_id = ?
-              AND action IN (
-                  'create_item_folder',
-                  'rename_item_folder',
-                  'move_item_folder'
-              )
-            ORDER BY created_at DESC, rowid DESC
-            LIMIT 1
-            """,
-            (
-                normalize_dialog_id(dialog_id),
-                normalize_checklist_key(checklist_key),
-                clean_cell_value(item_id),
-            ),
-        ).fetchone()
-        record = _normalize_job_record(row)
-        if clean_cell_value((record or {}).get("status")) in {
-            "queued", "running", "error", "conflict"
-        }:
-            return record
+        for candidate_id in (base_item_id, subfolder_job_item_id(base_item_id)):
+            row = conn.execute(
+                """
+                SELECT *
+                FROM yandex_structure_jobs
+                WHERE dialog_id = ?
+                  AND checklist_key = ?
+                  AND item_id = ?
+                ORDER BY created_at DESC, rowid DESC
+                LIMIT 1
+                """,
+                (
+                    normalize_dialog_id(dialog_id),
+                    normalize_checklist_key(checklist_key),
+                    candidate_id,
+                ),
+            ).fetchone()
+            record = _normalize_job_record(row)
+            if clean_cell_value((record or {}).get("status")) in {
+                "queued", "running", "error", "conflict"
+            }:
+                return record
         return None
     finally:
         conn.close()
@@ -617,7 +641,7 @@ def list_pending_yandex_structure_job_ids(limit: int = 500) -> list[str]:
             SELECT job_id
             FROM yandex_structure_jobs
             WHERE status = 'queued'
-            ORDER BY created_at ASC, job_id ASC
+            ORDER BY created_at ASC, rowid ASC
             LIMIT ?
             """,
             (max(1, int(limit or 500)),),
@@ -671,7 +695,7 @@ def list_session_yandex_structure_job_ids(
             FROM yandex_structure_jobs
             WHERE session_id = ?
               AND status = ?
-            ORDER BY created_at ASC, job_id ASC
+            ORDER BY created_at ASC, rowid ASC
             """,
             (clean_cell_value(session_id), clean_cell_value(status)),
         ).fetchall()

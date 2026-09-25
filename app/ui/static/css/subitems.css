@@ -215,3 +215,65 @@ body.item-order-dragging .subitem-add-trigger {
 .subitem-list.item-order-drop-group {
     outline-color: rgba(34, 197, 94, 0.6);
 }
+
+/* Folders of a subitem: one row per top-level folder. */
+.doc-folders {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin-top: 4px;
+}
+
+.doc-folder-row {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    width: 100%;
+    min-width: 0;
+    padding: 3px 4px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: #1f2328;
+    font: inherit;
+    font-size: 12px;
+    text-align: left;
+    cursor: pointer;
+}
+
+.doc-folder-row:hover:not(:disabled),
+.doc-folder-row:focus-visible {
+    background: #eff4ff;
+}
+
+.doc-folder-row:disabled {
+    cursor: default;
+    opacity: .7;
+}
+
+.doc-folder-row-icon {
+    flex: 0 0 auto;
+}
+
+.doc-folder-row-name {
+    min-width: 0;
+    color: #1d4ed8;
+    font-weight: 600;
+    overflow-wrap: anywhere;
+}
+
+.doc-folder-row-meta {
+    flex: 0 0 auto;
+    color: #667085;
+    white-space: nowrap;
+}
+
+.doc-folders-note {
+    margin-top: 2px;
+    padding: 4px 6px;
+    border-radius: 6px;
+    background: #f9fafb;
+    color: #667085;
+    font-size: 11px;
+    line-height: 1.35;
+}

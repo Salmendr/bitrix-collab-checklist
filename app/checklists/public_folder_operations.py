@@ -1042,6 +1042,7 @@ def _apply_public_replacement(record: dict) -> dict:
             "yandexFolderAlias": clean_cell_value(
                 old_document.get("yandexFolderAlias")
             ),
+            "relativeFolder": old_document.get("relativeFolder") or "",
         })
         documents[old_index] = new_document
         documents = normalize_documents_list(documents)

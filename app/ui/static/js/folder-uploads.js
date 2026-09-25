@@ -24,7 +24,7 @@
     let folderUploadSequence = 0;
 
     function createFolderFallbackUploadManager(
-        maxActive = 9,
+        maxActive = 10,
         onStateChange = function () {}
     ) {
         const queue = [];
@@ -270,9 +270,10 @@
         });
     }
 
+    // Up to ten uploads at once, the next starts as soon as one finishes.
     const folderFallbackUploadManager = (
         createFolderFallbackUploadManager(
-            1,
+            10,
             function (
                 snapshot,
                 reason,
@@ -335,9 +336,11 @@
             ),
             dialogId: folderDialogId,
             checklistKey: folderChecklistKey,
-            itemId: folderItemId,
+            itemId: String(extra.itemId || folderItemId),
             itemGroup: folderItemGroup,
             itemName: folderItemName,
+            relativeFolder: String(extra.relativeFolder || ''),
+            folderUploadRoot: String(extra.folderUploadRoot || ''),
             fileName: String(
                 file && file.name || 'Файл'
             ),
@@ -468,8 +471,17 @@
         const formData = new FormData();
 
         formData.append('dialogId', folderDialogId);
-        formData.append('itemId', folderItemId);
+        formData.append(
+            'itemId',
+            String(context && context.itemId || folderItemId)
+        );
         formData.append('file', file);
+        if (context && context.relativeFolder) {
+            formData.append('relativeFolder', context.relativeFolder);
+        }
+        if (context && context.folderUploadRoot) {
+            formData.append('folderUploadRoot', context.folderUploadRoot);
+        }
         formData.append(
             'checklistKey',
             folderChecklistKey
@@ -657,12 +669,106 @@
         'folderUploadStagingMount'
     );
 
+    const folderBootstrap = (
+        global.ChecklistFolderCore
+        && global.ChecklistFolderCore.bootstrap
+    ) || {};
+
+    async function postFolderStructureApi(url, body) {
+        const actor = getFolderDeleteActor();
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                dialogId: folderDialogId,
+                checklistKey: folderChecklistKey,
+                sessionId: requireFolderEditSession('загрузка папки'),
+                requireEditSession: true,
+                actingUserId: actor.id,
+                actingUserName: actor.name,
+                ...body
+            })
+        });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok || !result.ok) {
+            throw new Error(result && result.error || 'Не удалось создать папку');
+        }
+        return result;
+    }
+
+    async function planFolderPageUpload(files, emptyDirs) {
+        const planner = global.ChecklistFolderUploadPlanner;
+        const currentFolder = String(folderBootstrap.relativeFolder || '');
+        if (!planner || !planner.hasFolders(files, emptyDirs)) {
+            return {
+                placements: files.map(file => ({
+                    file,
+                    itemId: folderItemId,
+                    relativeFolder: currentFolder,
+                    folderUploadRoot: ''
+                })),
+                failures: [],
+                structureChanged: false
+            };
+        }
+        let structureChanged = false;
+        const result = await planner.plan({
+            files,
+            emptyDirs,
+            target: {
+                itemId: folderItemId,
+                topLevel: folderBootstrap.itemIsTopLevel === true,
+                relativeFolder: currentFolder,
+                subitems: Array.isArray(folderBootstrap.subitems)
+                    ? folderBootstrap.subitems
+                    : []
+            },
+            async ensureSubitem(name) {
+                const created = await postFolderStructureApi(
+                    String(folderBootstrap.addItemApiUrl || ''),
+                    {
+                        groupId: Number(folderItemGroup || 0),
+                        parentItemId: folderItemId,
+                        name
+                    }
+                );
+                if (!created.item) {
+                    throw new Error('Не удалось создать подпункт «' + name + '»');
+                }
+                structureChanged = true;
+                return {
+                    id: String(created.item.id || ''),
+                    name: String(created.item.name || name)
+                };
+            },
+            async createFolder(folder) {
+                const parts = String(folder.path || '').split('/').filter(Boolean);
+                const name = parts.pop();
+                const created = await postFolderStructureApi(
+                    String(folderBootstrap.folderCreateApiUrl || ''),
+                    {
+                        itemId: folder.itemId,
+                        parentFolder: parts.join('/'),
+                        name,
+                        folderUploadRoot: folder.root || ''
+                    }
+                );
+                if (created.created) structureChanged = true;
+            }
+        });
+        return { ...result, structureChanged };
+    }
+
     async function uploadFolderStagedFiles(
         files,
-        stagingController
+        stagingController,
+        extras = {}
     ) {
         const selectedFiles = Array.from(files || []);
-        if (!selectedFiles.length) {
+        const selectedEmptyDirs = Array.isArray(extras && extras.emptyDirs)
+            ? extras.emptyDirs.slice()
+            : [];
+        if (!selectedFiles.length && !selectedEmptyDirs.length) {
             return { keepState: true };
         }
 
@@ -683,11 +789,33 @@
             actionIcons.setBusy(folderUploadBtn, true);
         }
 
-        const uploadPlans = selectedFiles.map(file => {
+        let planned;
+        try {
+            planned = await planFolderPageUpload(
+                selectedFiles,
+                selectedEmptyDirs
+            );
+        } catch (error) {
+            if (
+                actionIcons
+                && typeof actionIcons.setBusy === 'function'
+            ) {
+                actionIcons.setBusy(folderUploadBtn, false);
+            }
+            throw error;
+        }
+
+        const uploadPlans = planned.placements.map(placement => {
+            const file = placement.file;
             const context = buildFolderUploadTaskContext(
                 file,
                 'upload',
-                { sessionId: editSessionId }
+                {
+                    sessionId: editSessionId,
+                    itemId: placement.itemId,
+                    relativeFolder: placement.relativeFolder,
+                    folderUploadRoot: placement.folderUploadRoot
+                }
             );
 
             return {
@@ -750,10 +878,44 @@
                 }
             });
 
+            planned.failures.forEach(failure => {
+                if (failure.file) failedFiles.push(failure.file);
+                failed.push({
+                    fileName: String(
+                        failure.file && failure.file.name
+                        || failure.emptyDir
+                        || 'Папка'
+                    ),
+                    error: String(
+                        failure.error && failure.error.message
+                        || failure.error
+                        || 'Ошибка загрузки'
+                    )
+                });
+            });
+            const failedEmptyDirs = planned.failures
+                .map(failure => failure.emptyDir)
+                .filter(Boolean);
+
             stagingController.replaceFiles(
                 failedFiles,
-                { expanded: failedFiles.length > 0 }
+                {
+                    expanded: failedFiles.length > 0 || failedEmptyDirs.length > 0,
+                    emptyDirs: failedEmptyDirs
+                }
             );
+
+            if (!successful.length && planned.structureChanged) {
+                notifyParentChecklistDocumentChanged(
+                    'checklist-document-changed',
+                    {
+                        folderChange: {
+                            oldValue: '',
+                            newValue: selectedEmptyDirs.join(', ')
+                        }
+                    }
+                );
+            }
 
             if (successful.length) {
                 notifyParentChecklistDocumentChanged(
@@ -775,15 +937,15 @@
                         + ': '
                         + entry.error
                     ))
-                    .join('\\n');
+                    .join('\n');
 
                 alert(
-                    'Не удалось загрузить часть файлов:\\n\\n'
+                    'Не удалось загрузить часть файлов:\n\n'
                     + failedText
                 );
             }
 
-            if (successful.length && !failed.length) {
+            if ((successful.length || planned.structureChanged) && !failed.length) {
                 stagingController.clear({ collapse: true });
                 window.location.reload();
             }
@@ -835,10 +997,11 @@
                         : 'Сессия редактирования не готова'
                 );
             },
-            onConfirm(files, controller) {
+            onConfirm(files, controller, extras) {
                 return uploadFolderStagedFiles(
                     files,
-                    controller
+                    controller,
+                    extras
                 );
             },
             onError(error) {

@@ -14,6 +14,7 @@
         'yandexStructureAction',
         'yandexStructureUpdatedAt',
         'documents',
+        'subfolders',
         'archivedDocumentSeries',
         'documentUrl',
         'documentName'
@@ -163,6 +164,49 @@
         return mergedSnapshot;
     }
 
+    function mergeSingleItem(
+        mergedSnapshot,
+        serverItem,
+        pendingChanges
+    ) {
+        const targetId = normalizeId(serverItem && serverItem.id);
+        const localIndex = mergedSnapshot.items.findIndex(candidate => (
+            normalizeId(candidate && candidate.id) === targetId
+        ));
+
+        if (localIndex < 0) {
+            mergedSnapshot.items.push(clone(serverItem));
+            return;
+        }
+
+        const localItem = clone(
+            mergedSnapshot.items[localIndex] || {}
+        );
+        const mergedItem = clone(localItem);
+
+        DOCUMENT_FIELDS.forEach(field => {
+            if (Object.prototype.hasOwnProperty.call(serverItem, field)) {
+                mergedItem[field] = clone(serverItem[field]);
+            }
+        });
+
+        if (
+            !hasEffectivePendingStatusChange(
+                pendingChanges,
+                targetId,
+                localItem
+            )
+        ) {
+            STATUS_FIELDS.forEach(field => {
+                if (Object.prototype.hasOwnProperty.call(serverItem, field)) {
+                    mergedItem[field] = clone(serverItem[field]);
+                }
+            });
+        }
+
+        mergedSnapshot.items[localIndex] = mergedItem;
+    }
+
     function mergeSnapshot(
         localSnapshot,
         refreshedSnapshot,
@@ -202,41 +246,31 @@
             return mergedSnapshot;
         }
 
-        const localIndex = mergedSnapshot.items.findIndex(candidate => (
-            normalizeId(candidate && candidate.id) === targetId
-        ));
-
-        if (localIndex < 0) {
-            mergedSnapshot.items.push(clone(serverItem));
-            return mergedSnapshot;
-        }
-
-        const localItem = clone(
-            mergedSnapshot.items[localIndex] || {}
-        );
-        const mergedItem = clone(localItem);
-
-        DOCUMENT_FIELDS.forEach(field => {
-            if (Object.prototype.hasOwnProperty.call(serverItem, field)) {
-                mergedItem[field] = clone(serverItem[field]);
-            }
+        // The item, its parent and its subitems: a change in the folder
+        // window (upload into a subitem, new subitem, folder operation)
+        // also changes the derived status of the family.
+        const parentId = normalizeId(serverItem.parentItemId);
+        const family = serverItems.filter(candidate => {
+            const candidateId = normalizeId(candidate && candidate.id);
+            return (
+                candidateId === targetId
+                || (parentId && candidateId === parentId)
+                || normalizeId(candidate && candidate.parentItemId) === targetId
+            );
         });
 
+        family.forEach(candidate => {
+            mergeSingleItem(mergedSnapshot, candidate, pendingChanges);
+        });
+
+        // A subitem created in the folder window bumps the order version.
         if (
-            !hasEffectivePendingStatusChange(
-                pendingChanges,
-                targetId,
-                localItem
-            )
+            Number(serverSnapshot.orderVersion || 0)
+            > Number(mergedSnapshot.orderVersion || 0)
         ) {
-            STATUS_FIELDS.forEach(field => {
-                if (Object.prototype.hasOwnProperty.call(serverItem, field)) {
-                    mergedItem[field] = clone(serverItem[field]);
-                }
-            });
+            mergedSnapshot.orderVersion = serverSnapshot.orderVersion;
         }
 
-        mergedSnapshot.items[localIndex] = mergedItem;
         return mergedSnapshot;
     }
 

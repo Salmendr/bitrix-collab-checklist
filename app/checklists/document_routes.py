@@ -1,4 +1,16 @@
 from app.checklists.document_names import unique_file_name, safe_file_name
+from app.checklists.document_folders import (
+    FolderPathError,
+    TOP_LEVEL_FOLDER_ERROR,
+    canonical_folder,
+    child_folders,
+    documents_in_folder,
+    find_folder,
+    item_allows_plain_folders,
+    item_subfolders,
+    names_in_folder,
+    normalize_relative_folder,
+)
 from app.checklists.item_mutation_guard import serialize_legacy_file_mutation
 import html
 import json
@@ -319,9 +331,16 @@ async def api_checklist_upload_document(
     actingUserName: str = Form(""),
     sessionId: str = Form(""),
     requireEditSession: str = Form(""),
+    relativeFolder: str = Form(""),
+    folderUploadRoot: str = Form(""),
 ):
     upload_id = uuid.uuid4().hex
     started_at = time.monotonic()
+    try:
+        relative_folder = normalize_relative_folder(relativeFolder)
+        folder_upload_root = normalize_relative_folder(folderUploadRoot)
+    except FolderPathError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
 
     dialog_id = normalize_dialog_id(dialogId)
     checklist_key = normalize_checklist_key(checklistKey)
@@ -365,6 +384,8 @@ async def api_checklist_upload_document(
                 file=file,
                 acting_user_id=acting_user_id,
                 acting_user_name=acting_user_name,
+                relative_folder=relative_folder,
+                folder_upload_root=folder_upload_root,
             )
             return JSONResponse(result)
         except Exception as exc:
@@ -424,7 +445,13 @@ async def api_checklist_upload_document(
             "existingDocumentsCount": len(normalize_documents_list(target_item.get("documents"))),
         })
 
-        uploaded_name = unique_file_name(uploaded_name, [d.get("name") for d in target_item.get("documents", [])])
+        if relative_folder and not item_allows_plain_folders(target_item):
+            return JSONResponse({"ok": False, "error": TOP_LEVEL_FOLDER_ERROR}, status_code=400)
+        relative_folder = canonical_folder(item_subfolders(target_item), relative_folder)
+        uploaded_name = unique_file_name(
+            uploaded_name,
+            names_in_folder(target_item.get("documents", []), relative_folder),
+        )
         rel_path = build_upload_rel_path(dialog_id, item_id, uploaded_name)
         abs_path = UPLOAD_ROOT / rel_path
 
@@ -509,6 +536,7 @@ async def api_checklist_upload_document(
             "yandexPath": "",
             "yandexFileUrl": "",
             "yandexFolderAlias": "",
+            "relativeFolder": relative_folder,
         })
 
         existing_documents = normalize_documents_list(target_item.get("documents"))
@@ -783,7 +811,14 @@ async def api_checklist_replace_document(
             status_code=404,
         )
 
-    uploaded_name = unique_file_name(uploaded_name, [d.get("name") for d in documents if d.get("id") != document_id])
+    uploaded_name = unique_file_name(
+        uploaded_name,
+        names_in_folder(
+            documents,
+            old_document.get("relativeFolder"),
+            exclude_id=document_id,
+        ),
+    )
 
     guard = get_document_replacement_guard(
         old_document,
@@ -1013,6 +1048,7 @@ async def api_checklist_replace_document(
                     "yandexFolderAlias"
                 )
             ),
+            "relativeFolder": old_document.get("relativeFolder") or "",
         })
 
         next_documents = list(documents)
@@ -1967,7 +2003,10 @@ def _build_folder_actions_html(
     documents: list[dict],
     yandex_folder_url: str,
     yandex_available: bool,
+    show_yandex: bool | None = None,
 ) -> str:
+    if show_yandex is None:
+        show_yandex = bool(documents)
     replace_controls_html = ""
 
     if documents:
@@ -1982,19 +2021,19 @@ def _build_folder_actions_html(
 
     yandex_link_html = ""
 
-    if documents and yandex_folder_url and yandex_available:
+    if show_yandex and yandex_folder_url and yandex_available:
         yandex_link_html = f'''
             <a
                 class="folder-yandex-link checklist-action-button checklist-action-button-yandex"
                 href="{html.escape(yandex_folder_url)}"
                 target="_blank"
-                title="Открыть папку пункта на Яндекс.Диске"
-                aria-label="Открыть папку пункта на Яндекс.Диске"
+                title="Открыть папку на Яндекс.Диске"
+                aria-label="Открыть папку на Яндекс.Диске"
             >
                 <span data-checklist-icon="yandex"></span>
             </a>
         '''
-    elif documents:
+    elif show_yandex:
         yandex_link_html = '''
             <button
                 class="folder-yandex-link checklist-action-button checklist-action-button-yandex"
@@ -2032,116 +2071,42 @@ def _build_folder_actions_html(
     '''
 
 
-def _files_count_text(count: int) -> str:
-    tail = count % 100
-    if 11 <= tail <= 14:
-        word = "файлов"
-    elif count % 10 == 1:
-        word = "файл"
-    elif count % 10 in (2, 3, 4):
-        word = "файла"
-    else:
-        word = "файлов"
-    return f"{count} {word}"
-
-
-def _build_folder_subfolders_html(
+def _build_folder_manage_html(
     *,
-    items: list[dict],
-    parent_item_id: str,
-    dialog_id: str,
-    checklist_key: str,
-    app_base_path: str,
-    session_id: str,
-    user_id: str,
-    user_name: str,
+    is_top_level: bool,
+    relative_folder: str,
+    zip_url: str,
 ) -> str:
-    """Subfolders of subitems below the files of the parent item."""
-    from app.checklists.subitems import children_of
+    """Folder operations of the current level (edit session required)."""
+    buttons: list[str] = []
 
-    children = children_of(items, parent_item_id)
-    if not children:
-        return ""
-
-    blocks: list[str] = []
-    for child in children:
-        child_id = clean_cell_value(child.get("id"))
-        child_name = html.escape(clean_cell_value(child.get("name")) or "Подпункт")
-        child_documents = normalize_documents_list(child.get("documents"))
-        status = clean_cell_value(child.get("status"))
-        status_class = "done" if status == "Есть" else "open"
-        status_text = "Есть" if status == "Есть" else "Нет"
-        subfolder_url = (
-            f"{app_base_path}/api/checklist/folder"
-            f"?dialogId={quote(dialog_id, safe='')}"
-            f"&checklistKey={quote(checklist_key, safe='')}"
-            f"&itemId={quote(child_id, safe='')}"
-            f"&sessionId={quote(session_id, safe='')}"
-            f"&userId={quote(user_id, safe='')}"
-            f"&userName={quote(user_name, safe='')}"
+    def button(role: str, label: str, title: str, danger: bool = False) -> None:
+        css = "folder-manage-button" + (" folder-manage-button--danger" if danger else "")
+        buttons.append(
+            f'<button type="button" class="{css}" data-role="{role}" '
+            f'data-folder-mutation="1" title="{html.escape(title)}">'
+            f"{html.escape(label)}</button>"
         )
 
-        file_rows = []
-        for doc in child_documents:
-            doc_id = str(doc.get("id") or "")
-            doc_name = html.escape(str(doc.get("name") or "Файл"))
-            open_url = build_document_view_url(
-                dialog_id,
-                checklist_key,
-                child_id,
-                doc_id,
-            )
-            file_rows.append(f'''
-                <li class="folder-subfolder-file">
-                    <a
-                        class="folder-subfolder-file-name"
-                        href="{html.escape(open_url)}"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        title="Открыть файл: {doc_name}"
-                    >{doc_name}</a>
-                    <span class="folder-subfolder-file-meta">{html.escape(format_file_size(doc.get("size") or 0))}</span>
-                    <span class="folder-subfolder-file-meta">{html.escape(format_document_uploaded_at(doc.get("uploadedAt") or doc.get("modifiedAt")))}</span>
-                    <span class="folder-subfolder-file-meta">{html.escape(clean_cell_value(doc.get("uploadedByName")) or "—")}</span>
-                    <a
-                        class="folder-download-button checklist-action-button checklist-action-button-download"
-                        href="{html.escape(open_url + "&download=1")}"
-                        download
-                        title="Скачать файл"
-                        aria-label="Скачать файл {doc_name}"
-                    ><span data-checklist-icon="download"></span></a>
-                </li>
-            ''')
-
-        files_html = (
-            f'<ul class="folder-subfolder-files">{"".join(file_rows)}</ul>'
-            if file_rows
-            else '<div class="folder-subfolder-empty">В подпапке пока нет файлов</div>'
-        )
-        blocks.append(f'''
-            <details class="folder-subfolder" data-subfolder-item-id="{html.escape(child_id)}">
-                <summary class="folder-subfolder-summary">
-                    <span class="folder-subfolder-chevron" aria-hidden="true"></span>
-                    <span class="folder-subfolder-icon" aria-hidden="true">📁</span>
-                    <span class="folder-subfolder-name">{child_name}</span>
-                    <span class="folder-subfolder-count">{_files_count_text(len(child_documents))}</span>
-                    <span class="folder-subfolder-status folder-subfolder-status--{status_class}">{status_text}</span>
-                </summary>
-                <div class="folder-subfolder-body">
-                    {files_html}
-                    <a class="folder-subfolder-open" href="{html.escape(subfolder_url)}">
-                        Открыть подпапку (замена и архив файлов)
-                    </a>
-                </div>
-            </details>
-        ''')
-
-    return f'''
-        <section class="folder-subfolders" aria-labelledby="folderSubfoldersTitle">
-            <h2 id="folderSubfoldersTitle" class="folder-subfolders-title">Подпапки</h2>
-            {"".join(blocks)}
-        </section>
-    '''
+    if is_top_level:
+        button("folder-create", "Новая папка", "Создать подпункт — папку этого пункта")
+    else:
+        button("folder-create", "Новая папка", "Создать папку внутри текущей")
+        if relative_folder:
+            button("folder-rename", "Переименовать", "Переименовать эту папку")
+            button("folder-move", "Переместить", "Переместить эту папку")
+            button("folder-delete", "Удалить папку", "Удалить папку со всеми файлами", danger=True)
+        else:
+            button("folder-rename", "Переименовать", "Переименовать подпункт")
+    buttons.append(
+        f'<a class="folder-manage-button" data-role="folder-zip" href="{html.escape(zip_url)}" '
+        'download title="Скачать содержимое папки одним ZIP-архивом">Скачать ZIP</a>'
+    )
+    return (
+        '<div class="folder-manage" role="toolbar" aria-label="Действия с папкой">'
+        + "".join(buttons)
+        + "</div>"
+    )
 
 
 def _safe_json_for_inline_script(value) -> str:
@@ -2167,7 +2132,10 @@ def api_checklist_folder(
     sessionId: str = "",
     userId: str = "",
     userName: str = "",
+    folder: str = "",
 ):
+    from app.checklists import folder_page
+
     dialog_id = normalize_dialog_id(dialogId)
     checklist_key = normalize_checklist_key(
         checklistKey
@@ -2201,9 +2169,24 @@ def api_checklist_folder(
             status_code=404,
         )
 
-    documents = normalize_documents_list(
+    all_documents = normalize_documents_list(
         target_item.get("documents")
     )
+    requested_folder = normalize_relative_folder(folder, strict=False)
+    relative_folder = find_folder(
+        item_subfolders(target_item),
+        requested_folder,
+    ) if requested_folder else ""
+    if requested_folder and (
+        not relative_folder
+        or not item_allows_plain_folders(target_item)
+    ):
+        return HTMLResponse(
+            "<h3>Папка не найдена</h3>"
+            "<p>Возможно, её переименовали, переместили или удалили.</p>",
+            status_code=404,
+        )
+    documents = documents_in_folder(all_documents, relative_folder)
     if clean_cell_value(target_item.get("parentItemId")):
         # Subitem folder: only its own stored path, never a name lookup.
         from app.checklists.storage import get_project_storage_context
@@ -2243,17 +2226,37 @@ def api_checklist_folder(
         and is_yandex_disk_enabled()
     )
 
+    if relative_folder and yandex_folder_path:
+        from app.yandex_disk.client import yandex_disk_client_url
+        from app.checklists.document_folders import join_yandex_folder
+        yandex_folder_path = join_yandex_folder(yandex_folder_path, relative_folder)
+        yandex_folder_url = yandex_disk_client_url(yandex_folder_path)
+
+    # Detached archive series belong to the item, not to a nested folder.
+    table_item = target_item if not relative_folder else {
+        **target_item,
+        "archivedDocumentSeries": [],
+    }
     table_html = _build_folder_document_rows_html(
         documents=documents,
         dialog_id=dialog_id,
         checklist_key=checklist_key,
         item_id=item_id,
-        target_item=target_item,
+        target_item=table_item,
+    )
+    from app.checklists.subitems import children_of
+    has_any_documents = bool(
+        all_documents
+        or any(
+            child.get("documents")
+            for child in children_of(items, item_id)
+        )
     )
     folder_actions_html = _build_folder_actions_html(
         documents=documents,
         yandex_folder_url=yandex_folder_url,
         yandex_available=yandex_available,
+        show_yandex=bool(documents or has_any_documents or relative_folder),
     )
 
     yandex_folder_path_html = ""
@@ -2261,20 +2264,51 @@ def api_checklist_folder(
     app_base_path = normalize_base_path(
         APP_BASE_PATH
     )
-    subfolders_html = _build_folder_subfolders_html(
-        items=items,
-        parent_item_id=item_id,
+    session_id = clean_cell_value(sessionId)
+    links = folder_page.FolderPageLinks(
+        app_base_path=app_base_path,
         dialog_id=dialog_id,
         checklist_key=checklist_key,
-        app_base_path=app_base_path,
-        session_id=clean_cell_value(sessionId),
+        session_id=session_id,
         user_id=clean_cell_value(userId),
         user_name=clean_cell_value(userName),
+    )
+    from app.checklists.storage import get_project_storage_context
+    is_top_level = not clean_cell_value(target_item.get("parentItemId")) and not item_allows_plain_folders(target_item)
+    breadcrumbs_html = folder_page.breadcrumb_html(
+        folder_page.breadcrumb_segments(
+            dialog_id=dialog_id,
+            checklist_key=checklist_key,
+            data=data,
+            item=target_item,
+            folder=relative_folder,
+            links=links,
+            project_context=get_project_storage_context(dialog_id) or {},
+        )
+    )
+    subfolders_html = folder_page.folder_tree_html(
+        data=data,
+        item=target_item,
+        folder=relative_folder,
+        links=links,
+        format_datetime=format_document_uploaded_at,
+    )
+    zip_url = (
+        f"{app_base_path}/api/checklist/folders/zip"
+        f"?dialogId={quote(dialog_id, safe='')}"
+        f"&checklistKey={quote(checklist_key, safe='')}"
+        f"&itemId={quote(item_id, safe='')}"
+        + (f"&folder={quote(relative_folder, safe='')}" if relative_folder else "")
+    )
+    folder_manage_html = _build_folder_manage_html(
+        is_top_level=is_top_level,
+        relative_folder=relative_folder,
+        zip_url=zip_url,
     )
     ui_static_base_url = (
         f"{app_base_path}/ui-static"
     )
-    ui_asset_version = "8.16-subitems"
+    ui_asset_version = "8.17-folders"
     popup_url = (
         f"{app_base_path}/popup"
         f"?dialogId={quote(dialog_id, safe='')}"
@@ -2335,17 +2369,50 @@ def api_checklist_folder(
         "archiveDeleteAdminUserIds": sorted(
             get_archive_permanent_delete_admin_user_ids()
         ),
+        "relativeFolder": relative_folder,
+        "folderName": folder_page.folder_name(relative_folder) if relative_folder else "",
+        "itemIsTopLevel": is_top_level,
+        "isSubitem": bool(clean_cell_value(target_item.get("parentItemId"))),
+        "parentItemId": clean_cell_value(target_item.get("parentItemId")),
+        "backUrl": folder_page.back_url(links, items, target_item, relative_folder),
+        "moveTargets": (
+            folder_page.move_targets(target_item, relative_folder)
+            if relative_folder else []
+        ),
+        "childFolderNames": [
+            folder_page.folder_name(path)
+            for path in child_folders(item_subfolders(target_item), relative_folder)
+        ] if not is_top_level else [
+            clean_cell_value(child.get("name"))
+            for child in children_of(items, item_id)
+        ],
+        "folderPageUrlTemplate": links.folder(item_id, "__FOLDER__"),
+        "subitemPageUrlTemplate": links.folder("__ITEM__"),
+        "folderCreateApiUrl": f"{app_base_path}/api/checklist/folders/create",
+        "folderRenameApiUrl": f"{app_base_path}/api/checklist/folders/rename",
+        "folderMoveApiUrl": f"{app_base_path}/api/checklist/folders/move",
+        "folderDeleteApiUrl": f"{app_base_path}/api/checklist/folders/delete",
+        "addItemApiUrl": f"{app_base_path}/api/checklist/add-item",
+        "renameItemApiUrl": f"{app_base_path}/api/checklist/rename-item",
+        "subitems": [
+            {
+                "id": clean_cell_value(child.get("id")),
+                "name": clean_cell_value(child.get("name")),
+            }
+            for child in children_of(items, item_id)
+        ] if is_top_level else [],
     }
 
     return render_ui_template(
         "folder.html",
         {
             "FOLDER_TITLE": html.escape(
-                str(target_item.get("name") or "Папка")
+                folder_page.folder_name(relative_folder)
+                if relative_folder
+                else str(target_item.get("name") or "Папка")
             ),
-            "FOLDER_CHECKLIST_TITLE": html.escape(
-                str(data.get("title") or "Чек-лист")
-            ),
+            "FOLDER_BREADCRUMBS_HTML": breadcrumbs_html,
+            "FOLDER_MANAGE_HTML": folder_manage_html,
             "FOLDER_YANDEX_PATH_HTML": (
                 yandex_folder_path_html
             ),
@@ -2408,6 +2475,9 @@ def api_checklist_folder(
             "FOLDER_UPLOAD_STAGING_JS_URL": html.escape(
                 f"{ui_static_base_url}/js/upload-staging.js?v={ui_asset_version}"
             ),
+            "FOLDER_UPLOAD_PLANNER_JS_URL": html.escape(
+                f"{ui_static_base_url}/js/folder-upload-planner.js?v={ui_asset_version}"
+            ),
             "FOLDER_UPLOADS_JS_URL": html.escape(
                 f"{ui_static_base_url}/js/folder-uploads.js?v={ui_asset_version}"
             ),
@@ -2416,6 +2486,9 @@ def api_checklist_folder(
             ),
             "FOLDER_ARCHIVE_JS_URL": html.escape(
                 f"{ui_static_base_url}/js/folder-archive-ui.js?v={ui_asset_version}"
+            ),
+            "FOLDER_TREE_ACTIONS_JS_URL": html.escape(
+                f"{ui_static_base_url}/js/folder-tree-actions.js?v={ui_asset_version}"
             ),
         },
     )

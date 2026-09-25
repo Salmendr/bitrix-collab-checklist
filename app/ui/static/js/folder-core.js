@@ -105,11 +105,23 @@
         }, 120);
     }
 
+    const folderBackUrl = String(
+        bootstrap.backUrl || ''
+    ).trim();
+
     function returnToChecklistPopup(event) {
         if (event && typeof event.preventDefault === 'function') {
             event.preventDefault();
         }
         if (folderReturnInProgress) return;
+
+        if (folderBackUrl && !(event && event.forcePopup === true)) {
+            // One level up: folder → parent folder → subitem → item.
+            // The same window keeps its opener (the checklist popup).
+            folderReturnInProgress = true;
+            global.location.assign(folderBackUrl);
+            return;
+        }
 
         folderReturnInProgress = true;
         if (folderBackButton) {
@@ -266,7 +278,8 @@
             '#folderNotificationBtn',
             '[data-role="folder-remove-file"]',
             '[data-role="folder-replace-upload"]',
-            '[data-role="folder-delete-archive-version"]'
+            '[data-role="folder-delete-archive-version"]',
+            '[data-folder-mutation="1"]'
         ].join(',');
 
         global.document.querySelectorAll(

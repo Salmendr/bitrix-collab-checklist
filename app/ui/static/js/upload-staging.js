@@ -8,8 +8,124 @@
         return String(value == null ? '' : value).trim();
     }
 
+    // Folder uploads: every file keeps the folder it came from
+    // ("Альбом/Разделы"), empty folders are kept as paths.
+    const SKIPPED_SYSTEM_FILES = new Set(['.ds_store', 'thumbs.db', 'desktop.ini']);
+
+    function fileFolderPath(file) {
+        if (!file) return '';
+        if (typeof file.__checklistFolderPath === 'string') {
+            return file.__checklistFolderPath;
+        }
+        const relative = normalizedText(file.webkitRelativePath);
+        if (!relative || relative.indexOf('/') < 0) return '';
+        return relative.split('/').slice(0, -1).filter(Boolean).join('/');
+    }
+
+    function topFolderOf(path) {
+        return normalizedText(path).split('/').filter(Boolean)[0] || '';
+    }
+
+    function tagFile(file, folderPath) {
+        try {
+            Object.defineProperty(file, '__checklistFolderPath', {
+                value: normalizedText(folderPath),
+                configurable: true,
+                enumerable: false,
+                writable: true
+            });
+        } catch (error) {
+            file.__checklistFolderPath = normalizedText(folderPath);
+        }
+        return file;
+    }
+
+    function isSkippedSystemFile(file) {
+        return SKIPPED_SYSTEM_FILES.has(
+            normalizedText(file && file.name).toLowerCase()
+        );
+    }
+
+    function readDirectoryEntries(directoryEntry) {
+        const reader = directoryEntry.createReader();
+        const all = [];
+        return new Promise((resolve, reject) => {
+            function readBatch() {
+                // readEntries returns at most ~100 entries per call.
+                reader.readEntries(batch => {
+                    if (!batch.length) {
+                        resolve(all);
+                        return;
+                    }
+                    all.push(...batch);
+                    readBatch();
+                }, reject);
+            }
+            readBatch();
+        });
+    }
+
+    function entryFile(fileEntry) {
+        return new Promise((resolve, reject) => fileEntry.file(resolve, reject));
+    }
+
+    async function walkEntry(entry, parentPath, result) {
+        if (!entry) return;
+        if (entry.isFile) {
+            const file = await entryFile(entry);
+            if (!isSkippedSystemFile(file)) {
+                result.files.push(tagFile(file, parentPath));
+            }
+            return;
+        }
+        if (!entry.isDirectory) return;
+        const path = parentPath ? parentPath + '/' + entry.name : entry.name;
+        const children = await readDirectoryEntries(entry);
+        if (!children.length) {
+            result.emptyDirs.push(path);
+            return;
+        }
+        for (const child of children) {
+            await walkEntry(child, path, result);
+        }
+    }
+
+    // Entries must be taken synchronously inside the drop handler: the
+    // DataTransfer list is emptied when the event returns.
+    function takeDroppedEntries(dataTransfer) {
+        const entries = [];
+        const looseFiles = [];
+        Array.from(dataTransfer && dataTransfer.items || []).forEach(item => {
+            if (!item || item.kind !== 'file') return;
+            const entry = typeof item.webkitGetAsEntry === 'function'
+                ? item.webkitGetAsEntry()
+                : null;
+            if (entry) {
+                entries.push(entry);
+                return;
+            }
+            const file = typeof item.getAsFile === 'function' ? item.getAsFile() : null;
+            if (file) looseFiles.push(file);
+        });
+        if (!entries.length && !looseFiles.length) {
+            Array.from(dataTransfer && dataTransfer.files || []).forEach(file => {
+                looseFiles.push(file);
+            });
+        }
+        return { entries, looseFiles };
+    }
+
+    async function collectDropped(taken) {
+        const result = { files: taken.looseFiles.slice(), emptyDirs: [] };
+        for (const entry of taken.entries) {
+            await walkEntry(entry, '', result);
+        }
+        return result;
+    }
+
     function fileIdentity(file) {
         return [
+            fileFolderPath(file),
             normalizedText(file && file.name),
             Number(file && file.size || 0),
             Number(file && file.lastModified || 0),
@@ -45,6 +161,7 @@
                 dropActive: false,
                 expanded: false,
                 files: [],
+                emptyDirs: [],
                 listeners: new Set()
             });
         }
@@ -106,6 +223,69 @@
         return card;
     }
 
+    function createFolderCard(group, removeFolder) {
+        const card = global.document.createElement('article');
+        card.className = 'upload-staging-file-card upload-staging-folder-card';
+        card.title = group.name;
+
+        const iconWrap = global.document.createElement('div');
+        iconWrap.className = 'upload-staging-file-icon-wrap';
+        iconWrap.innerHTML = `
+            <svg class="upload-staging-folder-icon" viewBox="0 0 44 36" aria-hidden="true">
+                <path d="M3 6.5A2.5 2.5 0 0 1 5.5 4h11l3.5 4h18.5A2.5 2.5 0 0 1 41 10.5v19a2.5 2.5 0 0 1-2.5 2.5h-33A2.5 2.5 0 0 1 3 29.5Z"></path>
+            </svg>
+        `;
+
+        const removeButton = global.document.createElement('button');
+        removeButton.type = 'button';
+        removeButton.className = 'upload-staging-file-remove';
+        removeButton.title = 'Убрать папку из списка';
+        removeButton.setAttribute('aria-label', 'Убрать папку из списка');
+        removeButton.textContent = '×';
+        removeButton.addEventListener('click', event => {
+            event.preventDefault();
+            event.stopPropagation();
+            removeFolder(group.name);
+        });
+        iconWrap.appendChild(removeButton);
+
+        const name = global.document.createElement('div');
+        name.className = 'upload-staging-file-name';
+        name.textContent = group.name;
+
+        const size = global.document.createElement('div');
+        size.className = 'upload-staging-file-size';
+        size.textContent = formatBytes(group.size);
+
+        card.append(iconWrap, name, size);
+        return card;
+    }
+
+    function groupStaged(files, emptyDirs) {
+        const loose = [];
+        const folders = new Map();
+        function folderGroup(top) {
+            const key = top.toLocaleLowerCase('ru');
+            if (!folders.has(key)) {
+                folders.set(key, { name: top, size: 0 });
+            }
+            return folders.get(key);
+        }
+        files.forEach(file => {
+            const top = topFolderOf(fileFolderPath(file));
+            if (!top) {
+                loose.push(file);
+                return;
+            }
+            folderGroup(top).size += Number(file && file.size || 0);
+        });
+        emptyDirs.forEach(path => {
+            const top = topFolderOf(path);
+            if (top) folderGroup(top);
+        });
+        return { loose, folders: Array.from(folders.values()) };
+    }
+
     function create(options = {}) {
         const trigger = options.trigger;
         const input = options.input;
@@ -134,10 +314,16 @@
                         <path d="M5 20h14"></path>
                     </svg>
                     <span class="upload-staging-picker-copy">
-                        <strong>Перетащите файлы для загрузки</strong>
+                        <strong>Перетащите файлы или папки для загрузки</strong>
                         <small>или нажмите здесь, чтобы выбрать файлы</small>
                     </span>
                 </button>
+                <button
+                    class="upload-staging-folder-picker"
+                    type="button"
+                    data-role="upload-staging-folder-picker"
+                    title="Выбрать папку целиком со всеми вложенными папками"
+                >Выбрать папку</button>
                 <button
                     class="upload-staging-close"
                     type="button"
@@ -167,6 +353,17 @@
         const footer = zone.querySelector('[data-role="upload-staging-footer"]');
         const count = zone.querySelector('[data-role="upload-staging-count"]');
         const confirmButton = zone.querySelector('[data-role="upload-staging-confirm"]');
+        const folderPicker = zone.querySelector('[data-role="upload-staging-folder-picker"]');
+        const folderInput = global.document.createElement('input');
+        folderInput.type = 'file';
+        folderInput.multiple = true;
+        folderInput.hidden = true;
+        folderInput.setAttribute('webkitdirectory', '');
+        folderInput.setAttribute('directory', '');
+        zone.appendChild(folderInput);
+        if (options.allowFolders === false) {
+            folderPicker.hidden = true;
+        }
 
         function canInteract() {
             if (state.busy || trigger.disabled) return false;
@@ -188,14 +385,29 @@
                 unique.set(fileIdentity(file), file);
             });
             state.files = Array.from(unique.values());
+            // Empty folders are created before the files are sent.
+            state.emptyDirs = Array.isArray(settings.emptyDirs)
+                ? settings.emptyDirs.slice()
+                : [];
             if (Object.prototype.hasOwnProperty.call(settings, 'expanded')) {
                 state.expanded = !!settings.expanded;
             }
             notifyState(state);
         }
 
-        function addFiles(files) {
+        function addFiles(files, emptyDirs = []) {
             if (!canInteract()) return;
+            if (options.allowFolders === false) {
+                const hasFolders = Array.from(files || []).some(file => !!fileFolderPath(file))
+                    || (emptyDirs && emptyDirs.length);
+                if (hasFolders) {
+                    if (typeof options.onBlocked === 'function') {
+                        options.onBlocked(new Error('Сюда можно загрузить только файлы'));
+                    }
+                    files = Array.from(files || []).filter(file => !fileFolderPath(file));
+                    emptyDirs = [];
+                }
+            }
             const unique = new Map(
                 state.files.map(file => [fileIdentity(file), file])
             );
@@ -204,9 +416,30 @@
                 unique.set(fileIdentity(file), file);
             });
             state.files = Array.from(unique.values());
+            const dirs = new Map(
+                state.emptyDirs.map(path => [path.toLocaleLowerCase('ru'), path])
+            );
+            Array.from(emptyDirs || []).forEach(path => {
+                const normalized = normalizedText(path);
+                if (normalized) dirs.set(normalized.toLocaleLowerCase('ru'), normalized);
+            });
+            state.emptyDirs = Array.from(dirs.values());
             state.expanded = true;
             state.dropActive = false;
             input.value = '';
+            folderInput.value = '';
+            notifyState(state);
+        }
+
+        function removeFolder(name) {
+            if (state.busy) return;
+            const key = normalizedText(name).toLocaleLowerCase('ru');
+            state.files = state.files.filter(file => (
+                topFolderOf(fileFolderPath(file)).toLocaleLowerCase('ru') !== key
+            ));
+            state.emptyDirs = state.emptyDirs.filter(path => (
+                topFolderOf(path).toLocaleLowerCase('ru') !== key
+            ));
             notifyState(state);
         }
 
@@ -221,11 +454,13 @@
 
         function clear(settings = {}) {
             state.files = [];
+            state.emptyDirs = [];
             state.dropActive = false;
             if (settings.collapse !== false) {
                 state.expanded = false;
             }
             input.value = '';
+            folderInput.value = '';
             notifyState(state);
         }
 
@@ -265,6 +500,9 @@
             getFiles() {
                 return state.files.slice();
             },
+            getEmptyDirs() {
+                return state.emptyDirs.slice();
+            },
             replaceFiles,
             setBusy(value) {
                 state.busy = !!value;
@@ -294,33 +532,48 @@
             trigger.setAttribute('aria-expanded', state.expanded ? 'true' : 'false');
             trigger.setAttribute('aria-busy', state.busy ? 'true' : 'false');
 
+            const hasContent = state.files.length > 0 || state.emptyDirs.length > 0;
             picker.disabled = state.busy;
+            folderPicker.disabled = state.busy;
             closeButton.disabled = state.busy;
-            confirmButton.disabled = state.busy || !state.files.length;
+            confirmButton.disabled = state.busy || !hasContent;
             confirmButton.textContent = state.busy ? 'Загрузка…' : 'Загрузить';
 
+            const grouped = groupStaged(state.files, state.emptyDirs);
             fileGrid.replaceChildren();
-            state.files.forEach(file => {
+            grouped.folders.forEach(group => {
+                fileGrid.appendChild(createFolderCard(group, removeFolder));
+            });
+            grouped.loose.forEach(file => {
                 fileGrid.appendChild(createFileCard(file, removeFile));
             });
 
-            const hasFiles = state.files.length > 0;
-            fileGrid.hidden = !hasFiles;
-            footer.hidden = !hasFiles;
-            count.textContent = hasFiles
-                ? 'Выбрано файлов: ' + state.files.length
+            fileGrid.hidden = !hasContent;
+            footer.hidden = !hasContent;
+            const parts = [];
+            if (grouped.folders.length) {
+                parts.push('папок: ' + grouped.folders.length);
+            }
+            if (state.files.length) {
+                parts.push('файлов: ' + state.files.length);
+            }
+            count.textContent = hasContent
+                ? 'Выбрано ' + parts.join(', ')
                 : '';
         }
 
         async function confirmUpload() {
-            if (!canInteract() || !state.files.length) return;
+            if (!canInteract() || (!state.files.length && !state.emptyDirs.length)) return;
             const selectedFiles = state.files.slice();
+            const selectedEmptyDirs = state.emptyDirs.slice();
             state.busy = true;
             notifyState(state);
 
             try {
                 const result = typeof options.onConfirm === 'function'
-                    ? await options.onConfirm(selectedFiles, controller)
+                    ? await options.onConfirm(selectedFiles, controller, {
+                        emptyDirs: selectedEmptyDirs
+                    })
                     : null;
 
                 if (!(result && result.keepState === true)) {
@@ -381,13 +634,33 @@
                 event.preventDefault();
                 event.stopPropagation();
                 setDropActive(false);
-                const files = event.dataTransfer && event.dataTransfer.files;
-                if (files && files.length) addFiles(files);
+                const taken = takeDroppedEntries(event.dataTransfer);
+                if (!taken.entries.length && !taken.looseFiles.length) return;
+                collectDropped(taken).then(result => {
+                    if (result.files.length || result.emptyDirs.length) {
+                        addFiles(result.files, result.emptyDirs);
+                    }
+                }).catch(error => {
+                    console.log('upload staging folder read error:', error);
+                    if (typeof options.onError === 'function') {
+                        options.onError(new Error('Не удалось прочитать перетащенную папку'));
+                    }
+                });
             });
         });
 
         picker.addEventListener('click', () => {
             if (canInteract()) input.click();
+        });
+        folderPicker.addEventListener('click', () => {
+            if (canInteract()) folderInput.click();
+        });
+        folderInput.addEventListener('change', () => {
+            const files = Array.from(folderInput.files || [])
+                .filter(file => !isSkippedSystemFile(file))
+                .map(file => tagFile(file, fileFolderPath(file)));
+            if (files.length) addFiles(files);
+            folderInput.value = '';
         });
         closeButton.addEventListener('click', () => controller.collapse());
         confirmButton.addEventListener('click', confirmUpload);
@@ -404,7 +677,7 @@
 
     function pendingFileCount() {
         return Array.from(states.values()).reduce(
-            (total, state) => total + state.files.length,
+            (total, state) => total + state.files.length + state.emptyDirs.length,
             0
         );
     }
@@ -412,6 +685,7 @@
     function clearAll() {
         states.forEach(state => {
             state.files = [];
+            state.emptyDirs = [];
             state.dropActive = false;
             state.expanded = false;
             notifyState(state);
@@ -421,6 +695,8 @@
     global.ChecklistUploadStaging = Object.freeze({
         clearAll,
         create,
+        fileFolderPath,
+        tagFile,
         hasPendingFiles() {
             return pendingFileCount() > 0;
         },

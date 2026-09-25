@@ -1,6 +1,14 @@
 from __future__ import annotations
 
 from app.checklists.document_names import unique_file_name, safe_file_name
+from app.checklists.document_folders import (
+    TOP_LEVEL_FOLDER_ERROR,
+    item_allows_plain_folders,
+    names_in_folder,
+    canonical_folder,
+    item_subfolders,
+    normalize_relative_folder,
+)
 
 import copy
 import shutil
@@ -230,6 +238,8 @@ async def transactional_upload_document(
     file: UploadFile,
     acting_user_id: str = "",
     acting_user_name: str = "",
+    relative_folder: str = "",
+    folder_upload_root: str = "",
 ) -> dict:
     async with item_mutation_guard(
         dialog_id,
@@ -245,6 +255,8 @@ async def transactional_upload_document(
             file=file,
             acting_user_id=acting_user_id,
             acting_user_name=acting_user_name,
+            relative_folder=relative_folder,
+            folder_upload_root=folder_upload_root,
         )
 
 
@@ -258,7 +270,11 @@ async def _transactional_upload_document_inner(
     file: UploadFile,
     acting_user_id: str = "",
     acting_user_name: str = "",
+    relative_folder: str = "",
+    folder_upload_root: str = "",
 ) -> dict:
+    normalized_relative_folder = normalize_relative_folder(relative_folder)
+    normalized_folder_root = normalize_relative_folder(folder_upload_root)
     normalized_session_id = clean_cell_value(session_id)
     normalized_dialog_id = normalize_dialog_id(dialog_id)
     normalized_checklist_key = normalize_checklist_key(checklist_key)
@@ -290,7 +306,19 @@ async def _transactional_upload_document_inner(
         )
 
         _, target_item = _find_item(data, normalized_item_id)
-        uploaded_name = unique_file_name(uploaded_name, [d.get("name") for d in target_item.get("documents", [])])
+        if normalized_relative_folder and not item_allows_plain_folders(target_item):
+            raise ValueError(TOP_LEVEL_FOLDER_ERROR)
+        normalized_relative_folder = canonical_folder(
+            item_subfolders(target_item),
+            normalized_relative_folder,
+        )
+        uploaded_name = unique_file_name(
+            uploaded_name,
+            names_in_folder(
+                target_item.get("documents", []),
+                normalized_relative_folder,
+            ),
+        )
         rel_path = build_upload_rel_path(
             normalized_dialog_id,
             normalized_item_id,
@@ -333,6 +361,7 @@ async def _transactional_upload_document_inner(
             "source": "local",
             **_deferred_mirror_payload(),
             "yandexFolderAlias": "",
+            "relativeFolder": normalized_relative_folder,
         })
 
         file_entry = register_created_file(
@@ -396,6 +425,8 @@ async def _transactional_upload_document_inner(
                 "fileName": uploaded_name,
                 "localPath": str(created_path),
                 "deferredYandexUpload": True,
+                "relativeFolder": normalized_relative_folder,
+                "folderUploadRoot": normalized_folder_root,
             },
         )
 
@@ -517,7 +548,14 @@ async def _transactional_replace_document_inner(
                 "У текущего файла есть ошибка синхронизации; требуется подтверждение"
             )
 
-        uploaded_name = unique_file_name(uploaded_name, [d.get("name") for d in documents if d.get("id") != normalized_document_id])
+        uploaded_name = unique_file_name(
+            uploaded_name,
+            names_in_folder(
+                documents,
+                old_document.get("relativeFolder"),
+                exclude_id=normalized_document_id,
+            ),
+        )
         old_local_path = _document_local_path(old_document)
         new_rel_path = build_upload_rel_path(
             normalized_dialog_id,
@@ -640,6 +678,8 @@ async def _transactional_replace_document_inner(
             "replacementOperationId": operation_id,
             **_deferred_mirror_payload(),
             "yandexFolderAlias": clean_cell_value(old_document.get("yandexFolderAlias")),
+            # A new version stays in the folder of the replaced file.
+            "relativeFolder": old_document.get("relativeFolder") or "",
         })
 
         documents[old_index] = new_document

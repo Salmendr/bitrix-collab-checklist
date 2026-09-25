@@ -140,9 +140,10 @@ def find_existing_yandex_document(
     # Ignore persisted file paths: even an identically named file in another
     # object must never influence this item's synchronization.
     safe_name = Path(expected_name or local_path.name).name
+    from app.checklists.document_folders import document_yandex_folder
     for folder_path in known_folders:
         file_path = normalize_yandex_disk_path(
-            f"{folder_path.rstrip('/')}/{safe_name}"
+            f"{document_yandex_folder(folder_path, document).rstrip('/')}/{safe_name}"
         )
         candidate_paths.setdefault(_path_key(file_path), file_path)
 

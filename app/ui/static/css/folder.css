@@ -333,148 +333,334 @@
 
 /* Stage 8.5.1.1: file names are the only visible open controls. */
 
-/* Subfolders of subitems (below the files of the item). */
-.folder-subfolders {
-    margin-top: 18px;
+/* Path bar like on Yandex Disk: project › … › item › subitem › folder. */
+.folder-breadcrumbs {
     display: flex;
-    flex-direction: column;
-    gap: 8px;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 2px 6px;
+    margin-bottom: 6px;
+    color: #667085;
+    font-size: 13px;
+    line-height: 1.4;
 }
 
-.folder-subfolders-title {
-    margin: 0 0 2px;
+.folder-breadcrumb-link {
+    color: #1d4ed8;
+    text-decoration: none;
+    overflow-wrap: anywhere;
+}
+
+.folder-breadcrumb-link:hover {
+    text-decoration: underline;
+}
+
+.folder-breadcrumb-text {
+    overflow-wrap: anywhere;
+}
+
+.folder-breadcrumb-current {
+    color: #1f2328;
+    font-weight: 700;
+    overflow-wrap: anywhere;
+}
+
+.folder-breadcrumb-separator {
+    color: #98a2b3;
+}
+
+/* Folder operations of the current level. */
+.folder-manage {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 10px;
+}
+
+.folder-manage-button {
+    display: inline-flex;
+    align-items: center;
+    min-height: 28px;
+    padding: 4px 10px;
+    border: 1px solid #d0d5dd;
+    border-radius: 8px;
+    background: #ffffff;
+    color: #344054;
+    font: inherit;
+    font-size: 12px;
+    text-decoration: none;
+    cursor: pointer;
+}
+
+.folder-manage-button:hover:not(:disabled) {
+    border-color: #98a2b3;
+    background: #f9fafb;
+}
+
+.folder-manage-button:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+}
+
+.folder-manage-button--danger {
+    color: #b42318;
+}
+
+/* Folder tree below the files: subitems / folders of any depth. */
+.folder-tree {
+    margin-top: 18px;
+}
+
+.folder-tree-title {
+    margin: 0 0 8px;
     font-size: 15px;
     font-weight: 700;
     color: #1f2328;
 }
 
-.folder-subfolder {
-    border: 1px solid #e4e7ec;
-    border-radius: 10px;
-    background: #fff;
+.folder-tree-root,
+.folder-tree-children,
+.folder-tree-files {
+    margin: 0;
+    padding: 0;
+    list-style: none;
 }
 
-.folder-subfolder-summary {
+.folder-tree-root {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.folder-tree-root > .folder-tree-node {
+    border: 1px solid #e4e7ec;
+    border-radius: 10px;
+    background: #ffffff;
+}
+
+.folder-tree-children {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.folder-tree-summary {
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 10px 12px;
+    min-height: 36px;
+    padding: 6px 10px;
     cursor: pointer;
     list-style: none;
     font-size: 13px;
 }
 
-.folder-subfolder-summary::-webkit-details-marker {
+.folder-tree-summary::-webkit-details-marker {
     display: none;
 }
 
-.folder-subfolder-chevron {
-    width: 8px;
-    height: 8px;
+.folder-tree-chevron {
+    flex: 0 0 auto;
+    width: 7px;
+    height: 7px;
+    margin: 0 3px;
     border-right: 2px solid #667085;
     border-bottom: 2px solid #667085;
     transform: rotate(-45deg);
     transition: transform 140ms ease;
-    flex: 0 0 auto;
 }
 
-.folder-subfolder[open] .folder-subfolder-chevron {
+.folder-tree-details[open] > .folder-tree-summary .folder-tree-chevron {
     transform: rotate(45deg);
 }
 
-.folder-subfolder-name {
+.folder-tree-folder {
+    flex: 0 0 18px;
+    width: 18px;
+    height: 18px;
+    fill: #fcd34d;
+    stroke: #d97706;
+    stroke-width: 1.2;
+}
+
+.folder-tree-subitem path + path {
+    fill: none;
+    stroke: #92400e;
+    stroke-width: 1.8;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+.folder-tree-name {
+    min-width: 0;
     font-weight: 700;
     color: #1f2328;
     overflow-wrap: anywhere;
 }
 
-.folder-subfolder-count {
-    color: #667085;
-    font-size: 12px;
-}
-
-.folder-subfolder-status {
-    margin-left: auto;
-    padding: 2px 8px;
-    border-radius: 999px;
-    font-size: 11px;
-    font-weight: 700;
-}
-
-.folder-subfolder-status--done {
-    background: #dcfce7;
-    color: #15803d;
-}
-
-.folder-subfolder-status--open {
-    background: #f2f4f7;
-    color: #475467;
-}
-
-.folder-subfolder-body {
-    padding: 0 12px 12px 30px;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-}
-
-.folder-subfolder-files {
-    margin: 0;
-    padding: 0;
-    list-style: none;
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-}
-
-.folder-subfolder-file {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto auto auto 34px;
-    align-items: center;
-    gap: 12px;
-    padding: 4px 0;
-    border-top: 1px solid #f2f4f7;
-    font-size: 13px;
-}
-
-.folder-subfolder-file-name {
-    color: #1d4ed8;
-    overflow-wrap: anywhere;
-    text-decoration: none;
-}
-
-.folder-subfolder-file-name:hover {
-    text-decoration: underline;
-}
-
-.folder-subfolder-file-meta {
+.folder-tree-meta {
+    flex: 0 0 auto;
     color: #667085;
     font-size: 12px;
     white-space: nowrap;
 }
 
-.folder-subfolder-empty {
+.folder-tree-view {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-left: auto;
+    padding: 3px 8px;
+    border-radius: 999px;
+    color: #1d4ed8;
+    font-size: 12px;
+    text-decoration: none;
+    white-space: nowrap;
+}
+
+.folder-tree-view:hover {
+    background: #eff4ff;
+}
+
+.folder-tree-eye {
+    width: 16px;
+    height: 16px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.8;
+}
+
+.folder-tree-body {
+    padding: 0 10px 8px 26px;
+}
+
+.folder-tree-file {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 4px 0 4px 28px;
+    border-top: 1px solid #f2f4f7;
+    font-size: 13px;
+}
+
+.folder-tree-file-name {
+    min-width: 0;
+    color: #344054;
+    overflow-wrap: anywhere;
+}
+
+.folder-tree-file-date {
+    flex: 0 0 auto;
+    color: #667085;
+    font-size: 12px;
+    white-space: nowrap;
+}
+
+.folder-tree-empty {
+    padding: 4px 0 4px 28px;
     color: #98a2b3;
     font-size: 12px;
 }
 
-.folder-subfolder-open {
-    align-self: flex-start;
-    color: #1d4ed8;
-    font-size: 12px;
-    font-weight: 600;
-    text-decoration: none;
-}
-
-.folder-subfolder-open:hover {
-    text-decoration: underline;
-}
-
-@media (max-width: 760px) {
-    .folder-subfolder-file {
-        grid-template-columns: minmax(0, 1fr) 34px;
-    }
-    .folder-subfolder-file-meta {
+@media (max-width: 640px) {
+    .folder-tree-view span {
         display: none;
     }
 }
+
+/* Name / target dialog of folder operations. */
+.folder-dialog-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    background: rgba(16, 24, 40, 0.45);
+}
+
+.folder-dialog {
+    width: min(440px, 100%);
+    max-height: calc(100vh - 32px);
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 18px;
+    border-radius: 12px;
+    background: #ffffff;
+    box-shadow: 0 12px 32px rgba(16, 24, 40, 0.24);
+}
+
+.folder-dialog-title {
+    margin: 0;
+    font-size: 16px;
+    overflow-wrap: anywhere;
+}
+
+.folder-dialog-body {
+    min-height: 0;
+    overflow: auto;
+}
+
+.folder-dialog-input {
+    width: 100%;
+    padding: 8px 10px;
+    border: 1px solid #d0d5dd;
+    border-radius: 8px;
+    font: inherit;
+}
+
+.folder-dialog-targets {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.folder-dialog-target {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 4px;
+    border-radius: 6px;
+    font-size: 13px;
+    cursor: pointer;
+}
+
+.folder-dialog-target:hover {
+    background: #f9fafb;
+}
+
+.folder-dialog-error {
+    color: #b42318;
+    font-size: 13px;
+}
+
+.folder-dialog-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+}
+
+.folder-dialog-actions button {
+    padding: 7px 14px;
+    border: 1px solid #d0d5dd;
+    border-radius: 8px;
+    background: #ffffff;
+    font: inherit;
+    font-size: 13px;
+    cursor: pointer;
+}
+
+.folder-dialog-actions .folder-dialog-submit {
+    border-color: #1d4ed8;
+    background: #1d4ed8;
+    color: #ffffff;
+}
+
+.folder-dialog-actions .folder-dialog-submit:disabled {
+    opacity: 0.6;
+    cursor: wait;
+}
+

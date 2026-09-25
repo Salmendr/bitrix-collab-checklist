@@ -30,6 +30,94 @@ function assignmentHistoryPanelId(itemId, seriesId) {
         + String(seriesId || '').replace(/[^a-zA-Z0-9_-]+/g, '-');
 }
 
+function documentRelativeFolder(doc) {
+    return String(doc && doc.relativeFolder || '')
+        .split('/')
+        .map(part => part.trim())
+        .filter(Boolean)
+        .join('/');
+}
+
+function pluralFiles(count) {
+    const tail = count % 100;
+    const last = count % 10;
+    const word = (tail >= 11 && tail <= 14)
+        ? 'файлов'
+        : last === 1
+            ? 'файл'
+            : (last >= 2 && last <= 4)
+                ? 'файла'
+                : 'файлов';
+    return count + ' ' + word;
+}
+
+// Folders of a subitem in the popup: only its top-level folders, each
+// leading to its folder page; files inside folders are not listed here.
+function buildSubitemFolderRows(item, documents, itemId) {
+    const folderKeys = new Map();
+    const addFolder = path => {
+        const parts = String(path || '').split('/').map(part => part.trim()).filter(Boolean);
+        for (let index = 1; index <= parts.length; index += 1) {
+            const candidate = parts.slice(0, index).join('/');
+            const key = candidate.toLocaleLowerCase('ru');
+            if (!folderKeys.has(key)) folderKeys.set(key, candidate);
+        }
+    };
+    (Array.isArray(item && item.subfolders) ? item.subfolders : []).forEach(addFolder);
+    documents.forEach(doc => addFolder(documentRelativeFolder(doc)));
+
+    const allFolders = Array.from(folderKeys.values());
+    const topFolders = allFolders
+        .filter(path => path.indexOf('/') < 0)
+        .sort((left, right) => left.localeCompare(right, 'ru'));
+    if (!topFolders.length) return '';
+
+    const hasNested = allFolders.some(path => path.indexOf('/') >= 0);
+    const editingAllowed = (
+        typeof isEditingAllowed !== 'function'
+        || isEditingAllowed()
+    );
+    const rows = topFolders.map(folder => {
+        const key = folder.toLocaleLowerCase('ru');
+        const count = documents.filter(doc => {
+            const docFolder = documentRelativeFolder(doc).toLocaleLowerCase('ru');
+            return docFolder === key || docFolder.startsWith(key + '/');
+        }).length;
+        const folderUrl = appUrl('api/checklist/folder')
+            + '?dialogId=' + encodeURIComponent(dialogId)
+            + '&checklistKey=' + encodeURIComponent(currentChecklistKey)
+            + '&itemId=' + encodeURIComponent(itemId)
+            + '&folder=' + encodeURIComponent(folder);
+        return `
+            <button
+                class="doc-folder-row"
+                type="button"
+                data-role="view-folder"
+                data-item-id="${esc(itemId)}"
+                data-folder-url="${esc(folderUrl)}"
+                title="Открыть папку «${esc(folder)}»"
+                ${editingAllowed ? '' : 'disabled'}
+            >
+                <span class="doc-folder-row-icon" aria-hidden="true">📁</span>
+                <span class="doc-folder-row-name">${esc(folder)}</span>
+                <span class="doc-folder-row-meta">· ${esc(count ? pluralFiles(count) : 'пусто')}</span>
+            </button>
+        `;
+    }).join('');
+
+    return `
+        <div class="doc-folders">
+            ${rows}
+            ${hasNested ? `
+                <div class="doc-folders-note">
+                    Есть вложенные папки — чтобы увидеть все папки и файлы,
+                    перейдите в папку пункта
+                </div>
+            ` : ''}
+        </div>
+    `;
+}
+
 // Stage 7.1.1: unified document toolbar and direct per-file replacement controls.
 function buildDocumentCell(item) {
     if (normalizeStatus(item && item.status) === 'Не требуется') {
@@ -40,6 +128,17 @@ function buildDocumentCell(item) {
     const itemId = String(item && item.id || '');
     const subitemsApi = window.ChecklistPopupSubitems || null;
     const isSubitem = !!String(item && item.parentItemId || '').trim();
+    const allowsFolders = (
+        isSubitem
+        || !!String(item && item.notRequiredReturnParentId || '').trim()
+    );
+    // Files of nested folders are shown on the folder page only.
+    const rootDocuments = allowsFolders
+        ? documents.filter(doc => !documentRelativeFolder(doc))
+        : documents;
+    const folderRowsHtml = allowsFolders
+        ? buildSubitemFolderRows(item, documents, itemId)
+        : '';
     // A parent item opens its folder also when only its subitems have files:
     // the folder page lists the subfolders.
     const hasSubitemDocuments = !!(
@@ -133,7 +232,7 @@ function buildDocumentCell(item) {
             : ''
     );
 
-    const filesHtml = documents.map(doc => {
+    const filesHtml = rootDocuments.map(doc => {
         const docId = String(doc.id || '');
         const docName = String(doc.name || 'Файл');
         const mirrorStatus = String(
@@ -317,11 +416,13 @@ function buildDocumentCell(item) {
                 </div>
             ` : ''}
 
-            ${documents.length ? `
+            ${rootDocuments.length ? `
                 <div class="doc-files">
                     ${filesHtml}
                 </div>
             ` : ''}
+
+            ${folderRowsHtml}
 
             <input
                 type="file"
