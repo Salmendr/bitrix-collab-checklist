@@ -8,3 +8,4 @@ app.db
 docker_commands
 Volume/
 debug/
+backup/
