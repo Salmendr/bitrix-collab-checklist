@@ -139,6 +139,10 @@ function buildDocumentCell(item) {
     const folderRowsHtml = allowsFolders
         ? buildSubitemFolderRows(item, documents, itemId)
         : '';
+    // Empty folders count as content of a subitem too.
+    const hasOwnFolders = allowsFolders && (
+        Array.isArray(item && item.subfolders) && item.subfolders.length > 0
+    );
     // A parent item opens its folder also when only its subitems have files:
     // the folder page lists the subfolders.
     const hasSubitemDocuments = !!(
@@ -150,16 +154,16 @@ function buildDocumentCell(item) {
         typeof isEditingAllowed !== 'function'
         || isEditingAllowed()
     );
-    const folderViewUrl = String(item.folderUrl || '').trim() || ((documents.length || hasSubitemDocuments) ? (
+    const folderViewUrl = String(item.folderUrl || '').trim() || ((documents.length || hasSubitemDocuments || hasOwnFolders) ? (
         appUrl('api/checklist/folder')
         + '?dialogId=' + encodeURIComponent(dialogId)
         + '&checklistKey=' + encodeURIComponent(currentChecklistKey)
         + '&itemId=' + encodeURIComponent(itemId)
     ) : '');
     const showDocumentActions = documents.length > 0;
+    // Items and subitems alike: the folder page opens when there is content.
     const showViewFolder = (
-        !isSubitem
-        && (showDocumentActions || hasSubitemDocuments)
+        (showDocumentActions || hasSubitemDocuments || hasOwnFolders)
         && !!folderViewUrl
     );
     const yandexFolderStatus = normalizeYandexFolderStatus(
@@ -200,8 +204,9 @@ function buildDocumentCell(item) {
     const yandexConflict = yandexFolderStatus === 'conflict';
     const yandexRetry = yandexFolderStatus === 'error' || hasMirrorErrors;
     if (isSubitem) {
-        // A subitem has no own folder link: only a retry after an error.
-        showYandexAction = yandexRetry || yandexConflict;
+        // A subitem opens its own Yandex folder like an item; after an
+        // error the same button offers the retry.
+        showYandexAction = showDocumentActions || yandexRetry || yandexConflict;
     }
     const yandexButtonDisabled = (
         stageYandexDisabled

@@ -430,6 +430,56 @@ def api_folder_zip(
     )
 
 
+@router.get("/api/checklist/folders/yandex-link")
+def api_folder_yandex_link(
+    dialogId: str = "",
+    checklistKey: str = "id",
+    itemId: str = "",
+    folder: str = "",
+):
+    """Public Yandex link of an item folder or a folder inside it."""
+    from app.checklists.folder_page import public_folder_link
+
+    dialog_id = normalize_dialog_id(dialogId)
+    config = get_checklist_config(normalize_checklist_key(checklistKey))
+    data = get_checklist(dialog_id, config.key)
+    item = _find_item(data.get("items") or [], itemId)
+    if item is None:
+        return JSONResponse({"ok": False, "error": "item not found"}, status_code=404)
+    try:
+        relative = normalize_relative_folder(folder)
+    except FolderPathError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+    if relative:
+        relative = find_folder(item_subfolders(item), relative)
+        if not relative:
+            return JSONResponse({"ok": False, "error": "Папка не найдена"}, status_code=404)
+    try:
+        result = public_folder_link(dialog_id, config.key, item, relative)
+    except Exception as exc:
+        write_debug_log("checklist_folder_yandex_link_failed", {
+            "dialogId": dialog_id,
+            "checklistKey": config.key,
+            "itemId": clean_cell_value(itemId),
+            "folder": relative,
+            "error": str(exc),
+        })
+        return JSONResponse(
+            {"ok": False, "error": "Не удалось получить ссылку Яндекс.Диска: " + str(exc)},
+            status_code=502,
+        )
+    write_debug_log("checklist_folder_yandex_link_resolved", {
+        "dialogId": dialog_id,
+        "checklistKey": config.key,
+        "itemId": clean_cell_value(itemId),
+        "folder": relative,
+        "ok": bool(result.get("ok")),
+        "published": bool(result.get("published")),
+        "error": result.get("error", ""),
+    })
+    return JSONResponse(result, status_code=200 if result.get("ok") else 409)
+
+
 def folder_tree(item: dict, folder: str = "") -> list[dict]:
     """Nested structure below ``folder``: [{path, name, documents, children}]."""
     folders = item_subfolders(item)

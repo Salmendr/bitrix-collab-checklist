@@ -112,16 +112,66 @@ def back_url(links: FolderPageLinks, items: list[dict], item: dict, folder: str)
     return ""
 
 
-def item_yandex_folder_path(dialog_id: str, checklist_key: str, item: dict) -> str:
-    from app.checklists.yandex_scope import item_folder
+def resolve_item_yandex_folder(dialog_id: str, checklist_key: str, item: dict) -> dict:
+    """{path, url} of the item's own Yandex folder.
 
-    known = clean_cell_value(item.get("yandexFolderPath"))
-    if known:
-        return known
+    Same source as the popup Yandex button: the latest structure job (it
+    follows renames and moves), then the stored fields. The legacy lookup by
+    item name is only a fallback for standard items: a renamed item, or an
+    item created as a subitem, has no mapping under its current name.
+    """
+    from app.checklists.yandex_structure_jobs import (
+        get_latest_yandex_structure_job_for_item,
+    )
+    from app.checklists.yandex_structure_state import (
+        build_yandex_structure_item_fields,
+    )
+
+    item_id = clean_cell_value(item.get("id"))
     try:
-        return item_folder(dialog_id, checklist_key, item)
+        latest = get_latest_yandex_structure_job_for_item(
+            dialog_id=dialog_id,
+            checklist_key=checklist_key,
+            item_id=item_id,
+        ) or {}
     except Exception:
-        return ""
+        latest = {}
+    state = build_yandex_structure_item_fields(item=item, job=latest)
+    path = clean_cell_value(state.get("yandexFolderPath"))
+    url = clean_cell_value(state.get("yandexFolderUrl"))
+    if not path and not parent_id_of(item):
+        try:
+            from app.checklists.storage import get_item_yandex_folder
+            legacy = (get_item_yandex_folder(
+                dialog_id,
+                checklist_key,
+                clean_cell_value(item.get("name")),
+                group_id=int(item.get("group") or 0),
+            ) or {}).get("folder") or {}
+            path = clean_cell_value(legacy.get("path"))
+            url = url or clean_cell_value(legacy.get("url"))
+        except Exception:
+            pass
+    if not path:
+        try:
+            from app.checklists.yandex_scope import item_folder
+            path = item_folder(dialog_id, checklist_key, item)
+        except Exception:
+            path = ""
+    return {"path": path, "url": url}
+
+
+def item_yandex_folder_path(dialog_id: str, checklist_key: str, item: dict) -> str:
+    return resolve_item_yandex_folder(dialog_id, checklist_key, item)["path"]
+
+
+def project_yandex_available(dialog_id: str) -> bool:
+    from app.checklists.storage import get_project_storage_context
+    from app.yandex_disk.client import is_yandex_disk_enabled
+
+    context = get_project_storage_context(dialog_id) or {}
+    targets = (context.get("storageMode") or {}).get("mirrorTargets") or []
+    return bool(context) and "yandex_disk" in targets and bool(is_yandex_disk_enabled())
 
 
 def breadcrumb_segments(
@@ -313,17 +363,49 @@ def folder_tree_html(
     )
 
 
-def folder_yandex_link(dialog_id: str, checklist_key: str, item: dict, folder: str) -> tuple[str, str]:
-    """(path, url) of the current folder on Yandex Disk, if known."""
-    from app.yandex_disk.client import yandex_disk_client_url
+def public_folder_link(
+    dialog_id: str,
+    checklist_key: str,
+    item: dict,
+    relative_folder: str = "",
+) -> dict:
+    """Public Yandex link of the item folder or of a folder inside it.
 
-    base = item_yandex_folder_path(dialog_id, checklist_key, item)
-    if not base:
-        return "", ""
-    path = join_yandex_folder(base, folder)
-    if not folder:
-        return path, clean_cell_value(item.get("yandexFolderUrl")) or yandex_disk_client_url(path)
-    return path, yandex_disk_client_url(path)
+    A folder that already has a public link keeps it; one without is
+    published. A folder that is not on Yandex Disk yet (the edit session is
+    not saved, or its files are still syncing) is never created from here.
+    """
+    from app.yandex_disk.client import (
+        yandex_disk_get_resource_meta,
+        yandex_disk_publish_path,
+        yandex_disk_try_get_resource_meta,
+    )
+
+    if not project_yandex_available(dialog_id):
+        return {"ok": False, "error": "Синхронизация с Яндекс.Диском для проекта отключена"}
+    base = resolve_item_yandex_folder(dialog_id, checklist_key, item)
+    if not base["path"]:
+        return {"ok": False, "error": "Папка пункта на Яндекс.Диске ещё не создана"}
+    if not relative_folder and base["url"]:
+        return {"ok": True, "path": base["path"], "url": base["url"]}
+    path = join_yandex_folder(base["path"], relative_folder)
+    meta = yandex_disk_try_get_resource_meta(path)
+    if not meta:
+        return {
+            "ok": False,
+            "path": path,
+            "error": (
+                "Папки ещё нет на Яндекс.Диске — она появится после "
+                "сохранения изменений и синхронизации файлов"
+            ),
+        }
+    url = clean_cell_value(meta.get("public_url"))
+    if not url:
+        yandex_disk_publish_path(path)
+        url = clean_cell_value(yandex_disk_get_resource_meta(path).get("public_url"))
+    if not url:
+        return {"ok": False, "path": path, "error": "Яндекс.Диск не выдал публичную ссылку на папку"}
+    return {"ok": True, "path": path, "url": url, "published": True}
 
 
 def move_targets(item: dict, folder: str) -> list[str]:

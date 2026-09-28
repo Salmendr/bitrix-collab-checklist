@@ -1,5 +1,5 @@
 {
-  "stage": "8.17-folders",
+  "stage": "8.17.1-links",
   "hashMode": "utf8-lf",
   "modules": {
     "checklist-window-channel.js": {
@@ -63,8 +63,8 @@
       "bytes": 6389
     },
     "folder-tree-actions.js": {
-      "sha256": "72d11d931fba1e46613a6a236027073a407cfdd51b31ff8b2272b60b44c19234",
-      "bytes": 16550
+      "sha256": "6034377fad09dc03a286750b43c2fea411be6380522c932bc49fb3b7afb0d161",
+      "bytes": 18702
     }
   },
   "loadOrder": [
@@ -120,7 +120,8 @@
     "Stage 8.15.8 renders the item-folder pre-upload area below the file table and scrolls it into view from the header Upload action.",
     "Dropped and selected files remain local file cards until explicit confirmation; failed files stay staged for retry.",
     "The folder public-link action is icon-only, permanently disabled in the current interface and cannot be re-enabled by edit-session refresh.",
-    "Stage 8.17 shows a Yandex-like path bar, the folder tree with a view action per folder, nested folder pages and folder create/rename/move/delete/ZIP actions."
+    "Stage 8.17 shows a Yandex-like path bar, the folder tree with a view action per folder, nested folder pages and folder create/rename/move/delete/ZIP actions.",
+    "Stage 8.17.1 resolves the item Yandex folder like the popup (structure state first), publishes nested folders on the first click and hides folder deletion from users without file-delete rights."
   ],
-  "generatedAt": "2026-09-25T03:45:29+00:00"
+  "generatedAt": "2026-09-25T12:32:47+00:00"
 }

@@ -405,6 +405,58 @@
         };
     }
 
+    // Deleting a folder deletes its files: only for users who may delete
+    // files (the server checks it again).
+    function hideDeleteWithoutRights() {
+        const actor = core.getActor();
+        if (deleteAllowedUserIds.has(String(actor && actor.id || '').trim())) return;
+        doc.querySelectorAll('[data-role="folder-delete"]').forEach(button => {
+            button.remove();
+        });
+    }
+
+    // Nested folders are published on Yandex Disk on the first click.
+    async function openYandexFolder(button) {
+        if (button.dataset.loading === '1') return;
+        const cached = String(button.dataset.yandexUrl || '');
+        if (cached) {
+            global.open(cached, '_blank', 'noopener,noreferrer');
+            return;
+        }
+        button.dataset.loading = '1';
+        button.setAttribute('aria-busy', 'true');
+        try {
+            const response = await fetch(String(bootstrap.yandexLinkApiUrl || ''), {
+                cache: 'no-store'
+            });
+            const result = await response.json().catch(() => ({}));
+            const url = String(result && result.url || '').trim();
+            if (!response.ok || !result.ok || !url) {
+                throw new Error(result && result.error || 'Не удалось открыть папку на Яндекс.Диске');
+            }
+            button.dataset.yandexUrl = url;
+            global.open(url, '_blank', 'noopener,noreferrer');
+        } catch (error) {
+            alert(error && error.message ? error.message : 'Не удалось открыть папку на Яндекс.Диске');
+        } finally {
+            delete button.dataset.loading;
+            button.removeAttribute('aria-busy');
+        }
+    }
+
+    doc.querySelectorAll('[data-role="folder-yandex-lazy"]').forEach(button => {
+        button.addEventListener('click', event => {
+            event.preventDefault();
+            openYandexFolder(button);
+        });
+    });
+
+    if (doc.readyState === 'loading') {
+        doc.addEventListener('DOMContentLoaded', hideDeleteWithoutRights, { once: true });
+    } else {
+        hideDeleteWithoutRights();
+    }
+
     const handlers = {
         'folder-create': createFolder,
         'folder-rename': renameFolder,

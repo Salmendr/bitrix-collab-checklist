@@ -1,6 +1,6 @@
 {
-  "stage": "8.17-folders",
-  "generatedAt": "2026-09-25T03:45:29+00:00",
+  "stage": "8.17.1-links",
+  "generatedAt": "2026-09-25T12:32:47+00:00",
   "loadOrder": [
     "checklist-host-diagnostics.js",
     "popup-bootstrap.js",
@@ -84,8 +84,8 @@
       "bytes": 105713
     },
     "popup-document-list.js": {
-      "sha256": "d630fde6e0f7d928e47c07495e77da8207a22252190dfae65b7b2684746802cd",
-      "bytes": 18821
+      "sha256": "ea5f58ae65e8260ce606e1fd5a16d581ac955e4a11b0d90639a6f94d59bd05cf",
+      "bytes": 19168
     },
     "document-assignment-history.js": {
       "sha256": "8ca593270b9e1e0170187046f5480c5fc8a7237c8dc62d1a89677e4f17d65e62",
@@ -296,7 +296,8 @@
     "Stage 8.16 adds one level of subitems (Todoist-like): nested rows, sibling-unique names, derived parent status, subfolders inside the parent Yandex folder, subfolder list on the item folder page.",
     "Stage 8.16 hides the share and notification buttons and records only essential popup diagnostics.",
     "Stage 8.16.2 adds the Design checklist and optional explicit popup columns (panelGroupIds).",
-    "Stage 8.17 uploads whole folders: a folder dropped into an item becomes a subitem, deeper levels become folders of the subitem; empty folders are kept."
+    "Stage 8.17 uploads whole folders: a folder dropped into an item becomes a subitem, deeper levels become folders of the subitem; empty folders are kept.",
+    "Stage 8.17.1 shows the folder and Yandex buttons for subitems as for items."
   ],
   "hashMode": "utf8-lf",
   "lineEndingNote": "Hashes are calculated from bytes written to disk. This is stable for Windows CRLF and Unix LF.",
@@ -338,8 +339,8 @@
       "bytes": 105713
     },
     "popup-document-list.js": {
-      "sha256": "d630fde6e0f7d928e47c07495e77da8207a22252190dfae65b7b2684746802cd",
-      "bytes": 18821
+      "sha256": "ea5f58ae65e8260ce606e1fd5a16d581ac955e4a11b0d90639a6f94d59bd05cf",
+      "bytes": 19168
     },
     "document-assignment-history.js": {
       "sha256": "8ca593270b9e1e0170187046f5480c5fc8a7237c8dc62d1a89677e4f17d65e62",

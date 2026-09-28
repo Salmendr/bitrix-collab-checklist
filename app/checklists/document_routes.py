@@ -51,7 +51,6 @@ from app.checklists.permissions import (
 
 from app.checklists.storage import (
     get_checklist,
-    get_item_yandex_folder,
     save_checklist,
 )
 
@@ -1600,19 +1599,12 @@ def api_checklist_item_yandex_folder(
         })
 
     try:
-        # A subitem is never resolved by name: an item of the section can
-        # share its name.
-        folder_data = None if clean_cell_value(
-            target_item.get("parentItemId")
-        ) else get_item_yandex_folder(
-            dialog_id,
-            checklist_key,
-            clean_cell_value(target_item.get("name")),
-            group_id=int(target_item.get("group") or 0),
-        )
-        folder = (folder_data or {}).get("folder") or {}
-        folder_url = clean_cell_value(folder.get("url"))
-        folder_path = clean_cell_value(folder.get("path"))
+        from app.checklists.folder_page import public_folder_link
+        # The structure state first, never a name lookup for a subitem;
+        # a folder known only by its path is published here.
+        link = public_folder_link(dialog_id, checklist_key, target_item)
+        folder_url = clean_cell_value(link.get("url"))
+        folder_path = clean_cell_value(link.get("path"))
 
         return JSONResponse({
             "ok": True,
@@ -1623,6 +1615,7 @@ def api_checklist_item_yandex_folder(
             "url": folder_url,
             "path": folder_path,
             "yandexEnabled": bool(is_yandex_disk_enabled()),
+            **({"warning": link["error"]} if link.get("error") else {}),
         })
 
     except Exception as exc:
@@ -2004,6 +1997,7 @@ def _build_folder_actions_html(
     yandex_folder_url: str,
     yandex_available: bool,
     show_yandex: bool | None = None,
+    yandex_lazy: bool = False,
 ) -> str:
     if show_yandex is None:
         show_yandex = bool(documents)
@@ -2032,6 +2026,19 @@ def _build_folder_actions_html(
             >
                 <span data-checklist-icon="yandex"></span>
             </a>
+        '''
+    elif show_yandex and yandex_available and yandex_lazy:
+        # Published on click: /api/checklist/folders/yandex-link.
+        yandex_link_html = '''
+            <button
+                class="folder-yandex-link checklist-action-button checklist-action-button-yandex"
+                type="button"
+                data-role="folder-yandex-lazy"
+                title="Открыть папку на Яндекс.Диске"
+                aria-label="Открыть папку на Яндекс.Диске"
+            >
+                <span data-checklist-icon="yandex"></span>
+            </button>
         '''
     elif show_yandex:
         yandex_link_html = '''
@@ -2187,50 +2194,16 @@ def api_checklist_folder(
             status_code=404,
         )
     documents = documents_in_folder(all_documents, relative_folder)
-    if clean_cell_value(target_item.get("parentItemId")):
-        # Subitem folder: only its own stored path, never a name lookup.
-        from app.checklists.storage import get_project_storage_context
-        subitem_path = clean_cell_value(target_item.get("yandexFolderPath"))
-        yandex_folder_data = {
-            "folder": {
-                "path": subitem_path,
-                "url": clean_cell_value(target_item.get("yandexFolderUrl")),
-            },
-            "context": get_project_storage_context(dialog_id) or {},
-        } if subitem_path else None
-    else:
-        yandex_folder_data = get_item_yandex_folder(
-            dialog_id,
-            checklist_key,
-            clean_cell_value(target_item.get("name")),
-            group_id=int(target_item.get("group") or 0),
-        )
-    yandex_folder = (
-        yandex_folder_data or {}
-    ).get("folder") or {}
-    yandex_folder_url = clean_cell_value(
-        yandex_folder.get("url")
+    from app.checklists import folder_page as folder_page_module
+    item_yandex = folder_page_module.resolve_item_yandex_folder(
+        dialog_id,
+        checklist_key,
+        target_item,
     )
-    yandex_folder_path = clean_cell_value(
-        yandex_folder.get("path")
-    )
-    yandex_context = (
-        yandex_folder_data or {}
-    ).get("context") or {}
-    yandex_mirror_targets = (
-        yandex_context.get("storageMode") or {}
-    ).get("mirrorTargets") or []
-    yandex_available = (
-        bool(yandex_context)
-        and "yandex_disk" in yandex_mirror_targets
-        and is_yandex_disk_enabled()
-    )
-
-    if relative_folder and yandex_folder_path:
-        from app.yandex_disk.client import yandex_disk_client_url
-        from app.checklists.document_folders import join_yandex_folder
-        yandex_folder_path = join_yandex_folder(yandex_folder_path, relative_folder)
-        yandex_folder_url = yandex_disk_client_url(yandex_folder_path)
+    yandex_available = folder_page_module.project_yandex_available(dialog_id)
+    # The item folder opens by its stored public link; a nested folder (or
+    # an item folder still without one) is published on the first click.
+    yandex_folder_url = "" if relative_folder else item_yandex["url"]
 
     # Detached archive series belong to the item, not to a nested folder.
     table_item = target_item if not relative_folder else {
@@ -2257,6 +2230,7 @@ def api_checklist_folder(
         yandex_folder_url=yandex_folder_url,
         yandex_available=yandex_available,
         show_yandex=bool(documents or has_any_documents or relative_folder),
+        yandex_lazy=bool(item_yandex["path"]),
     )
 
     yandex_folder_path_html = ""
@@ -2308,7 +2282,7 @@ def api_checklist_folder(
     ui_static_base_url = (
         f"{app_base_path}/ui-static"
     )
-    ui_asset_version = "8.17-folders"
+    ui_asset_version = "8.17.1-links"
     popup_url = (
         f"{app_base_path}/popup"
         f"?dialogId={quote(dialog_id, safe='')}"
@@ -2387,6 +2361,13 @@ def api_checklist_folder(
             for child in children_of(items, item_id)
         ],
         "folderPageUrlTemplate": links.folder(item_id, "__FOLDER__"),
+        "yandexLinkApiUrl": (
+            f"{app_base_path}/api/checklist/folders/yandex-link"
+            f"?dialogId={quote(dialog_id, safe='')}"
+            f"&checklistKey={quote(checklist_key, safe='')}"
+            f"&itemId={quote(item_id, safe='')}"
+            + (f"&folder={quote(relative_folder, safe='')}" if relative_folder else "")
+        ),
         "subitemPageUrlTemplate": links.folder("__ITEM__"),
         "folderCreateApiUrl": f"{app_base_path}/api/checklist/folders/create",
         "folderRenameApiUrl": f"{app_base_path}/api/checklist/folders/rename",
