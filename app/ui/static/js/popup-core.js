@@ -7,6 +7,14 @@
             }
 
             const dialogId = String(popupBootstrap.dialogId || '');
+            // A project stage has its own storage dialog id; Bitrix only
+            // knows the chat of the project.
+            const popupPhases = (
+                popupBootstrap.phases
+                && typeof popupBootstrap.phases === 'object'
+            ) ? popupBootstrap.phases : {};
+            const bitrixDialogId = String(popupPhases.baseDialogId || dialogId);
+            const popupPhaseLabel = String(popupPhases.label || '');
             const projectRootYandexPath = String(
                 popupBootstrap.projectRootYandexPath || ''
             );
@@ -310,10 +318,13 @@
             }
 
             function renderTitle() {
+                const phaseSuffix = popupPhaseLabel
+                    ? ' <small class="popup-phase-title">· ' + esc(popupPhaseLabel) + '</small>'
+                    : '';
                 if (collabTitle) {
-                    popupTitleEl.innerHTML = esc(checklistTitle) + ' <small>— ' + esc(collabTitle) + '</small>';
+                    popupTitleEl.innerHTML = esc(checklistTitle) + ' <small>— ' + esc(collabTitle) + '</small>' + phaseSuffix;
                 } else {
-                    popupTitleEl.textContent = checklistTitle;
+                    popupTitleEl.innerHTML = esc(checklistTitle) + phaseSuffix;
                 }
             }
             function fetchCurrentUserIfPossible() {
@@ -630,7 +641,7 @@
                 }
 
                 try {
-                    const data = await popupBitrix.getDialog(dialogId);
+                    const data = await popupBitrix.getDialog(bitrixDialogId);
 
                     if (!data || typeof data !== 'object') {
                         renderTitle();

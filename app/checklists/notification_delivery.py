@@ -38,6 +38,13 @@ class NotificationDeliveryError(RuntimeError):
     pass
 
 
+
+
+def _chat_dialog_id(dialog_id: str) -> str:
+    """A project stage posts into the chat of the project."""
+    from app.checklists.project_phases import base_dialog_id
+    return base_dialog_id(dialog_id)
+
 def _json_dumps(value: Any) -> str:
     return json.dumps(
         value,
@@ -1050,7 +1057,7 @@ def deliver_committed_notification_drafts(session_id: str) -> dict:
             ),
             method="im.message.add",
             payload={
-                "DIALOG_ID": dialog_id,
+                "DIALOG_ID": _chat_dialog_id(dialog_id),
                 "MESSAGE": message,
                 "SYSTEM": "N",
                 "URL_PREVIEW": "N",
@@ -1340,7 +1347,7 @@ def retry_failed_notification_deliveries(
             idempotency_key=spec.get("idempotencyKey") or "",
             method="im.message.add",
             payload={
-                "DIALOG_ID": spec.get("dialogId") or "",
+                "DIALOG_ID": _chat_dialog_id(spec.get("dialogId") or ""),
                 "MESSAGE": message,
                 "SYSTEM": "N",
                 "URL_PREVIEW": "N",

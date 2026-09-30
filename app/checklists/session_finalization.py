@@ -556,7 +556,9 @@ def _deliver_summary_once(
             "messageResult": {},
         }
 
-    target_dialog_id = (
+    from app.checklists.project_phases import base_dialog_id
+    # A stage has its own storage dialog id; the chat is the project chat.
+    target_dialog_id = base_dialog_id(
         dialog_id
         or visible_sessions[0].get("dialogId")
         or ""

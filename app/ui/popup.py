@@ -59,6 +59,10 @@ def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
 
     collab_title = html.escape(collab_title_raw)
     full_title = f"{title} — {collab_title}" if collab_title_raw else title
+    from app.checklists.project_phases import phase_summary
+    phases = phase_summary(dialog_id)
+    if phases["label"]:
+        full_title += " · " + html.escape(phases["label"])
     progress_percent = int(data.get("progressPercent", 0) or 0)
 
     project_root_folder_info = get_project_root_yandex_folder_info(dialog_id)
@@ -161,6 +165,7 @@ def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
     groups_json = json.dumps(data.get("groups", []), ensure_ascii=False)
     project_checklists_json = json.dumps(data.get("projectChecklists", []), ensure_ascii=False)
     dialog_id_json = json.dumps(dialog_id, ensure_ascii=False)
+    phases_json = json.dumps(phases, ensure_ascii=False)
     collab_title_json = json.dumps(collab_title_raw, ensure_ascii=False)
     checklist_key_json = json.dumps(checklist_key, ensure_ascii=False)
     checklist_title_json = json.dumps(title_raw, ensure_ascii=False)
@@ -181,6 +186,7 @@ def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
             "POPUP_FULL_TITLE": full_title,
             "POPUP_PROGRESS_PERCENT": progress_percent,
             "POPUP_DIALOG_ID_JSON": dialog_id_json,
+            "POPUP_PHASES_JSON": phases_json,
             "POPUP_PROJECT_ROOT_YANDEX_PATH_JSON": project_root_yandex_path_json,
             "POPUP_PROJECT_ROOT_YANDEX_URL_JSON": project_root_yandex_url_json,
             "POPUP_PROJECT_ROOT_YANDEX_PREPARED_JSON": project_root_yandex_prepared_json,

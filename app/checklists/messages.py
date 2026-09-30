@@ -517,8 +517,14 @@ def build_checklist_message_block(
     checklist_key = normalize_checklist_key(data.get("checklistKey") or "id")
     checklist_title = get_checklist_message_title(checklist_key, data.get("title") or "")
     dialog_id = normalize_dialog_id(data.get("resolvedDialogId") or data.get("dialogId") or "")
+    # The link opens the checklist of this very stage (its own dialog id).
     link_url = build_checklist_message_link(dialog_id, checklist_key)
     link_caption = get_checklist_link_caption(checklist_key)
+    from app.checklists.project_phases import phase_label
+    stage_label = phase_label(dialog_id)
+    if stage_label:
+        checklist_title = f"{checklist_title} · {stage_label}"
+        link_caption = f"{link_caption} ({stage_label.upper()})"
 
     parts = [
         build_recent_changes_text(

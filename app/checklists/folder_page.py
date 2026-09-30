@@ -194,6 +194,12 @@ def breadcrumb_segments(
     ).rstrip("/")
 
     segments: list[tuple[str, str]] = []
+    base_root = clean_cell_value(
+        ((project_context or {}).get("yandexDisk") or {}).get("projectBaseRootPath")
+    ).rstrip("/")
+    if base_root and project_root.startswith(base_root + "/"):
+        # A project stage: «Проект › Этап 2 › …».
+        segments.append((base_root.rsplit("/", 1)[-1], ""))
     if top_path and project_root and top_path.startswith(project_root + "/"):
         root_name = project_root.rsplit("/", 1)[-1]
         inner = [part for part in top_path[len(project_root):].split("/") if part]

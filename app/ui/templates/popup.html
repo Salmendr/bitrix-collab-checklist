@@ -12,7 +12,7 @@
             });
         </script>
         <script src="ui-static/js/checklist-host-diagnostics.js?v=8.16-subitems"></script>
-        <link rel="stylesheet" href="ui-static/css/popup-bootstrap.css?v=8.17-folders">
+        <link rel="stylesheet" href="ui-static/css/popup-bootstrap.css?v=8.18-phases">
         <!-- Stage 6.2: popup styles are loaded through popup-bootstrap.css. -->
     </head>
     <body>
@@ -21,6 +21,7 @@
                 <div class="header">
                     <div class="header-main">
                         <div class="title" id="popupTitle">[[POPUP_FULL_TITLE]]</div>
+                        <div id="projectGipControl" class="project-gip-control" hidden></div>
                         <div id="idReminderControl" class="id-reminder-control" hidden>
                             <label id="idReminderToggleLabel" hidden><input type="checkbox" id="idReminderEnabled" disabled> Включить оповещения</label>
                             <button type="button" id="idReminderSettings" class="id-reminder-settings" hidden>Настроить</button>
@@ -119,6 +120,7 @@
                         </div>
                         <div class="side-panel">
                             <div class="side-panel-title">Список чек-листов по проекту</div>
+                            <div id="projectPhaseBar" class="project-phase-bar" hidden></div>
                             <div class="side-panel-toolbar">
                                 <div class="side-panel-list" id="projectChecklistList"></div>
                                 <div id="stageFolderBox" class="stage-folder-box"></div>
@@ -131,6 +133,7 @@
         <script>
             window.CHECKLIST_POPUP_BOOTSTRAP = Object.freeze({
                 dialogId: [[POPUP_DIALOG_ID_JSON]],
+                phases: [[POPUP_PHASES_JSON]],
                 projectRootYandexPath: [[POPUP_PROJECT_ROOT_YANDEX_PATH_JSON]],
                 projectRootYandexUrl: [[POPUP_PROJECT_ROOT_YANDEX_URL_JSON]],
                 projectRootYandexPrepared: [[POPUP_PROJECT_ROOT_YANDEX_PREPARED_JSON]],
@@ -155,7 +158,7 @@
         <script src="ui-static/js/checklist-window-channel.js?v=8.15.1-bitrix-hotfix"></script>
         <script src="ui-static/js/popup-client-session.js?v=8.15.1-bitrix-hotfix"></script>
         <script src="ui-static/js/popup-document-refresh.js?v=8.17-folders"></script>
-        <script src="ui-static/js/popup-core.js?v=8.17-folders"></script>
+        <script src="ui-static/js/popup-core.js?v=8.18-phases"></script>
         <script src="ui-static/js/popup-document-list.js?v=8.17.1-links"></script>
         <script src="ui-static/js/popup-subitems.js?v=8.16-subitems"></script>
         <script src="ui-static/js/document-assignment-history.js?v=8.15.1-bitrix-hotfix"></script>
@@ -167,7 +170,7 @@
         <script src="ui-static/js/popup-upload-progress.js?v=8.15.1-bitrix-hotfix"></script>
         <script src="ui-static/js/popup-upload-manager.js?v=8.17-folders"></script>
         <script src="ui-static/js/popup-document-replacement.js?v=8.15.1-bitrix-hotfix"></script>
-        <script src="ui-static/js/popup-session-enhancements.js?v=8.15.5-id-yandex-folder-return"></script>
+        <script src="ui-static/js/popup-session-enhancements.js?v=8.18-phases"></script>
         <script src="ui-static/js/popup-edit-session.js?v=8.15.5-id-yandex-folder-return"></script>
         <script src="ui-static/js/popup-inactivity.js?v=8.16.1-review-fixes"></script>
         <script src="ui-static/js/bitrix-user-picker.js?v=8.15.1-bitrix-hotfix"></script>
@@ -193,4 +196,5 @@
         <script src="ui-static/js/popup-event-generic.js?v=8.15.1-bitrix-hotfix"></script>
         <script src="ui-static/js/popup-renderer-registry.js?v=8.15.1-bitrix-hotfix"></script>
         <script src="ui-static/js/popup-render-orchestrator.js?v=8.17-folders"></script>
+        <script src="ui-static/js/popup-project-phases.js?v=8.18-phases"></script>
         <script src="ui-static/js/popup-init.js?v=8.15.5-id-yandex-folder-return"></script>

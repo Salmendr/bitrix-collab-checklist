@@ -1,6 +1,6 @@
 {
-  "stage": "8.17.1-links",
-  "generatedAt": "2026-09-25T12:32:47+00:00",
+  "stage": "8.18-phases",
+  "generatedAt": "2026-09-30T04:05:12+00:00",
   "loadOrder": [
     "checklist-host-diagnostics.js",
     "popup-bootstrap.js",
@@ -48,6 +48,7 @@
     "popup-event-generic.js",
     "popup-renderer-registry.js",
     "popup-render-orchestrator.js",
+    "popup-project-phases.js",
     "popup-init.js"
   ],
   "extractedModules": {
@@ -80,8 +81,8 @@
       "bytes": 7935
     },
     "popup-core.js": {
-      "sha256": "463a5b7dd5bedc02116a1ecd506babaca19a21197525c707073732b491096e20",
-      "bytes": 105713
+      "sha256": "3df2b2abe47906920c3db89d85e4496c883a7e267bd0af1e545ff950e1486a42",
+      "bytes": 106373
     },
     "popup-document-list.js": {
       "sha256": "ea5f58ae65e8260ce606e1fd5a16d581ac955e4a11b0d90639a6f94d59bd05cf",
@@ -120,8 +121,8 @@
       "bytes": 25202
     },
     "popup-session-enhancements.js": {
-      "sha256": "7fd8e8889eadc86a9471688e5a0842997c57a7ecd00f19f04c75369fb9e6992a",
-      "bytes": 50734
+      "sha256": "40bae7c5be41b0780900b2a23983089a0d09addb7490d2eb04c297e6f1b4c095",
+      "bytes": 50954
     },
     "popup-edit-session.js": {
       "sha256": "8cd402644dc0c9724b46b22c725e19a572232fa81d7105a8d3c094de9d6c7c42",
@@ -297,7 +298,8 @@
     "Stage 8.16 hides the share and notification buttons and records only essential popup diagnostics.",
     "Stage 8.16.2 adds the Design checklist and optional explicit popup columns (panelGroupIds).",
     "Stage 8.17 uploads whole folders: a folder dropped into an item becomes a subitem, deeper levels become folders of the subitem; empty folders are kept.",
-    "Stage 8.17.1 shows the folder and Yandex buttons for subitems as for items."
+    "Stage 8.17.1 shows the folder and Yandex buttons for subitems as for items.",
+    "Stage 8.18 adds project stages (tabs above the checklist list, «Добавить этап») and the project GIP field."
   ],
   "hashMode": "utf8-lf",
   "lineEndingNote": "Hashes are calculated from bytes written to disk. This is stable for Windows CRLF and Unix LF.",
@@ -335,8 +337,8 @@
       "bytes": 7935
     },
     "popup-core.js": {
-      "sha256": "463a5b7dd5bedc02116a1ecd506babaca19a21197525c707073732b491096e20",
-      "bytes": 105713
+      "sha256": "3df2b2abe47906920c3db89d85e4496c883a7e267bd0af1e545ff950e1486a42",
+      "bytes": 106373
     },
     "popup-document-list.js": {
       "sha256": "ea5f58ae65e8260ce606e1fd5a16d581ac955e4a11b0d90639a6f94d59bd05cf",
@@ -371,8 +373,8 @@
       "bytes": 25202
     },
     "popup-session-enhancements.js": {
-      "sha256": "7fd8e8889eadc86a9471688e5a0842997c57a7ecd00f19f04c75369fb9e6992a",
-      "bytes": 50734
+      "sha256": "40bae7c5be41b0780900b2a23983089a0d09addb7490d2eb04c297e6f1b4c095",
+      "bytes": 50954
     },
     "popup-edit-session.js": {
       "sha256": "8cd402644dc0c9724b46b22c725e19a572232fa81d7105a8d3c094de9d6c7c42",
@@ -485,6 +487,10 @@
     "folder-upload-planner.js": {
       "sha256": "c4eb5210b37145959f2733c815defba63c15f11bd5b8617476b5f719df930cfb",
       "bytes": 6389
+    },
+    "popup-project-phases.js": {
+      "sha256": "5c8748479ed96aed7176630e3c3ba9b3358a43597e1bdd6c5879ae80ccf17e6a",
+      "bytes": 14903
     }
   }
 }

@@ -1622,6 +1622,12 @@ async function finalizePopupSession(saveChanges, options = {}) {
     // initiated after a successful Save/Cancel must not finalize a second time.
     clearPopupCloseHandoff();
 
+    // Switching or adding a project stage continues in this window.
+    if (typeof finalizeOptions.afterFinalize === 'function') {
+        await finalizeOptions.afterFinalize(persistResult);
+        return true;
+    }
+
     // Stage 7.1.1.1: both successful save and rollback use the safe local
     // fallback. Bitrix closes through BX24.closeApplication(); a direct local
     // tab reloads instead of being redirected to a blank page.
