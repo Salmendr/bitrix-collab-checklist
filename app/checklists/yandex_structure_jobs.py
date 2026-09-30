@@ -23,12 +23,15 @@ SUPPORTED_STRUCTURE_ACTIONS = frozenset({
     "create_item_subfolder",
     "move_item_subfolder",
     "delete_item_subfolder",
+    "replace_item_subfolder",
 })
 SUBFOLDER_JOB_SUFFIX = "::subfolders"
 SUBFOLDER_ACTIONS = frozenset({
     "create_item_subfolder",
     "move_item_subfolder",
     "delete_item_subfolder",
+    # Folder replacement: old contents go to the Yandex trash first.
+    "replace_item_subfolder",
 })
 
 

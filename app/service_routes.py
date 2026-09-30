@@ -26,9 +26,44 @@ async def api_debug_event(request: Request):
             }
 
     event = str(payload.get("event") or "unknown").strip()
-    write_debug_log(event, payload)
+    payload = _compact_client_event(event, payload)
+    if payload is not None:
+        write_debug_log(event, payload)
 
     return JSONResponse({"ok": True})
+
+
+# Popup opening repeats what the server already logs (edit_session_started,
+# lock_acquire): these client events add nothing.
+REDUNDANT_CLIENT_EVENTS = frozenset({
+    "popup_edit_session_start_requested",
+    "popup_session_startup_completed",
+})
+
+
+def _compact_client_event(event: str, payload: dict) -> dict | None:
+    """Keep popup-open logs short; the browser snapshot only for errors."""
+    if not isinstance(payload, dict):
+        return payload
+    if event in REDUNDANT_CLIENT_EVENTS:
+        return None
+    inner = payload.get("payload")
+    if event == "stage_yandex_folder_prepared" and isinstance(inner, dict):
+        # Only a real preparation or a problem is worth a line.
+        if not inner.get("preparedNow") and not inner.get("error"):
+            return None
+    is_error = (
+        event.endswith("_error")
+        or event.endswith("_failed")
+        or event.endswith("_unhandled_rejection")
+    )
+    if event.startswith("popup_diag_") and not is_error and isinstance(inner, dict):
+        payload = {
+            key: value for key, value in payload.items()
+            if key not in {"frameInstanceId", "href"}
+        }
+        payload["payload"] = {"details": inner.get("details") or {}}
+    return payload
 
 
 @router.get("/debug/logs", response_class=HTMLResponse)

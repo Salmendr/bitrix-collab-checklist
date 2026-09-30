@@ -6,6 +6,7 @@ from app.checklists.document_folders import (
     child_folders,
     documents_in_folder,
     find_folder,
+    folder_key,
     item_allows_plain_folders,
     item_subfolders,
     names_in_folder,
@@ -332,6 +333,7 @@ async def api_checklist_upload_document(
     requireEditSession: str = Form(""),
     relativeFolder: str = Form(""),
     folderUploadRoot: str = Form(""),
+    folderReplaceId: str = Form(""),
 ):
     upload_id = uuid.uuid4().hex
     started_at = time.monotonic()
@@ -385,6 +387,7 @@ async def api_checklist_upload_document(
                 acting_user_name=acting_user_name,
                 relative_folder=relative_folder,
                 folder_upload_root=folder_upload_root,
+                folder_replace_id=clean_cell_value(folderReplaceId),
             )
             return JSONResponse(result)
         except Exception as exc:
@@ -1998,6 +2001,7 @@ def _build_folder_actions_html(
     yandex_available: bool,
     show_yandex: bool | None = None,
     yandex_lazy: bool = False,
+    show_replace_folder: bool = False,
 ) -> str:
     if show_yandex is None:
         show_yandex = bool(documents)
@@ -2054,9 +2058,30 @@ def _build_folder_actions_html(
             </button>
         '''
 
+    replace_folder_html = '''
+            <button
+                class="folder-action-button checklist-action-button folder-replace-folder-button"
+                type="button"
+                id="folderReplaceFolderBtn"
+                data-role="folder-replace"
+                data-folder-mutation="1"
+                title="Заменить папку"
+                aria-label="Заменить папку"
+            >
+                <svg class="folder-replace-icon" viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M3 7.5A1.5 1.5 0 0 1 4.5 6h4.2l1.8 2h9a1.5 1.5 0 0 1 1.5 1.5v8A1.5 1.5 0 0 1 19.5 19h-15A1.5 1.5 0 0 1 3 17.5Z"></path>
+                    <path d="M9 13.2a3 3 0 0 1 5.3-1.6"></path>
+                    <path d="m14.6 10.4-.2 1.5-1.5-.2"></path>
+                    <path d="M15 14.4a3 3 0 0 1-5.3 1.4"></path>
+                    <path d="m9.4 17.1.2-1.5 1.5.3"></path>
+                </svg>
+            </button>
+    ''' if show_replace_folder else ""
+
     return f'''
         <div class="folder-actions" role="toolbar" aria-label="Действия с документами пункта">
             {replace_controls_html}
+            {replace_folder_html}
             <button
                 class="folder-action-button checklist-action-button checklist-action-button-upload"
                 type="button"
@@ -2205,10 +2230,30 @@ def api_checklist_folder(
     # an item folder still without one) is published on the first click.
     yandex_folder_url = "" if relative_folder else item_yandex["url"]
 
-    # Detached archive series belong to the item, not to a nested folder.
-    table_item = target_item if not relative_folder else {
+    # Archived series are shown in the folder they were archived from; a
+    # series whose folder no longer exists (replaced, deleted) is shown in
+    # the nearest folder that still exists.
+    existing_folder_keys = {
+        folder_key(path) for path in item_subfolders(target_item)
+    }
+
+    def _series_folder(series: dict) -> str:
+        value = normalize_relative_folder(
+            (series or {}).get("relativeFolder"),
+            strict=False,
+        )
+        while value and folder_key(value) not in existing_folder_keys:
+            value = value.rsplit("/", 1)[0] if "/" in value else ""
+        return value
+
+    table_item = {
         **target_item,
-        "archivedDocumentSeries": [],
+        "archivedDocumentSeries": [
+            series
+            for series in (target_item.get("archivedDocumentSeries") or [])
+            if isinstance(series, dict)
+            and folder_key(_series_folder(series)) == folder_key(relative_folder)
+        ],
     }
     table_html = _build_folder_document_rows_html(
         documents=documents,
@@ -2231,6 +2276,8 @@ def api_checklist_folder(
         yandex_available=yandex_available,
         show_yandex=bool(documents or has_any_documents or relative_folder),
         yandex_lazy=bool(item_yandex["path"]),
+        # A subitem (its whole contents) or a folder inside it.
+        show_replace_folder=item_allows_plain_folders(target_item),
     )
 
     yandex_folder_path_html = ""
@@ -2282,7 +2329,7 @@ def api_checklist_folder(
     ui_static_base_url = (
         f"{app_base_path}/ui-static"
     )
-    ui_asset_version = "8.17.1-links"
+    ui_asset_version = "8.19-folder-replace"
     popup_url = (
         f"{app_base_path}/popup"
         f"?dialogId={quote(dialog_id, safe='')}"
@@ -2373,6 +2420,7 @@ def api_checklist_folder(
         "folderRenameApiUrl": f"{app_base_path}/api/checklist/folders/rename",
         "folderMoveApiUrl": f"{app_base_path}/api/checklist/folders/move",
         "folderDeleteApiUrl": f"{app_base_path}/api/checklist/folders/delete",
+        "folderReplaceApiUrl": f"{app_base_path}/api/checklist/folders/replace-begin",
         "addItemApiUrl": f"{app_base_path}/api/checklist/add-item",
         "renameItemApiUrl": f"{app_base_path}/api/checklist/rename-item",
         "subitems": [
@@ -2470,6 +2518,9 @@ def api_checklist_folder(
             ),
             "FOLDER_TREE_ACTIONS_JS_URL": html.escape(
                 f"{ui_static_base_url}/js/folder-tree-actions.js?v={ui_asset_version}"
+            ),
+            "FOLDER_REPLACE_JS_URL": html.escape(
+                f"{ui_static_base_url}/js/folder-replace.js?v={ui_asset_version}"
             ),
         },
     )

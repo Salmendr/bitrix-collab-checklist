@@ -53,6 +53,7 @@ MESSAGE_SECTION_LABELS = {
     "archive-delete": "Удалены архивные версии",
     "add-item": "Добавлены пункты",
     "folder-upload": "Загружены папки",
+    "folder-replace": "Заменены папки",
     "folder-create": "Созданы папки",
     "folder-move": "Изменены папки",
     "folder-delete": "Удалены папки",
@@ -97,6 +98,7 @@ def split_changes(changes: list) -> dict:
         "archive-delete": [],
         "add-item": [],
         "folder-upload": [],
+        "folder-replace": [],
         "folder-create": [],
         "folder-move": [],
         "folder-delete": [],
@@ -130,7 +132,7 @@ def split_changes(changes: list) -> dict:
             groups["archive-delete"].append(change)
         elif field == "add-item":
             groups["add-item"].append(change)
-        elif field in {"folder-upload", "folder-create", "folder-move", "folder-delete"}:
+        elif field in {"folder-upload", "folder-replace", "folder-create", "folder-move", "folder-delete"}:
             groups[field].append(change)
 
     return groups
@@ -235,7 +237,7 @@ def build_change_left_label(field: str, checklist_key: str) -> str:
         return "Архив"
     if field == "add-item":
         return "Пункт"
-    if field in {"folder-upload", "folder-create", "folder-move", "folder-delete"}:
+    if field in {"folder-upload", "folder-replace", "folder-create", "folder-move", "folder-delete"}:
         return "Папка"
     return field
 
@@ -266,7 +268,7 @@ def build_change_emoji(field: str, new_value: str, checklist_key: str) -> str:
         return "🗑️"
     if field == "add-item":
         return "➕"
-    if field in {"folder-upload", "folder-create", "folder-move"}:
+    if field in {"folder-upload", "folder-replace", "folder-create", "folder-move"}:
         return "📁"
     if field == "folder-delete":
         return "🗑️"
@@ -454,6 +456,7 @@ def build_recent_changes_sections(changes: list, checklist_key: str) -> list[dic
         "document-add",
         "document-remove",
         "folder-upload",
+        "folder-replace",
         "folder-create",
         "folder-move",
         "folder-delete",

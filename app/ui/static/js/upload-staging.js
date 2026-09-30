@@ -318,12 +318,7 @@
                         <small>или нажмите здесь, чтобы выбрать файлы</small>
                     </span>
                 </button>
-                <button
-                    class="upload-staging-folder-picker"
-                    type="button"
-                    data-role="upload-staging-folder-picker"
-                    title="Выбрать папку целиком со всеми вложенными папками"
-                >Выбрать папку</button>
+
                 <button
                     class="upload-staging-close"
                     type="button"
@@ -353,17 +348,6 @@
         const footer = zone.querySelector('[data-role="upload-staging-footer"]');
         const count = zone.querySelector('[data-role="upload-staging-count"]');
         const confirmButton = zone.querySelector('[data-role="upload-staging-confirm"]');
-        const folderPicker = zone.querySelector('[data-role="upload-staging-folder-picker"]');
-        const folderInput = global.document.createElement('input');
-        folderInput.type = 'file';
-        folderInput.multiple = true;
-        folderInput.hidden = true;
-        folderInput.setAttribute('webkitdirectory', '');
-        folderInput.setAttribute('directory', '');
-        zone.appendChild(folderInput);
-        if (options.allowFolders === false) {
-            folderPicker.hidden = true;
-        }
 
         function canInteract() {
             if (state.busy || trigger.disabled) return false;
@@ -427,7 +411,6 @@
             state.expanded = true;
             state.dropActive = false;
             input.value = '';
-            folderInput.value = '';
             notifyState(state);
         }
 
@@ -460,7 +443,6 @@
                 state.expanded = false;
             }
             input.value = '';
-            folderInput.value = '';
             notifyState(state);
         }
 
@@ -534,7 +516,6 @@
 
             const hasContent = state.files.length > 0 || state.emptyDirs.length > 0;
             picker.disabled = state.busy;
-            folderPicker.disabled = state.busy;
             closeButton.disabled = state.busy;
             confirmButton.disabled = state.busy || !hasContent;
             confirmButton.textContent = state.busy ? 'Загрузка…' : 'Загрузить';
@@ -652,16 +633,6 @@
         picker.addEventListener('click', () => {
             if (canInteract()) input.click();
         });
-        folderPicker.addEventListener('click', () => {
-            if (canInteract()) folderInput.click();
-        });
-        folderInput.addEventListener('change', () => {
-            const files = Array.from(folderInput.files || [])
-                .filter(file => !isSkippedSystemFile(file))
-                .map(file => tagFile(file, fileFolderPath(file)));
-            if (files.length) addFiles(files);
-            folderInput.value = '';
-        });
         closeButton.addEventListener('click', () => controller.collapse());
         confirmButton.addEventListener('click', confirmUpload);
         input.addEventListener('change', () => {
@@ -692,10 +663,26 @@
         });
     }
 
+    // Reads a drop (folders included): take the entries synchronously inside
+    // the drop handler, the returned promise resolves with the files.
+    function readDrop(dataTransfer) {
+        const taken = takeDroppedEntries(dataTransfer);
+        return collectDropped(taken).then(result => ({
+            ...result,
+            topEntries: taken.entries.map(entry => ({
+                name: entry.name,
+                isDirectory: !!entry.isDirectory
+            })),
+            looseCount: taken.looseFiles.length
+        }));
+    }
+
     global.ChecklistUploadStaging = Object.freeze({
         clearAll,
         create,
         fileFolderPath,
+        formatBytes,
+        readDrop,
         tagFile,
         hasPendingFiles() {
             return pendingFileCount() > 0;

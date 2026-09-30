@@ -115,14 +115,73 @@ def ensure_parent_folder_path(
     )
 
 
+def _retarget_subitem_rename(job: dict, item: dict, parent_path: str) -> dict:
+    """A rename stays inside the parent's current folder.
+
+    The job is recorded with the parent path known at commit. When the
+    parent is moved or renamed in the same session, its job runs first and
+    carries the subitem folder along; the rename then has to follow it,
+    otherwise it recreates the old parent folder and pulls the subitem
+    back there.
+    """
+    from app.checklists.yandex_folders import (
+        _preserve_standard_folder_prefix,
+        normalize_yandex_disk_path,
+    )
+    from app.checklists.yandex_structure_jobs import (
+        update_yandex_structure_job_source,
+        update_yandex_structure_job_target,
+    )
+
+    parent = parent_path.rstrip("/")
+    job_id = clean_cell_value(job.get("job_id"))
+    source_path = clean_cell_value(job.get("source_path"))
+    target_path = clean_cell_value(job.get("target_path"))
+    stored_path = clean_cell_value(item.get("yandexFolderPath"))
+    if stored_path and stored_path.rsplit("/", 1)[0] == parent:
+        # Rebased after the parent job: the folder's real address.
+        new_source = stored_path
+    else:
+        base_name = (source_path or target_path).rsplit("/", 1)[-1]
+        if not base_name:
+            return job
+        new_source = normalize_yandex_disk_path(f"{parent}/{base_name}")
+    name = clean_cell_value(job.get("item_name")) or clean_cell_value(item.get("name"))
+    new_target = parent + "/" + _preserve_standard_folder_prefix(
+        new_source.rsplit("/", 1)[-1],
+        name,
+    )
+    updated = dict(job)
+    if new_source != source_path:
+        updated = update_yandex_structure_job_source(job_id, new_source) or {
+            **updated,
+            "source_path": new_source,
+        }
+    if new_target != target_path:
+        updated = update_yandex_structure_job_target(job_id, new_target) or {
+            **updated,
+            "target_path": new_target,
+        }
+    write_debug_log("yandex_subitem_job_retargeted", {
+        "jobId": job_id,
+        "action": "rename_item_folder",
+        "itemId": clean_cell_value(item.get("id")),
+        "previousSourcePath": source_path,
+        "previousTargetPath": target_path,
+        "sourcePath": new_source,
+        "targetPath": new_target,
+    })
+    return updated
+
+
 def retarget_subitem_job(job: dict, item: dict) -> dict:
-    """Point a create/move job of a subitem into its parent's current folder."""
+    """Point a job of a subitem into its parent's current folder."""
     from app.checklists.yandex_structure_jobs import (
         update_yandex_structure_job_target,
     )
 
     action = clean_cell_value(job.get("action"))
-    if action not in {"create_item_folder", "move_item_folder"}:
+    if action not in {"create_item_folder", "move_item_folder", "rename_item_folder"}:
         return job
     parent_id = parent_id_of(item)
     if not parent_id:
@@ -138,6 +197,8 @@ def retarget_subitem_job(job: dict, item: dict) -> dict:
     current_parent = current_target.rsplit("/", 1)[0] if "/" in current_target else ""
     if current_parent == parent_path.rstrip("/"):
         return job
+    if action == "rename_item_folder":
+        return _retarget_subitem_rename(job, item, parent_path)
     name = clean_cell_value(job.get("item_name")) or clean_cell_value(item.get("name"))
     target = build_subitem_target_path(parent_path, name)
     source_path = clean_cell_value(job.get("source_path"))

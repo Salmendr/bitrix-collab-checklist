@@ -453,6 +453,9 @@
         }
         const snapshot = buildSnapshot();
         snapshot.eventSequence = eventSequence;
+        // The full browser snapshot (frame, viewport, document state) is
+        // only useful to investigate errors; decisions stay one short line.
+        const isError = /_(error|failed|unhandled_rejection)$/.test(String(event || ''));
 
         return sendRecord({
             event: String(event || 'popup_diag_unknown'),
@@ -475,13 +478,19 @@
                 || 'id',
                 80
             ),
-            payload: {
-                details: details && typeof details === 'object'
-                    ? details
-                    : {},
-                snapshot
-            },
-            href: snapshot.href,
+            payload: isError
+                ? {
+                    details: details && typeof details === 'object'
+                        ? details
+                        : {},
+                    snapshot
+                }
+                : {
+                    details: details && typeof details === 'object'
+                        ? details
+                        : {}
+                },
+            href: isError ? snapshot.href : undefined,
             ts: new Date().toISOString()
         }, Boolean(useBeacon));
     }

@@ -620,6 +620,13 @@ def normalize_detached_archive_series_record(raw_series: dict) -> dict | None:
         "removedByName": clean_cell_value(
             raw_series.get("removedByName")
         ),
+        # Folder inside the (sub)item the series was archived from.
+        "relativeFolder": normalize_relative_folder(
+            raw_series.get("relativeFolder"),
+            strict=False,
+        ),
+        # "folder_replace" when the whole folder was replaced.
+        "removedReason": clean_cell_value(raw_series.get("removedReason")),
         "archiveVersions": archive_versions,
     }
 
@@ -675,6 +682,7 @@ def build_detached_archive_series(
         "removedAt": clean_cell_value(removed_at) or utc_now_iso(),
         "removedById": clean_cell_value(removed_by_id),
         "removedByName": clean_cell_value(removed_by_name),
+        "relativeFolder": document.get("relativeFolder") or "",
         "archiveVersions": archive_versions,
     })
 

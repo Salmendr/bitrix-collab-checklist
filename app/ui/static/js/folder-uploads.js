@@ -341,6 +341,7 @@
             itemName: folderItemName,
             relativeFolder: String(extra.relativeFolder || ''),
             folderUploadRoot: String(extra.folderUploadRoot || ''),
+            folderReplaceId: String(extra.folderReplaceId || ''),
             fileName: String(
                 file && file.name || 'Файл'
             ),
@@ -481,6 +482,9 @@
         }
         if (context && context.folderUploadRoot) {
             formData.append('folderUploadRoot', context.folderUploadRoot);
+        }
+        if (context && context.folderReplaceId) {
+            formData.append('folderReplaceId', context.folderReplaceId);
         }
         formData.append(
             'checklistKey',
@@ -1044,6 +1048,21 @@
             );
         },
         buildTaskContext: buildFolderUploadTaskContext,
+        // One file into a folder of this page (folder replacement).
+        enqueueUpload(file, placement) {
+            const openerManager = getFolderOpenerUploadManager();
+            const manager = openerManager || folderFallbackUploadManager;
+            const context = buildFolderUploadTaskContext(file, 'upload', {
+                sessionId: requireFolderEditSession('загрузка файлов'),
+                itemId: placement && placement.itemId,
+                relativeFolder: placement && placement.relativeFolder,
+                folderUploadRoot: placement && placement.folderUploadRoot,
+                folderReplaceId: placement && placement.folderReplaceId
+            });
+            return manager.enqueue(context, function (immutableContext, progressControl) {
+                return sendFolderUploadRequest(file, immutableContext, progressControl);
+            });
+        },
         sendMultipartRequest: sendFolderMultipartRequest,
         notifyParent: notifyParentChecklistDocumentChanged
     });

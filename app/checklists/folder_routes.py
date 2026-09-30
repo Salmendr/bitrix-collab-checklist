@@ -99,6 +99,16 @@ def _relocate_folder(item: dict, source: str, target: str) -> int:
             document["relativeFolder"] = rebase_folder(current, source, target)
             moved += 1
     item["documents"] = documents
+    # Archived series follow their folder.
+    series_list = []
+    for series in item.get("archivedDocumentSeries") or []:
+        if isinstance(series, dict):
+            current = normalize_relative_folder(series.get("relativeFolder"), strict=False)
+            if current and is_within(current, source):
+                series = {**series, "relativeFolder": rebase_folder(current, source, target)}
+        series_list.append(series)
+    if series_list:
+        item["archivedDocumentSeries"] = series_list
     return moved
 
 
@@ -196,6 +206,7 @@ async def api_folder_create(request: Request):
                 "folderUploadRoot": normalize_relative_folder(
                     payload.get("folderUploadRoot")
                 ),
+                "folderReplaceId": clean_cell_value(payload.get("folderReplaceId")),
             },
             "response": {"relativeFolder": path, "created": True},
         }
@@ -324,14 +335,102 @@ async def api_folder_delete(request: Request):
             "response": {"relativeFolder": folder, "removedDocuments": removed},
         }
 
-    class _Replay:
-        # _run_folder_change reads the JSON body; reuse the parsed payload.
-        def __init__(self, source: Request, body: dict):
-            self.url = source.url
-            self._body = body
+    return await _run_folder_change(_Replay(request, payload), change)
 
-        async def json(self):
-            return self._body
+
+class _Replay:
+    # _run_folder_change reads the JSON body; reuse the parsed payload.
+    def __init__(self, source: Request, body: dict):
+        self.url = source.url
+        self._body = body
+
+    async def json(self):
+        return self._body
+
+
+@router.post("/api/checklist/folders/replace-begin")
+async def api_folder_replace_begin(request: Request):
+    """First step of «Заменить папку»: the old contents go to the archive.
+
+    The folder keeps its name and place. The client then uploads the new
+    folder's files into it (with the returned folderReplaceId). Yandex Disk is
+    cleared by the folder job at commit, before those uploads.
+    """
+    import uuid
+
+    payload = await request.json()
+    dialog_id = normalize_dialog_id(payload.get("dialogId"))
+    config = get_checklist_config(normalize_checklist_key(payload.get("checklistKey")))
+    item_id = clean_cell_value(payload.get("itemId"))
+    acting_user_id = clean_cell_value(payload.get("actingUserId"))
+    acting_user_name = clean_cell_value(payload.get("actingUserName")) or "Пользователь"
+    session_id = clean_cell_value(payload.get("sessionId"))
+    if not session_id:
+        return JSONResponse({"ok": False, "error": "Активная сессия редактирования не готова", "editSessionError": True}, status_code=409)
+    if not can_user_delete_files(acting_user_id):
+        return JSONResponse({"ok": False, "error": "У вас недостаточно прав на замену папки"}, status_code=403)
+
+    data = get_checklist(dialog_id, config.key)
+    item = _find_item(data.get("items") or [], item_id)
+    if item is None:
+        return JSONResponse({"ok": False, "error": "item not found"}, status_code=404)
+    try:
+        if not item_allows_plain_folders(item):
+            raise FolderOperationError("Заменить можно папку подпункта или вложенную папку")
+        requested = normalize_relative_folder(payload.get("folder"))
+        folder = find_folder(item_subfolders(item), requested) if requested else ""
+        if requested and not folder:
+            raise FolderOperationError("Папка не найдена")
+        new_name = sanitize_folder_segment(payload.get("newFolderName"))
+        _ensure_not_syncing(item, folder)
+    except (FolderOperationError, FolderPathError) as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+
+    folder_replace_id = uuid.uuid4().hex
+    from app.checklists.edit_session_documents import transactional_archive_folder_documents
+    try:
+        archived = transactional_archive_folder_documents(
+            session_id=session_id,
+            dialog_id=dialog_id,
+            checklist_key=config.key,
+            item_id=item_id,
+            folder=folder,
+            folder_replace_id=folder_replace_id,
+            acting_user_id=acting_user_id,
+            acting_user_name=acting_user_name,
+        )
+    except Exception as exc:
+        write_debug_log("checklist_folder_replace_archive_failed", {
+            "dialogId": dialog_id,
+            "itemId": item_id,
+            "folder": folder,
+            "error": str(exc),
+        })
+        return checklist_edit_session_error_response(exc)
+
+    folder_label = folder or clean_cell_value(item.get("name"))
+
+    def change(payload: dict, current: dict) -> dict:
+        # The structure is rebuilt by the new folder: only the folder itself stays.
+        current["subfolders"] = [
+            value for value in item_subfolders(current)
+            if not (is_within(value, folder) and folder_key(value) != folder_key(folder))
+        ]
+        return {
+            "operationType": "checklist_folder_replace",
+            "payload": {
+                "relativeFolder": folder,
+                "folderLabel": folder_label,
+                "newFolderName": new_name,
+                "folderReplaceId": folder_replace_id,
+                "documentCount": int(archived.get("archivedCount") or 0),
+            },
+            "response": {
+                "relativeFolder": folder,
+                "folderReplaceId": folder_replace_id,
+                "archivedCount": int(archived.get("archivedCount") or 0),
+            },
+        }
 
     return await _run_folder_change(_Replay(request, payload), change)
 

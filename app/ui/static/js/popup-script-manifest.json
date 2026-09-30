@@ -1,6 +1,6 @@
 {
-  "stage": "8.18-phases",
-  "generatedAt": "2026-09-30T04:05:12+00:00",
+  "stage": "8.19-folder-replace",
+  "generatedAt": "2026-09-30T05:15:44+00:00",
   "loadOrder": [
     "checklist-host-diagnostics.js",
     "popup-bootstrap.js",
@@ -97,8 +97,8 @@
       "bytes": 12564
     },
     "upload-staging.js": {
-      "sha256": "2d9de930f7e62c800648c1f159322ee45eee7dcde8a13cf54ad1f115269fec47",
-      "bytes": 27238
+      "sha256": "314e4b82079424c1d5d608afcf578c6ab6fd223fadb5713d42b43b2e4a7458d2",
+      "bytes": 26381
     },
     "popup-document-actions.js": {
       "sha256": "2ec5decc69b13d60eb3a34eb199122d2ca45b98966a66aae5a5f8f9c0176e72c",
@@ -113,8 +113,8 @@
       "bytes": 11655
     },
     "popup-upload-manager.js": {
-      "sha256": "8548246cc9b4c6cbd0807d363c500c083d081cbed946ac541b4114fb5395e87b",
-      "bytes": 19742
+      "sha256": "9c6a0c4d5f0146fd7222e952096dde9ce9908f1945c210540b2d0c430bbfdd73",
+      "bytes": 19809
     },
     "popup-document-replacement.js": {
       "sha256": "f7ed236bf2952b8ee12fa0d1809ae9f075f41a7d4476bd499f943c7bfa957ef9",
@@ -299,14 +299,15 @@
     "Stage 8.16.2 adds the Design checklist and optional explicit popup columns (panelGroupIds).",
     "Stage 8.17 uploads whole folders: a folder dropped into an item becomes a subitem, deeper levels become folders of the subitem; empty folders are kept.",
     "Stage 8.17.1 shows the folder and Yandex buttons for subitems as for items.",
-    "Stage 8.18 adds project stages (tabs above the checklist list, «Добавить этап») and the project GIP field."
+    "Stage 8.18 adds project stages (tabs above the checklist list, «Добавить этап») and the project GIP field.",
+    "Stage 8.19: folders are uploaded by drag and drop only; popup-open diagnostics are compact."
   ],
   "hashMode": "utf8-lf",
   "lineEndingNote": "Hashes are calculated from bytes written to disk. This is stable for Windows CRLF and Unix LF.",
   "modules": {
     "checklist-host-diagnostics.js": {
-      "sha256": "b5d4fe941e8489cfc6d00452b18b9c15d53fc7cfcbb5c1ea170eb7e6e6f6e530",
-      "bytes": 21482
+      "sha256": "c8669043ef114ee3fa1044f9e6f0fad7e8bc59dd7e4ac914e330149f2d363c84",
+      "bytes": 21960
     },
     "popup-bootstrap.js": {
       "sha256": "79ea9dc579d40fe407a868f22577efeced5236e4a6a28244f36d589281fe41c1",
@@ -365,8 +366,8 @@
       "bytes": 11655
     },
     "popup-upload-manager.js": {
-      "sha256": "8548246cc9b4c6cbd0807d363c500c083d081cbed946ac541b4114fb5395e87b",
-      "bytes": 19742
+      "sha256": "9c6a0c4d5f0146fd7222e952096dde9ce9908f1945c210540b2d0c430bbfdd73",
+      "bytes": 19809
     },
     "popup-document-replacement.js": {
       "sha256": "f7ed236bf2952b8ee12fa0d1809ae9f075f41a7d4476bd499f943c7bfa957ef9",

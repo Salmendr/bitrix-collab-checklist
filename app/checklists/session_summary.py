@@ -398,6 +398,8 @@ def normalize_session_operations(
     folder_changes: list[dict] = []
     # Files removed together with their folder are reported by the folder line.
     removed_with_folder: set[tuple] = set()
+    # Files of a replaced folder: reported by one «папка заменена» line.
+    replaced_uploads: set[tuple] = set()
     archive_deletes: OrderedDict[tuple, dict] = OrderedDict()
     added_items: OrderedDict[str, dict] = OrderedDict()
 
@@ -548,7 +550,25 @@ def normalize_session_operations(
             )
             continue
 
+        if operation_type == "document_folder_archive":
+            # The old contents of a replaced folder went to the archive.
+            for series_id in payload.get("documentSeriesIds") or []:
+                key = (item_id, clean_cell_value(series_id))
+                removed_with_folder.add(key)
+                for state_key, state in document_states.items():
+                    if (
+                        clean_cell_value(state.get("itemId")) == item_id
+                        and clean_cell_value(state.get("seriesId")) == key[1]
+                    ):
+                        state["finalExists"] = False
+            continue
+
         if operation_type == "document_upload":
+            if clean_cell_value(payload.get("folderReplaceId")):
+                replaced_uploads.add((
+                    item_id,
+                    _document_identity(operation, _document_from(operation, "after")),
+                ))
             folder_root = clean_cell_value(payload.get("folderUploadRoot"))
             if folder_root:
                 identity = _document_identity(
@@ -590,6 +610,23 @@ def normalize_session_operations(
                 action="remove",
                 before_document=_document_from(operation, "before"),
             )
+            continue
+
+        if operation_type == "checklist_folder_replace":
+            folder_changes.append({
+                "sequenceNo": sequence_no,
+                "field": "folder-replace",
+                "itemId": item_id,
+                "itemName": item_name,
+                "oldValue": clean_cell_value(payload.get("folderLabel") or payload.get("relativeFolder")),
+                "newValue": "«" + clean_cell_value(payload.get("newFolderName")) + "»",
+            })
+            continue
+
+        if (
+            operation_type == "checklist_folder_create"
+            and clean_cell_value(payload.get("folderReplaceId"))
+        ):
             continue
 
         if operation_type in {
@@ -738,6 +775,11 @@ def normalize_session_operations(
             continue
 
         if not initial_exists and final_exists:
+            if (
+                clean_cell_value(state.get("itemId")),
+                clean_cell_value(state.get("seriesId")),
+            ) in replaced_uploads:
+                continue
             upload_root = folder_upload_roots.get(
                 (clean_cell_value(state.get("itemId")), clean_cell_value(state.get("seriesId")))
             )

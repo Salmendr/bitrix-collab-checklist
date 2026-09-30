@@ -176,4 +176,31 @@ def execute_subfolder_job(job: dict) -> dict:
             yandex_disk_delete_path(path, permanently=False)
         return {"ok": True, "folderPath": path, "trashed": bool(meta)}
 
+    if action == "replace_item_subfolder":
+        from app.yandex_disk.client import yandex_disk_list_folder_children
+
+        # The folder keeps its place (and its public link); its old contents
+        # go to the Yandex trash, the new files are uploaded after this job.
+        relative = normalize_relative_folder(result.get("relativeFolder"), strict=False)
+        path = join_yandex_folder(base, relative)
+        meta = yandex_disk_try_get_resource_meta(path)
+        if not meta:
+            return {"ok": True, "folderPath": path, "trashed": 0}
+        if clean_cell_value(meta.get("type")) != "dir":
+            raise RuntimeError("На Яндекс.Диске по пути папки находится файл. Замена остановлена.")
+        trashed = 0
+        for child in yandex_disk_list_folder_children(path):
+            child_path = clean_cell_value(child.get("path"))
+            if not child_path:
+                continue
+            yandex_disk_delete_path(child_path, permanently=False)
+            trashed += 1
+        write_debug_log("yandex_item_subfolder_replaced", {
+            "jobId": clean_cell_value(job.get("job_id")),
+            "itemId": item_id,
+            "folderPath": path,
+            "trashed": trashed,
+        })
+        return {"ok": True, "folderPath": path, "trashed": trashed}
+
     raise RuntimeError(f"Unsupported subfolder action: {action}")

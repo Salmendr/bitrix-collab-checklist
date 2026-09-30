@@ -89,6 +89,7 @@ function createPopupUploadManager(options = {}) {
             // Folder uploads: target folder inside the (sub)item.
             relativeFolder: String(source.relativeFolder || ''),
             folderUploadRoot: String(source.folderUploadRoot || ''),
+            folderReplaceId: String(source.folderReplaceId || ''),
             queueKey: queueKeyForContext(source),
             queueLimit: Math.max(
                 1,

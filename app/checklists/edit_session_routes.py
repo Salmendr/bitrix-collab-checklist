@@ -147,10 +147,17 @@ async def api_checklist_edit_session_start(
             ),
         }
 
-        write_debug_log(
-            "edit_session_started",
-            response,
-        )
+        session = response["session"] or {}
+        # Compact: who opened what; the full record is in edit_sessions.
+        write_debug_log("edit_session_started", {
+            "sessionId": session.get("sessionId", ""),
+            "dialogId": session.get("dialogId", ""),
+            "userId": session.get("userId", ""),
+            "userName": session.get("userName", ""),
+            "created": response["created"],
+            "resumed": response["resumed"],
+            "recovered": response["recovered"],
+        })
 
         return JSONResponse(response)
 

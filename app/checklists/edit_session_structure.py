@@ -56,6 +56,7 @@ SUBFOLDER_OPERATION_ACTIONS = {
     "checklist_folder_create": "create_item_subfolder",
     "checklist_folder_move": "move_item_subfolder",
     "checklist_folder_delete": "delete_item_subfolder",
+    "checklist_folder_replace": "replace_item_subfolder",
 }
 
 
@@ -77,7 +78,8 @@ def _prepare_subfolder_jobs_in_transaction(conn, *, session_id: str, now: str) -
           AND operation_type IN (
               'checklist_folder_create',
               'checklist_folder_move',
-              'checklist_folder_delete'
+              'checklist_folder_delete',
+              'checklist_folder_replace'
           )
         ORDER BY sequence_no ASC
         """,

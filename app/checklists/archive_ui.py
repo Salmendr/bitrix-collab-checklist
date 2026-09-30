@@ -108,6 +108,7 @@ def build_archive_series_rows_html(
     panel_id: str,
     format_datetime,
     detached: bool = False,
+    detached_label: str = "Текущий файл удалён",
 ) -> str:
     versions = normalize_archive_versions(
         archive_versions,
@@ -337,9 +338,9 @@ def build_archive_series_rows_html(
         """)
 
     detached_badge = (
-        """
+        f"""
             <span class="folder-archive-detached-badge">
-                Текущий файл удалён
+                {html.escape(detached_label)}
             </span>
         """
         if detached
@@ -419,7 +420,7 @@ def build_detached_archive_rows_html(
                 class="folder-archive-detached-heading-cell"
                 colspan="5"
             >
-                Архив удалённых файлов
+                Архив удалённых и заменённых файлов
             </td>
         </tr>
     """]
@@ -464,6 +465,11 @@ def build_detached_archive_rows_html(
                 panel_id=panel_id,
                 format_datetime=format_datetime,
                 detached=True,
+                detached_label=(
+                    "Папка заменена"
+                    if clean_cell_value(series.get("removedReason")) == "folder_replace"
+                    else "Текущий файл удалён"
+                ),
             )
         )
 

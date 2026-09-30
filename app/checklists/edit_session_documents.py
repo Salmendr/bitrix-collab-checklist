@@ -240,6 +240,7 @@ async def transactional_upload_document(
     acting_user_name: str = "",
     relative_folder: str = "",
     folder_upload_root: str = "",
+    folder_replace_id: str = "",
 ) -> dict:
     async with item_mutation_guard(
         dialog_id,
@@ -257,6 +258,7 @@ async def transactional_upload_document(
             acting_user_name=acting_user_name,
             relative_folder=relative_folder,
             folder_upload_root=folder_upload_root,
+            folder_replace_id=folder_replace_id,
         )
 
 
@@ -272,6 +274,7 @@ async def _transactional_upload_document_inner(
     acting_user_name: str = "",
     relative_folder: str = "",
     folder_upload_root: str = "",
+    folder_replace_id: str = "",
 ) -> dict:
     normalized_relative_folder = normalize_relative_folder(relative_folder)
     normalized_folder_root = normalize_relative_folder(folder_upload_root)
@@ -427,6 +430,7 @@ async def _transactional_upload_document_inner(
                 "deferredYandexUpload": True,
                 "relativeFolder": normalized_relative_folder,
                 "folderUploadRoot": normalized_folder_root,
+                "folderReplaceId": clean_cell_value(folder_replace_id),
             },
         )
 
@@ -963,6 +967,194 @@ def transactional_remove_document(
             "progressPercent": saved.get("progressPercent", 0),
         }
 
+    except Exception:
+        _restore_after_failed_operation(
+            session_id=normalized_session_id,
+            operation_id=operation_id,
+            dialog_id=normalized_dialog_id,
+            checklist_key=normalized_checklist_key,
+            before_checklist=before_checklist,
+        )
+        raise
+
+
+def transactional_archive_folder_documents(
+    *,
+    session_id: str,
+    dialog_id: str,
+    checklist_key: str,
+    item_id: str,
+    folder: str,
+    folder_replace_id: str,
+    acting_user_id: str = "",
+    acting_user_name: str = "",
+) -> dict:
+    """Move every current file below ``folder`` into «Архив версий».
+
+    Used by folder replacement: unlike a removal, the current file itself is
+    kept as the last archive version. One operation covers the whole folder;
+    Cancel restores all files. Yandex Disk is cleared by the folder job at
+    commit, so no per-file delete job is recorded.
+    """
+    from app.checklists.document_folders import documents_below, document_relative_folder
+
+    normalized_session_id = clean_cell_value(session_id)
+    normalized_dialog_id = normalize_dialog_id(dialog_id)
+    normalized_checklist_key = normalize_checklist_key(checklist_key)
+    normalized_item_id = clean_cell_value(item_id)
+    normalized_user_id = clean_cell_value(acting_user_id)
+    normalized_user_name = clean_cell_value(acting_user_name) or "Пользователь"
+    operation_id = uuid.uuid4().hex
+    before_checklist: dict | None = None
+
+    acquire_checklist_for_edit_session(
+        session_id=normalized_session_id,
+        dialog_id=normalized_dialog_id,
+        checklist_key=normalized_checklist_key,
+        user_id=normalized_user_id,
+        user_name=normalized_user_name,
+    )
+
+    try:
+        config = get_checklist_config(normalized_checklist_key)
+        data = get_checklist(normalized_dialog_id, config.key)
+        before_checklist = copy.deepcopy(data)
+        ensure_checklist_snapshot(
+            session_id=normalized_session_id,
+            dialog_id=normalized_dialog_id,
+            checklist_key=config.key,
+            data=before_checklist,
+        )
+        item_index, target_item = _find_item(data, normalized_item_id)
+        documents = normalize_documents_list(target_item.get("documents"))
+        to_archive = documents_below(documents, folder)
+        for document in to_archive:
+            status = clean_cell_value(
+                resolve_document_mirror_status(document).get("status")
+            ).lower()
+            if status in {"queued", "running"}:
+                raise EditSessionConflictError(
+                    "Файлы папки ещё синхронизируются с Яндекс.Диском — повторите через минуту"
+                )
+
+        archived_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        detached: list[dict] = []
+        archived_ids: set[str] = set()
+        file_entries: list[dict] = []
+        for document in to_archive:
+            document_id = clean_cell_value(document.get("id"))
+            series_id = clean_cell_value(document.get("seriesId")) or document_id
+            local_path = _document_local_path(document)
+            stashed = stash_existing_file(
+                session_id=normalized_session_id,
+                operation_id=operation_id,
+                operation_type="document_folder_archive",
+                dialog_id=normalized_dialog_id,
+                checklist_key=config.key,
+                item_id=normalized_item_id,
+                series_id=series_id,
+                document_id=document_id,
+                file_path=local_path,
+                user_id=normalized_user_id,
+                metadata={
+                    "fileName": clean_cell_value(document.get("name")),
+                    "oldYandexPath": clean_cell_value(document.get("yandexPath")),
+                },
+            )
+            # The stash keeps the original for Cancel; the archive gets a copy.
+            local_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(Path(stashed["staged_path"]), local_path)
+            archived_version = archive_current_document_local_file(
+                dialog_id=normalized_dialog_id,
+                item_id=normalized_item_id,
+                document=document,
+                archived_by_id=normalized_user_id,
+                archived_by_name=normalized_user_name,
+                archived_at=archived_at,
+            )
+            archive_path = get_upload_file_path_from_url(archived_version.get("fileUrl"))
+            if archive_path is None or not archive_path.is_file():
+                raise RuntimeError("Архивная версия не создана")
+            created = register_created_file(
+                session_id=normalized_session_id,
+                operation_id=operation_id,
+                operation_type="document_folder_archive",
+                dialog_id=normalized_dialog_id,
+                checklist_key=config.key,
+                item_id=normalized_item_id,
+                series_id=series_id,
+                document_id=clean_cell_value(archived_version.get("id")),
+                file_path=archive_path,
+                user_id=normalized_user_id,
+                metadata={
+                    "archiveVersion": int(archived_version.get("version") or 0),
+                    "originalDocumentId": document_id,
+                },
+            )
+            file_entries.extend([public_file_entry(stashed), public_file_entry(created)])
+            series = build_detached_archive_series(
+                {
+                    **document,
+                    "archiveVersions": list(document.get("archiveVersions") or []) + [archived_version],
+                },
+                removed_by_id=normalized_user_id,
+                removed_by_name=normalized_user_name,
+                removed_at=archived_at,
+            )
+            if series:
+                series["relativeFolder"] = document_relative_folder(document)
+                series["removedReason"] = "folder_replace"
+                detached.append(series)
+            archived_ids.add(document_id)
+
+        if detached:
+            target_item["archivedDocumentSeries"] = merge_detached_archive_series(
+                target_item.get("archivedDocumentSeries"),
+                detached,
+            )
+        remaining = normalize_documents_list([
+            document for document in documents
+            if clean_cell_value(document.get("id")) not in archived_ids
+        ])
+        target_item["documents"] = remaining
+        first_doc = remaining[0] if remaining else {}
+        target_item["documentUrl"] = clean_cell_value(first_doc.get("fileUrl"))
+        target_item["documentName"] = clean_cell_value(first_doc.get("name"))
+
+        data["items"][item_index] = target_item
+        saved = save_checklist(
+            normalized_dialog_id,
+            normalize_checklist_data(data, config.key),
+            config.key,
+        )
+        saved_item = _updated_item(saved, normalized_item_id)
+        operation = record_checklist_operation(
+            session_id=normalized_session_id,
+            dialog_id=normalized_dialog_id,
+            checklist_key=config.key,
+            operation_type="document_folder_archive",
+            before={"item": _find_item(copy.deepcopy(before_checklist), normalized_item_id)[1]},
+            after={"item": saved_item},
+            final_checklist_data=saved,
+            item_id=normalized_item_id,
+            operation_id=operation_id,
+            payload={
+                "relativeFolder": folder,
+                "folderReplaceId": clean_cell_value(folder_replace_id),
+                "documentCount": len(archived_ids),
+                "documentSeriesIds": [
+                    clean_cell_value(document.get("seriesId") or document.get("id"))
+                    for document in to_archive
+                ],
+            },
+        )
+        return {
+            "ok": True,
+            "item": saved_item,
+            "operation": operation,
+            "archivedCount": len(archived_ids),
+            "fileEntries": file_entries,
+        }
     except Exception:
         _restore_after_failed_operation(
             session_id=normalized_session_id,
