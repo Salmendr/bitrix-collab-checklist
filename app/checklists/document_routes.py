@@ -142,11 +142,19 @@ def document_edit_session_error_response(exc: Exception) -> JSONResponse:
     else:
         status_code = 500
 
+    from app.checklists.edit_sessions import (
+        EditSessionForceReplaceRequiredError,
+    )
     return JSONResponse(
         {
             "ok": False,
             "error": str(exc).strip("'"),
             "editSessionError": True,
+            # The client asks for a confirmation and repeats with forceReplace.
+            "requiresForceReplace": isinstance(
+                exc,
+                EditSessionForceReplaceRequiredError,
+            ),
         },
         status_code=status_code,
     )

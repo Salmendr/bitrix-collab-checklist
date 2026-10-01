@@ -54,6 +54,10 @@ class EditSessionConflictError(EditSessionError):
     pass
 
 
+class EditSessionForceReplaceRequiredError(EditSessionConflictError):
+    """The current file has a sync error: replacing it needs a confirmation."""
+
+
 class EditSessionPermissionError(EditSessionError):
     pass
 

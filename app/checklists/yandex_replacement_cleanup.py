@@ -119,10 +119,12 @@ def resolve_replacement_delete(replacement, probe):
     if old_path == new_path:
         return {'path': old_path, 'action': 'same_path_protected'}
     same_folder_documents = documents_in_folder(documents, document_relative_folder(successor))
+    # The old name was taken over by another current file in the same session:
+    # that file's own upload replaces the old bytes. Nothing to delete here.
     if any(clean_cell_value(d.get('name')).casefold() == old_name.casefold() for d in same_folder_documents):
-        raise ReplacementCleanupConflict('Имя старой версии уже используется текущим файлом пункта. Удаление остановлено.')
+        return {'path': old_path, 'action': 'same_path_protected'}
     if path_used_by_current_document(dialog_id, old_path):
-        raise ReplacementCleanupConflict('На старую версию ссылается текущий документ. Удаление остановлено.')
+        return {'path': old_path, 'action': 'same_path_protected'}
     versions = [v for v in archive_versions(item)
                 if (v.get('id') or v.get('versionId')) == replacement.get('archive_version_id')]
     if len(versions) != 1:
@@ -236,7 +238,10 @@ def may_overwrite_relocated_version(replacement, item, folder, probe):
     new_name = clean_cell_value(replacement.get('new_file_name'))
     if not old_name or old_name != new_name:
         return False
-    require_project_path(replacement['dialog_id'], replacement.get('old_yandex_path') or '')
+    # The replaced version may never have reached Yandex (sync error, or a
+    # second replacement in the same session): it then has no address.
+    if clean_cell_value(replacement.get('old_yandex_path')):
+        require_project_path(replacement['dialog_id'], replacement.get('old_yandex_path'))
     from app.checklists.document_folders import document_yandex_folder
     successor = next((d for d in (item.get('documents') or [])
                       if d.get('id') == replacement.get('new_document_id')), {})
@@ -245,13 +250,68 @@ def may_overwrite_relocated_version(replacement, item, folder, probe):
     meta = probe(path)
     if meta is None:
         return False
-    versions = [v for v in archive_versions(item)
-                if (v.get('id') or v.get('versionId')) == replacement.get('archive_version_id')]
-    if len(versions) != 1:
+    exact = [v for v in archive_versions(item)
+             if (v.get('id') or v.get('versionId')) == replacement.get('archive_version_id')]
+    if len(exact) > 1:
+        return False
+    # Yandex can hold an earlier version of the same document: the replaced
+    # one was not uploaded yet. Overwrite only bytes this series archived.
+    candidates = exact + [v for v in _series_archive_versions(item, replacement.get('series_id'))
+                          if not exact or v is not exact[0]]
+    for version in candidates:
+        try:
+            _verify_file(path, old_name, version, meta)
+        except ReplacementCleanupConflict:
+            continue
+        persist_delete_target(replacement, replacement.get('delete_job_id') or '', path)
+        return True
+    return False
+
+
+def may_overwrite_superseded_file(dialog_id, item, folder, document, probe):
+    """A new file may take the place of an obsolete version of this item.
+
+    In one session a file can be deleted or replaced under another name and
+    a new file uploaded under the old name. The old file is still on Yandex
+    when the new one is uploaded. It is overwritten only when its bytes are
+    one of this item's archived versions and no current document uses it.
+    """
+    from app.checklists.document_folders import document_yandex_folder
+    name = clean_cell_value(document.get('name'))
+    if not name:
         return False
     try:
-        _verify_file(path, old_name, versions[0], meta)
-    except ReplacementCleanupConflict:
+        path = require_project_path(dialog_id, document_yandex_folder(folder, document) + '/' + _file_name(name))
+    except (YandexScopeError, ReplacementCleanupConflict):
         return False
-    persist_delete_target(replacement, replacement.get('delete_job_id') or '', path)
-    return True
+    meta = probe(path)
+    if meta is None or meta.get('type') != 'file':
+        return False
+    if path_used_by_current_document(dialog_id, path):
+        return False
+    for version in archive_versions(item):
+        try:
+            _verify_file(path, name, version, meta)
+        except ReplacementCleanupConflict:
+            continue
+        write_debug_log('yandex_superseded_file_overwrite_allowed', {
+            'dialogId': dialog_id,
+            'itemId': clean_cell_value(item.get('id')),
+            'documentId': clean_cell_value(document.get('id')),
+            'path': path,
+            'archiveVersionId': clean_cell_value(version.get('id') or version.get('versionId')),
+        })
+        return True
+    return False
+
+
+def _series_archive_versions(item, series_id):
+    series_id = clean_cell_value(series_id)
+    if not series_id:
+        return
+    for record in list(item.get('documents') or []) + list(item.get('archivedDocumentSeries') or []):
+        if clean_cell_value(record.get('seriesId') or record.get('id')) != series_id:
+            continue
+        for version in record.get('archiveVersions') or []:
+            if isinstance(version, dict):
+                yield version

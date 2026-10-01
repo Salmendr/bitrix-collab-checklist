@@ -626,7 +626,7 @@ def enqueue_committed_edit_session_yandex_jobs(
             FROM upload_jobs
             WHERE source_session_id = ?
               AND status = 'queued'
-            ORDER BY created_at ASC, job_id ASC
+            ORDER BY created_at ASC, rowid ASC
             """,
             (normalized_session_id,),
         ).fetchall()

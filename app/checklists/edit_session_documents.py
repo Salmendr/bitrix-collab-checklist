@@ -548,7 +548,10 @@ async def _transactional_replace_document_inner(
                 "Файл ещё синхронизируется с Яндекс.Диском"
             )
         if mirror_status == "error" and not force_replace:
-            raise EditSessionConflictError(
+            from app.checklists.edit_sessions import (
+                EditSessionForceReplaceRequiredError,
+            )
+            raise EditSessionForceReplaceRequiredError(
                 "У текущего файла есть ошибка синхронизации; требуется подтверждение"
             )
 

@@ -1098,6 +1098,13 @@ def process_upload_job(job: dict):
     allow_replace = may_overwrite_relocated_version(
         replacement, item, folder_path, yandex_disk_try_get_resource_meta,
     ) if replacement else False
+    if not allow_replace:
+        from app.checklists.yandex_replacement_cleanup import may_overwrite_superseded_file
+        allow_replace = may_overwrite_superseded_file(
+            dialog_id, item, folder_path, document, yandex_disk_try_get_resource_meta,
+        ) or _pending_delete_targets_document_path(
+            dialog_id, folder_path, document,
+        )
 
 
     update_document_mirror_fields(
@@ -1200,6 +1207,45 @@ def process_upload_job(job: dict):
     )
 
     finish_upload_job(job_id, status="synced", stage="done")
+
+
+def _pending_delete_targets_document_path(
+    dialog_id: str,
+    folder_path: str,
+    document: dict,
+) -> bool:
+    """The file at the new document's address is already due for deletion.
+
+    A file deleted in a session and a new file with the same name uploaded
+    in that session: both jobs are created at commit and may run in either
+    order. The upload takes the place of the file the delete job removes
+    anyway; that job then sees the path used by a current document and
+    skips it.
+    """
+    from app.checklists.document_folders import document_yandex_folder
+    name = clean_cell_value(document.get("name"))
+    if not name or not clean_cell_value(folder_path):
+        return False
+    target = canonical_path(
+        document_yandex_folder(folder_path, document) + "/" + name
+    )
+    from app.db import get_conn
+    conn = get_conn()
+    try:
+        rows = conn.execute(
+            """
+            SELECT yandex_path
+            FROM upload_jobs
+            WHERE job_type = 'delete'
+              AND dialog_id = ?
+              AND status IN ('queued', 'running', 'pending')
+              AND yandex_path != ''
+            """,
+            (normalize_dialog_id(dialog_id),),
+        ).fetchall()
+    finally:
+        conn.close()
+    return any(canonical_path(row["yandex_path"] or "") == target for row in rows)
 
 
 def _path_used_by_current_document(dialog_id: str, path: str) -> bool:
