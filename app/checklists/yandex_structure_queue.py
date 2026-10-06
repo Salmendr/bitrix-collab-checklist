@@ -169,10 +169,16 @@ def _prepare_custom_job_target(job: dict, item: dict) -> dict:
     from app.checklists.yandex_folders import ensure_yandex_folder_chain
     ensure_yandex_folder_chain(target_parent)
 
+    from app.checklists.yandex_folders import is_custom_grouping_folder
     resolved_target = build_stable_custom_folder_target_path(
         parent_path=target_parent,
         item_name=clean_cell_value(job.get("item_name")),
         preserve_source_name=preserve_name,
+        numbered=not is_custom_grouping_folder(
+            clean_cell_value(job.get("dialog_id")),
+            clean_cell_value(job.get("checklist_key")),
+            target_parent,
+        ),
     )
     if resolved_target == target_path:
         return job
@@ -193,6 +199,8 @@ def _execute_yandex_structure_mutation(job: dict) -> dict:
     if action in SUBFOLDER_ACTIONS:
         from app.checklists.yandex_item_subfolders import execute_subfolder_job
         return execute_subfolder_job(job)
+    if action == "delete_item_folder":
+        return _delete_item_folder(job)
     item = _current_item(job)
     from app.checklists.yandex_subfolders import retarget_subitem_job
     job = retarget_subitem_job(job, item)
@@ -209,6 +217,40 @@ def _execute_yandex_structure_mutation(job: dict) -> dict:
         if resolved is job:
             raise
         return _run_yandex_structure_mutation(resolved)
+
+
+def _delete_item_folder(job: dict) -> dict:
+    """The folder of a deleted item goes to the Yandex trash (restorable)."""
+    from app.checklists.yandex_scope import require_project_path
+    from app.yandex_disk.client import yandex_disk_delete_path
+    dialog_id = normalize_dialog_id(job.get("dialog_id"))
+    path = require_project_path(
+        dialog_id,
+        clean_cell_value(job.get("source_path") or job.get("target_path")),
+    )
+    if not path:
+        raise RuntimeError("Не указана папка удалённого пункта")
+    from app.checklists.yandex_folders import is_structural_yandex_folder
+    if is_structural_yandex_folder(
+        dialog_id, normalize_checklist_key(job.get("checklist_key")), path,
+    ):
+        raise RuntimeError(
+            "Папка удалённого пункта совпадает с папкой раздела. Удаление остановлено: " + path
+        )
+    meta = yandex_disk_try_get_resource_meta(path)
+    if meta and clean_cell_value(meta.get("type")).lower() not in {"", "dir"}:
+        raise RuntimeError(
+            "На Яндекс.Диске по пути папки пункта находится файл. Удаление остановлено."
+        )
+    if meta:
+        yandex_disk_delete_path(path, permanently=False)
+    write_debug_log("yandex_item_folder_trashed", {
+        "jobId": clean_cell_value(job.get("job_id")),
+        "itemId": clean_cell_value(job.get("item_id")),
+        "folderPath": path,
+        "trashed": bool(meta),
+    })
+    return {"ok": True, "folderPath": path, "trashed": bool(meta), "deleted": True}
 
 
 def _run_yandex_structure_mutation(job: dict) -> dict:

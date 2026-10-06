@@ -257,7 +257,9 @@
                     localSnapshot,
                     result,
                     sourceItemId,
-                    existingState.changes
+                    existingState.changes,
+                    // An item moved or deleted in its window.
+                    { structureChanged: data.structureChanged === true }
                 )
             );
 

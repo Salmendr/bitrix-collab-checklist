@@ -17,6 +17,8 @@ SUPPORTED_STRUCTURE_ACTIONS = frozenset({
     "create_item_folder",
     "rename_item_folder",
     "move_item_folder",
+    # A deleted item: its folder goes to the Yandex trash.
+    "delete_item_folder",
     # Folders inside an item (see document_folders.py). Their jobs use the
     # pseudo item id "<itemId>::subfolders" so that they never replace the
     # item's own folder state.

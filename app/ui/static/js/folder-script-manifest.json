@@ -1,5 +1,5 @@
 {
-  "stage": "8.19-folder-replace",
+  "stage": "8.20-item-move-delete",
   "hashMode": "utf8-lf",
   "modules": {
     "checklist-window-channel.js": {
@@ -63,8 +63,8 @@
       "bytes": 6389
     },
     "folder-tree-actions.js": {
-      "sha256": "6034377fad09dc03a286750b43c2fea411be6380522c932bc49fb3b7afb0d161",
-      "bytes": 18702
+      "sha256": "196a36047e00e6e0ac08182a39888a75eee01fa61544237102af5f87a30dd1dd",
+      "bytes": 23502
     },
     "folder-replace.js": {
       "sha256": "39848dff392fa366e2950280611f2a4eb17395c100392804502e7f6669f774ed",

@@ -75,7 +75,8 @@ def rebase_item_file_paths_in_transaction(conn, *, dialog_id, checklist_key, ite
     if 'edit_session_operations' in tables:
         for row in conn.execute("SELECT operation_id,payload_json,before_json,after_json FROM edit_session_operations "
                                 "WHERE dialog_id=? AND checklist_key=? AND item_id=? "
-                                "AND operation_type IN ('document_replace','document_remove','documents_clear') "
+                                "AND operation_type IN ('document_replace','document_remove','documents_clear',"
+                                "'checklist_item_update','checklist_item_reorder') "
                                 "AND status NOT IN ('rolled_back','cancelled')", identity).fetchall():
             for field in ('payload_json', 'before_json', 'after_json'):
                 value = json.loads(row[field] or '{}')

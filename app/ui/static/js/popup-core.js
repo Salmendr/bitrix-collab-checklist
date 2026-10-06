@@ -520,7 +520,8 @@
                 localSnapshot,
                 refreshedSnapshot,
                 itemId,
-                pendingChanges
+                pendingChanges,
+                options
             ) {
                 const refreshApi = window.ChecklistPopupDocumentRefresh;
 
@@ -537,7 +538,8 @@
                     localSnapshot,
                     refreshedSnapshot,
                     itemId,
-                    pendingChanges
+                    pendingChanges,
+                    options
                 );
             }
 

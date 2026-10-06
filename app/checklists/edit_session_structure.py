@@ -140,7 +140,8 @@ def prepare_edit_session_structure_jobs_in_transaction(
           AND operation_type IN (
               'checklist_item_add',
               'checklist_item_rename',
-              'checklist_item_reorder'
+              'checklist_item_reorder',
+              'checklist_item_delete'
           )
         ORDER BY sequence_no ASC
         """,
@@ -195,6 +196,57 @@ def prepare_edit_session_structure_jobs_in_transaction(
             if clean_cell_value(operation.get("operation_type"))
             == "checklist_item_reorder"
         ]
+        delete_operations = [
+            operation
+            for operation in item_operations
+            if clean_cell_value(operation.get("operation_type"))
+            == "checklist_item_delete"
+        ]
+
+        if delete_operations and not current_item:
+            delete_operation = delete_operations[-1]
+            operation_id = clean_cell_value(delete_operation.get("operation_id"))
+            if add_operations:
+                # Created and deleted in one session: never reached Yandex.
+                skipped.append({
+                    "operationId": operation_id,
+                    "reason": "item added and deleted in the same session",
+                })
+                continue
+            payload = stable_json_loads(
+                delete_operation.get("payload_json") or "",
+                {},
+            )
+            payload = payload if isinstance(payload, dict) else {}
+            from app.yandex_disk.client import is_yandex_disk_enabled
+            enabled = bool(is_yandex_disk_enabled())
+            for index, folder_path in enumerate(payload.get("yandexFolderPaths") or []):
+                folder_path = clean_cell_value(folder_path)
+                if not folder_path:
+                    continue
+                job = insert_yandex_structure_job_in_transaction(
+                    conn,
+                    idempotency_key=(
+                        f"edit-session:{normalized_session_id}:"
+                        f"item:{item_id}:delete-item-folder:{index}"
+                    ),
+                    session_id=normalized_session_id,
+                    operation_id=operation_id,
+                    dialog_id=dialog_id,
+                    checklist_key=checklist_key,
+                    item_id=item_id,
+                    action="delete_item_folder",
+                    source_path=folder_path,
+                    target_path=folder_path,
+                    item_name=clean_cell_value(payload.get("itemName")),
+                    group_id=int(payload.get("groupId") or 0),
+                    initial_status="queued" if enabled else "disabled",
+                    error="" if enabled else "yandex disk is disabled",
+                    result={"deletedItemIds": payload.get("deletedItemIds") or []},
+                    now=now,
+                )
+                jobs.append(job)
+            continue
 
         if add_operations:
             add_operation = add_operations[0]
@@ -378,6 +430,25 @@ def prepare_edit_session_structure_jobs_in_transaction(
             if target_parent_id and target_parent_id != source_parent_id
             else ""
         )
+        if source_parent_id and not target_parent_id:
+            # A subitem became an item of the section: its folder leaves the
+            # old parent's folder for the section folder (05_ИОС for «ИОС …»).
+            from app.checklists.yandex_folders import (
+                resolve_custom_item_parent_yandex_path,
+                resolve_item_group_parent_yandex_path,
+            )
+            target_parent_path = (
+                resolve_custom_item_parent_yandex_path(
+                    dialog_id, checklist_key, target_group_id,
+                    item_name=clean_cell_value(current_item.get("name")),
+                )
+                if bool(current_item.get("isCustom", False))
+                else resolve_item_group_parent_yandex_path(
+                    dialog_id=dialog_id,
+                    checklist_key=checklist_key,
+                    group_id=target_group_id,
+                )
+            )
         source_path = clean_cell_value(
             next(
                 (
@@ -425,9 +496,20 @@ def prepare_edit_session_structure_jobs_in_transaction(
             jobs.append(retargeted)
             continue
 
+        spec_source = clean_cell_value(relocation_spec.get("sourcePath"))
+        spec_target = clean_cell_value(relocation_spec.get("targetPath"))
+        # A reorder inside the section moves the folder too when its place
+        # is wrong (a custom «ИОС …» item outside 05_ИОС).
+        placed_elsewhere = bool(
+            spec_source
+            and spec_target
+            and spec_source.rstrip("/").rsplit("/", 1)[0].casefold()
+            != spec_target.rstrip("/").rsplit("/", 1)[0].casefold()
+        )
         moved = (
             source_group_id != target_group_id
             or source_parent_id != target_parent_id
+            or placed_elsewhere
         )
         renamed = old_name != final_name
         if not moved and not renamed:

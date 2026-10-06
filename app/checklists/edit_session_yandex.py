@@ -25,6 +25,7 @@ SUPPORTED_DEFERRED_OPERATION_TYPES = {
     "document_replace",
     "document_remove",
     "checklist_item_update",
+    "checklist_item_reorder",
 }
 
 
@@ -341,7 +342,8 @@ def prepare_edit_session_yandex_jobs_in_transaction(
               'document_upload',
               'document_replace',
               'document_remove',
-              'checklist_item_update'
+              'checklist_item_update',
+              'checklist_item_reorder'
           )
         ORDER BY sequence_no ASC
         """,
@@ -497,7 +499,9 @@ def prepare_edit_session_yandex_jobs_in_transaction(
             jobs.append(job)
             continue
 
-        if operation_type == "checklist_item_update":
+        if operation_type in {"checklist_item_update", "checklist_item_reorder"}:
+            # A status change to «Нет» and a restore from «Не требуется»
+            # with file removal both record their Yandex deletes here.
             deferred_deletes = payload.get("deferredYandexDeletes") or []
             if not isinstance(deferred_deletes, list):
                 deferred_deletes = []

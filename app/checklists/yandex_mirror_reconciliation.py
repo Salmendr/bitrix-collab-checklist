@@ -118,6 +118,14 @@ def _record_error(
     })
 
 
+def _conflicts_are_files_only(remote_result: dict) -> bool:
+    conflicts = list(remote_result.get("conflicts") or [])
+    return bool(conflicts) and all(
+        clean_cell_value(conflict.get("reason")) != "not_a_file"
+        for conflict in conflicts
+    )
+
+
 def _pending_replacement_may_overwrite_old_path(
     *,
     dialog_id: str,
@@ -532,7 +540,12 @@ def reconcile_yandex_mirror_documents(
                                 continue
 
                             if remote_status == "conflict":
-                                if _pending_replacement_may_overwrite_old_path(
+                                if _conflicts_are_files_only(remote_result):
+                                    # A file of the same name with other content:
+                                    # the checklist version is uploaded over it.
+                                    stats["explicitReplacementUploads"] += 1
+                                    explicit_replacement_override = True
+                                elif _pending_replacement_may_overwrite_old_path(
                                     dialog_id=dialog_id,
                                     checklist_key=checklist_key,
                                     item_id=item_id,

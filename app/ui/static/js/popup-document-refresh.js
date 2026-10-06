@@ -27,6 +27,15 @@
         'order'
     ]);
 
+    // Where an item sits: the server applies every move at once.
+    const STRUCTURE_FIELDS = Object.freeze([
+        'group',
+        'order',
+        'parentItemId',
+        'notRequiredReturnGroupId',
+        'notRequiredReturnParentId'
+    ]);
+
     function clone(value) {
         if (value === undefined) {
             return undefined;
@@ -207,12 +216,59 @@
         mergedSnapshot.items[localIndex] = mergedItem;
     }
 
+    // An item was moved or deleted in its window: take the item list
+    // (which items exist, their section, parent, order) from the server.
+    // Field values the popup has not saved yet stay as merged above.
+    function syncStructure(mergedSnapshot, serverSnapshot, itemId) {
+        const serverItems = Array.isArray(serverSnapshot && serverSnapshot.items)
+            ? serverSnapshot.items
+            : [];
+        const serverById = new Map(serverItems.map(candidate => [
+            normalizeId(candidate && candidate.id),
+            candidate
+        ]));
+        const targetId = normalizeId(itemId);
+        const kept = [];
+        (mergedSnapshot.items || []).forEach(localItem => {
+            const id = normalizeId(localItem && localItem.id);
+            const serverItem = serverById.get(id);
+            if (!serverItem) return;
+            const merged = clone(localItem);
+            STRUCTURE_FIELDS.forEach(field => {
+                if (Object.prototype.hasOwnProperty.call(serverItem, field)) {
+                    merged[field] = clone(serverItem[field]);
+                }
+            });
+            if (id === targetId && Object.prototype.hasOwnProperty.call(serverItem, 'name')) {
+                // A move can add a suffix to a name taken in the new place.
+                merged.name = serverItem.name;
+            }
+            kept.push(merged);
+        });
+        const keptIds = new Set(kept.map(candidate => normalizeId(candidate && candidate.id)));
+        serverItems.forEach(serverItem => {
+            if (!keptIds.has(normalizeId(serverItem && serverItem.id))) {
+                kept.push(clone(serverItem));
+            }
+        });
+        mergedSnapshot.items = kept;
+        if (
+            Number(serverSnapshot.orderVersion || 0)
+            > Number(mergedSnapshot.orderVersion || 0)
+        ) {
+            mergedSnapshot.orderVersion = serverSnapshot.orderVersion;
+        }
+        return mergedSnapshot;
+    }
+
     function mergeSnapshot(
         localSnapshot,
         refreshedSnapshot,
         itemId,
-        pendingChanges
+        pendingChanges,
+        options
     ) {
+        const structureChanged = !!(options && options.structureChanged);
         const serverSnapshot = clone(refreshedSnapshot || {});
         const localHasItems = !!(
             localSnapshot
@@ -243,7 +299,9 @@
         ));
 
         if (!serverItem) {
-            return mergedSnapshot;
+            return structureChanged
+                ? syncStructure(mergedSnapshot, serverSnapshot, targetId)
+                : mergedSnapshot;
         }
 
         // The item, its parent and its subitems: a change in the folder
@@ -271,6 +329,9 @@
             mergedSnapshot.orderVersion = serverSnapshot.orderVersion;
         }
 
+        if (structureChanged) {
+            return syncStructure(mergedSnapshot, serverSnapshot, targetId);
+        }
         return mergedSnapshot;
     }
 

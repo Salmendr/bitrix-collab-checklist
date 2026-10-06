@@ -52,6 +52,7 @@ MESSAGE_SECTION_LABELS = {
     "document-replacement": "Заменены версии файлов",
     "archive-delete": "Удалены архивные версии",
     "add-item": "Добавлены пункты",
+    "delete-item": "Удалены пункты",
     "folder-upload": "Загружены папки",
     "folder-replace": "Заменены папки",
     "folder-create": "Созданы папки",
@@ -97,6 +98,7 @@ def split_changes(changes: list) -> dict:
         "document-replacement": [],
         "archive-delete": [],
         "add-item": [],
+        "delete-item": [],
         "folder-upload": [],
         "folder-replace": [],
         "folder-create": [],
@@ -132,6 +134,8 @@ def split_changes(changes: list) -> dict:
             groups["archive-delete"].append(change)
         elif field == "add-item":
             groups["add-item"].append(change)
+        elif field == "delete-item":
+            groups["delete-item"].append(change)
         elif field in {"folder-upload", "folder-replace", "folder-create", "folder-move", "folder-delete"}:
             groups[field].append(change)
 
@@ -235,7 +239,7 @@ def build_change_left_label(field: str, checklist_key: str) -> str:
         return "Файл"
     if field == "archive-delete":
         return "Архив"
-    if field == "add-item":
+    if field in {"add-item", "delete-item"}:
         return "Пункт"
     if field in {"folder-upload", "folder-replace", "folder-create", "folder-move", "folder-delete"}:
         return "Папка"
@@ -268,6 +272,8 @@ def build_change_emoji(field: str, new_value: str, checklist_key: str) -> str:
         return "🗑️"
     if field == "add-item":
         return "➕"
+    if field == "delete-item":
+        return "🗑️"
     if field in {"folder-upload", "folder-replace", "folder-create", "folder-move"}:
         return "📁"
     if field == "folder-delete":
@@ -389,6 +395,16 @@ def build_change_entry(change: dict, field: str, checklist_key: str) -> dict:
             "rightText": new_value,
         }
 
+    if field == "delete-item":
+        return {
+            "field": field,
+            "itemName": item_name,
+            "oldValue": old_value,
+            "newValue": new_value,
+            "leftText": f"{prefix}{item_name} / {label}: →",
+            "rightText": "удалён",
+        }
+
     if field == "add-item":
         left = f"{prefix}{item_name} / {label}: →"
         right = "добавлен"
@@ -463,6 +479,7 @@ def build_recent_changes_sections(changes: list, checklist_key: str) -> list[dic
         "archive-delete",
         "document",
         "add-item",
+        "delete-item",
         "name",
         "order",
         "source",

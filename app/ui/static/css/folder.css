@@ -632,6 +632,27 @@
     background: #f9fafb;
 }
 
+/* The current place of a moved item: shown for orientation, not selectable. */
+.folder-dialog-target.is-current {
+    color: #98a2b3;
+    cursor: default;
+}
+
+.folder-dialog-target.is-current:hover {
+    background: transparent;
+}
+
+.folder-dialog-targets {
+    max-height: min(60vh, 420px);
+    overflow-y: auto;
+}
+
+.folder-dialog-note {
+    margin: 0 0 8px;
+    color: #475467;
+    font-size: 13px;
+}
+
 .folder-dialog-error {
     color: #b42318;
     font-size: 13px;

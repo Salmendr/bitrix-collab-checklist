@@ -2116,6 +2116,7 @@ def _build_folder_manage_html(
     is_top_level: bool,
     relative_folder: str,
     zip_url: str,
+    item_deletable: bool = False,
 ) -> str:
     """Folder operations of the current level (edit session required)."""
     buttons: list[str] = []
@@ -2130,6 +2131,9 @@ def _build_folder_manage_html(
 
     if is_top_level:
         button("folder-create", "Новая папка", "Создать подпункт — папку этого пункта")
+        button("item-move", "Переместить", "Перенести пункт в другой раздел или внутрь другого пункта")
+        if item_deletable:
+            button("item-delete", "Удалить пункт", "Удалить пункт со всеми подпунктами и файлами", danger=True)
     else:
         button("folder-create", "Новая папка", "Создать папку внутри текущей")
         if relative_folder:
@@ -2138,6 +2142,9 @@ def _build_folder_manage_html(
             button("folder-delete", "Удалить папку", "Удалить папку со всеми файлами", danger=True)
         else:
             button("folder-rename", "Переименовать", "Переименовать подпункт")
+            button("item-move", "Переместить", "Перенести подпункт в другой пункт или в раздел")
+            if item_deletable:
+                button("item-delete", "Удалить подпункт", "Удалить подпункт со всеми папками и файлами", danger=True)
     buttons.append(
         f'<a class="folder-manage-button" data-role="folder-zip" href="{html.escape(zip_url)}" '
         'download title="Скачать содержимое папки одним ZIP-архивом">Скачать ZIP</a>'
@@ -2329,15 +2336,20 @@ def api_checklist_folder(
         f"&itemId={quote(item_id, safe='')}"
         + (f"&folder={quote(relative_folder, safe='')}" if relative_folder else "")
     )
+    item_deletable = bool(
+        clean_cell_value(target_item.get("parentItemId"))
+        or target_item.get("isCustom", False)
+    )
     folder_manage_html = _build_folder_manage_html(
         is_top_level=is_top_level,
         relative_folder=relative_folder,
         zip_url=zip_url,
+        item_deletable=item_deletable,
     )
     ui_static_base_url = (
         f"{app_base_path}/ui-static"
     )
-    ui_asset_version = "8.19-folder-replace"
+    ui_asset_version = "8.20-item-move-delete"
     popup_url = (
         f"{app_base_path}/popup"
         f"?dialogId={quote(dialog_id, safe='')}"
@@ -2431,6 +2443,14 @@ def api_checklist_folder(
         "folderReplaceApiUrl": f"{app_base_path}/api/checklist/folders/replace-begin",
         "addItemApiUrl": f"{app_base_path}/api/checklist/add-item",
         "renameItemApiUrl": f"{app_base_path}/api/checklist/rename-item",
+        "reorderItemApiUrl": f"{app_base_path}/api/checklist/reorder-items",
+        "deleteItemApiUrl": f"{app_base_path}/api/checklist/delete-item",
+        "itemDeletable": item_deletable,
+        "itemHasSubitems": bool(children_of(items, item_id)),
+        "itemMoveTargets": (
+            folder_page.item_move_targets(checklist_key, items, target_item)
+            if not relative_folder else []
+        ),
         "subitems": [
             {
                 "id": clean_cell_value(child.get("id")),

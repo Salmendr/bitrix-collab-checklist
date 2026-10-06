@@ -402,6 +402,8 @@ def normalize_session_operations(
     replaced_uploads: set[tuple] = set()
     archive_deletes: OrderedDict[tuple, dict] = OrderedDict()
     added_items: OrderedDict[str, dict] = OrderedDict()
+    deleted_items: OrderedDict[str, dict] = OrderedDict()
+    deleted_item_ids: set[str] = set()
 
     sorted_operations = sorted(
         [
@@ -425,6 +427,36 @@ def normalize_session_operations(
         payload = _dict(operation.get("payload"))
         before_item = _item_from(operation, "before")
         after_item = _item_from(operation, "after")
+
+        if operation_type == "checklist_item_delete":
+            removed_ids = {
+                clean_cell_value(value)
+                for value in (payload.get("deletedItemIds") or [item_id])
+            }
+            deleted_item_ids.update(removed_ids)
+            added_in_session = item_id in added_items
+            for removed_id in removed_ids:
+                added_items.pop(removed_id, None)
+            if added_in_session:
+                # Added and deleted in one session: nothing to report.
+                continue
+            deleted_name = (
+                clean_cell_value(payload.get("itemName"))
+                or clean_cell_value(before_item.get("name"))
+                or item_name
+            )
+            parent_name = clean_cell_value(payload.get("parentName"))
+            deleted_items[item_id] = {
+                "sequenceNo": sequence_no,
+                "field": "delete-item",
+                "itemId": item_id,
+                "itemName": (
+                    f"{parent_name} › {deleted_name}" if parent_name else deleted_name
+                ),
+                "oldValue": deleted_name,
+                "newValue": "Удалён",
+            }
+            continue
 
         if operation_type == "checklist_item_add":
             final_item = final_items.get(item_id) or after_item
@@ -865,6 +897,13 @@ def normalize_session_operations(
             "oldValue": "",
             "newValue": f"«{group['root']}»: " + ", ".join(parts),
         })
+    # A deleted item: one line instead of its other changes of the session.
+    normalized = [
+        change for change in normalized
+        if clean_cell_value(change.get("itemId")) not in deleted_item_ids
+    ]
+    normalized.extend(deleted_items.values())
+
     normalized.sort(key=lambda change: (
         _safe_int(change.get("sequenceNo")),
         clean_cell_value(change.get("field")),

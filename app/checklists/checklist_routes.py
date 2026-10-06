@@ -42,6 +42,7 @@ from app.checklists.upload_jobs import (
     attach_latest_document_mirror_states,
     cancel_upload_jobs_for_document,
     create_yandex_delete_job,
+    resolve_document_mirror_status,
 )
 
 from app.checklists.yandex_mirror_queue import enqueue_yandex_mirror_job
@@ -977,6 +978,239 @@ async def api_checklist_rename_item(request: Request):
             "checklistKey": config.key,
             "itemId": item_id,
             "name": requested_name,
+            "sessionId": clean_cell_value(payload.get("sessionId")),
+            "error": str(exc),
+        })
+        return checklist_edit_session_error_response(exc)
+
+
+def _item_local_file_paths(item: dict) -> list:
+    """Local files of an item: current documents and their archive."""
+    from app.checklists.documents import get_upload_file_path_from_url
+    records = []
+    for document in item.get("documents") or []:
+        if isinstance(document, dict):
+            records.append(document)
+            records.extend(v for v in document.get("archiveVersions") or [] if isinstance(v, dict))
+    for series in item.get("archivedDocumentSeries") or []:
+        if isinstance(series, dict):
+            records.extend(v for v in series.get("archiveVersions") or [] if isinstance(v, dict))
+    paths = []
+    seen = set()
+    for record in records:
+        path = get_upload_file_path_from_url(
+            clean_cell_value(record.get("fileUrl") or record.get("url") or record.get("path"))
+        )
+        if path is None or not path.is_file():
+            continue
+        key = str(path.resolve())
+        if key in seen:
+            continue
+        seen.add(key)
+        paths.append(path)
+    return paths
+
+
+@router.post("/api/checklist/delete-item")
+async def api_checklist_delete_item(request: Request):
+    """Delete a custom item or a subitem with its subitems and files.
+
+    Session-bound like every edit: Cancel restores the item and its local
+    files; Save trashes its folder on Yandex Disk. Standard items of the
+    template are never deleted (they go to «Не требуется»).
+    """
+    payload = await request.json()
+    dialog_id = normalize_dialog_id(payload.get("dialogId"))
+    config = get_checklist_config(normalize_checklist_key(payload.get("checklistKey")))
+    item_id = clean_cell_value(payload.get("itemId"))
+    acting_user_id = clean_cell_value(payload.get("actingUserId") or payload.get("userId"))
+    acting_user_name = clean_cell_value(payload.get("actingUserName")) or "Пользователь"
+
+    if not dialog_id:
+        return JSONResponse({"ok": False, "error": "dialogId is required"}, status_code=400)
+    if not item_id:
+        return JSONResponse({"ok": False, "error": "itemId is required"}, status_code=400)
+    if not can_user_delete_files(acting_user_id):
+        return JSONResponse(
+            {"ok": False, "error": "У вас недостаточно прав на удаление пунктов"},
+            status_code=403,
+        )
+
+    operation_id = uuid.uuid4().hex
+    transaction = None
+    try:
+        transaction = begin_optional_edit_session_change(
+            payload,
+            dialog_id=dialog_id,
+            checklist_key=config.key,
+        )
+        if not transaction:
+            return JSONResponse(
+                {"ok": False, "error": "Активная сессия редактирования не готова", "editSessionError": True},
+                status_code=409,
+            )
+
+        async with checklist_mutation_guard(dialog_id, config.key):
+            data = get_checklist(dialog_id, config.key)
+            before_checklist = copy.deepcopy(data)
+            items = data.get("items", []) or []
+            target_item = next(
+                (item for item in items if clean_cell_value(item.get("id")) == item_id),
+                None,
+            )
+            if not target_item:
+                return JSONResponse({"ok": False, "error": "item not found"}, status_code=404)
+
+            parent_id = parent_id_of(target_item)
+            if not parent_id and not bool(target_item.get("isCustom", False)):
+                return JSONResponse(
+                    {
+                        "ok": False,
+                        "error": (
+                            "Стандартный пункт удалить нельзя — "
+                            "переведите его в «Не требуется»"
+                        ),
+                    },
+                    status_code=400,
+                )
+
+            removed = [target_item] + list(children_of(items, item_id))
+            removed_ids = {clean_cell_value(item.get("id")) for item in removed}
+            for item in removed:
+                for document in item.get("documents") or []:
+                    status = resolve_document_mirror_status(document).get("status")
+                    if clean_cell_value(status).lower() in {"queued", "running"}:
+                        return JSONResponse(
+                            {
+                                "ok": False,
+                                "error": (
+                                    "Файл «" + clean_cell_value(document.get("name"))
+                                    + "» ещё синхронизируется с Яндекс.Диском. "
+                                    "Дождитесь окончания и повторите удаление."
+                                ),
+                            },
+                            status_code=409,
+                        )
+
+            ensure_checklist_snapshot(
+                session_id=transaction["sessionId"],
+                dialog_id=dialog_id,
+                checklist_key=config.key,
+                data=before_checklist,
+            )
+
+            # Local files leave with the item: stashed now (Cancel puts
+            # them back), removed for good when the session is saved.
+            from app.checklists.edit_session_files import stash_existing_file
+            file_count = 0
+            try:
+                for item in removed:
+                    for path in _item_local_file_paths(item):
+                        stash_existing_file(
+                            session_id=transaction["sessionId"],
+                            operation_id=operation_id,
+                            operation_type="checklist_item_delete",
+                            dialog_id=dialog_id,
+                            checklist_key=config.key,
+                            item_id=clean_cell_value(item.get("id")),
+                            file_path=path,
+                            user_id=acting_user_id,
+                            metadata={"deletedItem": True},
+                        )
+                        file_count += 1
+            except Exception:
+                rollback_edit_session_file_operation(
+                    session_id=transaction["sessionId"],
+                    operation_id=operation_id,
+                )
+                raise
+
+            group_id = int(target_item.get("group") or 0)
+            data["items"] = renumber_items_by_group(
+                [
+                    item for item in items
+                    if clean_cell_value(item.get("id")) not in removed_ids
+                ],
+                config.key,
+            )
+            try:
+                saved = save_checklist(
+                    dialog_id,
+                    normalize_checklist_data(data, config.key),
+                    config.key,
+                )
+                parent_item = next(
+                    (item for item in items if clean_cell_value(item.get("id")) == parent_id),
+                    {},
+                )
+                folder_paths = []
+                item_path = clean_cell_value(target_item.get("yandexFolderPath"))
+                if item_path:
+                    folder_paths.append(item_path)
+                for child in removed[1:]:
+                    child_path = clean_cell_value(child.get("yandexFolderPath"))
+                    if child_path and not (
+                        item_path and child_path.startswith(item_path.rstrip("/") + "/")
+                    ):
+                        folder_paths.append(child_path)
+                operation = record_or_restore_checklist_change(
+                    transaction=transaction,
+                    dialog_id=dialog_id,
+                    checklist_key=config.key,
+                    operation_type="checklist_item_delete",
+                    before={"item": copy.deepcopy(target_item), "children": copy.deepcopy(removed[1:])},
+                    after={},
+                    before_checklist=before_checklist,
+                    final_checklist=saved,
+                    item_id=item_id,
+                    payload={
+                        "itemName": clean_cell_value(target_item.get("name")),
+                        "parentItemId": parent_id,
+                        "parentName": clean_cell_value(parent_item.get("name")),
+                        "groupId": group_id,
+                        "isCustom": bool(target_item.get("isCustom", False)),
+                        "deletedItemIds": sorted(removed_ids),
+                        "subitemNames": [clean_cell_value(c.get("name")) for c in removed[1:]],
+                        "documentCount": sum(len(i.get("documents") or []) for i in removed),
+                        "fileCount": file_count,
+                        "yandexFolderPaths": folder_paths,
+                        "deferredYandexDelete": bool(folder_paths),
+                    },
+                    operation_id=operation_id,
+                )
+            except Exception:
+                rollback_edit_session_file_operation(
+                    session_id=transaction["sessionId"],
+                    operation_id=operation_id,
+                )
+                raise
+
+        write_debug_log("checklist_item_deleted", {
+            "dialogId": dialog_id,
+            "checklistKey": config.key,
+            "itemId": item_id,
+            "deletedItemIds": sorted(removed_ids),
+            "fileCount": file_count,
+            "sessionId": transaction["sessionId"],
+            "actingUserId": acting_user_id,
+            "actingUserName": acting_user_name,
+        })
+        return JSONResponse({
+            "ok": True,
+            "dialogId": dialog_id,
+            "checklistKey": config.key,
+            "itemId": item_id,
+            "parentItemId": parent_id,
+            "deletedItemIds": sorted(removed_ids),
+            "orderVersion": int(saved.get("orderVersion") or 0),
+            "transactional": True,
+            "operation": operation,
+        })
+    except Exception as exc:
+        write_debug_log("checklist_item_delete_failed", {
+            "dialogId": dialog_id,
+            "checklistKey": config.key,
+            "itemId": item_id,
             "sessionId": clean_cell_value(payload.get("sessionId")),
             "error": str(exc),
         })

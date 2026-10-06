@@ -143,9 +143,13 @@ def build_stable_custom_folder_target_path(
     parent_path: str,
     item_name: str,
     preserve_source_name: str = "",
+    numbered: bool = True,
 ) -> str:
     parent = normalize_yandex_disk_path(parent_path).rstrip("/")
     base_name = sanitize_yandex_folder_name(item_name)
+    if not numbered:
+        # A grouping folder (05_ИОС): its standard folders have no numbers.
+        return normalize_yandex_disk_path(f"{parent}/{base_name}")
     preserved_prefix, _ = split_custom_folder_prefix(preserve_source_name)
     prefix = preserved_prefix or next_free_custom_folder_prefix(parent)
     return normalize_yandex_disk_path(
@@ -990,8 +994,16 @@ def resolve_custom_item_parent_yandex_path(
     dialog_id: str,
     checklist_key: str,
     group_id: int,
+    item_name: str = "",
 ) -> str:
     checklist_key = normalize_checklist_key(checklist_key)
+    if clean_cell_value(item_name):
+        # «ИОС 1.2.2» goes into 05_ИОС next to the standard ИОС folders.
+        grouping = custom_grouping_folder_for_name(
+            dialog_id, checklist_key, group_id, item_name,
+        )
+        if grouping:
+            return grouping
     root_path = get_root_path_from_context(dialog_id, checklist_key)
 
     if not root_path:
@@ -1070,6 +1082,121 @@ def resolve_custom_item_parent_yandex_path(
 
     return root_path
 
+def _path_key(value: str) -> str:
+    return normalize_yandex_disk_path(clean_cell_value(value)).rstrip("/").casefold()
+
+
+def custom_grouping_folders(
+    dialog_id: str,
+    checklist_key: str,
+    group_id: int,
+) -> list[tuple[str, str]]:
+    """Folders that group standard items inside a section folder.
+
+    02_Стадия П/05_ИОС holds ИОС_1 … ИОС_5: (its path, "ИОС"). A section
+    whose standard folders all lie directly in it has none.
+    """
+    checklist_key = normalize_checklist_key(checklist_key)
+    try:
+        group_id = int(group_id or 0)
+    except (TypeError, ValueError):
+        return []
+    root_path = get_root_path_from_context(dialog_id, checklist_key)
+    group_root = resolve_custom_item_parent_yandex_path(
+        dialog_id, checklist_key, group_id,
+    )
+    root = normalize_yandex_disk_path(root_path).rstrip("/") if root_path else ""
+    if not root or not group_root or not _path_key(group_root).startswith(_path_key(root) + "/"):
+        return []
+    group_relative = normalize_yandex_disk_path(group_root).rstrip("/")[len(root) + 1:]
+    found: dict[str, tuple[str, str]] = {}
+    for raw_spec in (get_folder_specs_for_checklist(checklist_key) or {}).values():
+        spec = raw_spec or {}
+        try:
+            spec_group_id = int(spec.get("groupId") or 0)
+        except (TypeError, ValueError):
+            continue
+        if spec_group_id != group_id or spec.get("customItemsRoot"):
+            continue
+        relative = (
+            clean_cell_value(spec.get("relativePath"))
+            or clean_cell_value(spec.get("folderName"))
+        ).replace("\\", "/").strip("/")
+        if not relative.casefold().startswith(group_relative.casefold() + "/"):
+            continue
+        rest = [part for part in relative[len(group_relative) + 1:].split("/") if part]
+        if len(rest) < 2:
+            continue
+        segment = rest[0]
+        key = split_custom_folder_prefix(segment)[1].replace("_", " ").strip()
+        if not key:
+            continue
+        path = normalize_yandex_disk_path(f"{root}/{group_relative}/{segment}")
+        found.setdefault(_path_key(path), (path, key))
+    return list(found.values())
+
+
+def _name_starts_with_key(name: str, key: str) -> bool:
+    name = clean_cell_value(name).casefold()
+    key = clean_cell_value(key).casefold()
+    if not name or not key or not name.startswith(key):
+        return False
+    return len(name) == len(key) or not name[len(key)].isalpha()
+
+
+def custom_grouping_folder_for_name(
+    dialog_id: str,
+    checklist_key: str,
+    group_id: int,
+    item_name: str,
+) -> str:
+    """The grouping folder a custom item belongs to by its name, or ""."""
+    for path, key in custom_grouping_folders(dialog_id, checklist_key, group_id):
+        if _name_starts_with_key(item_name, key):
+            return path
+    return ""
+
+
+def is_custom_grouping_folder(dialog_id: str, checklist_key: str, path: str) -> bool:
+    target = _path_key(path)
+    if not target:
+        return False
+    config = get_checklist_config(checklist_key)
+    return any(
+        _path_key(grouping_path) == target
+        for group_id in config.group_ids()
+        for grouping_path, _ in custom_grouping_folders(dialog_id, checklist_key, group_id)
+    )
+
+
+def is_structural_yandex_folder(dialog_id: str, checklist_key: str, path: str) -> bool:
+    """A folder of the checklist structure itself (never an item's own).
+
+    The checklist root, section folders, grouping folders (05_ИОС), the
+    «Не требуется» folder and every parent of them.
+    """
+    target = _path_key(path)
+    if not target:
+        return True
+    checklist_key = normalize_checklist_key(checklist_key)
+    root_path = get_root_path_from_context(dialog_id, checklist_key)
+    structural = []
+    if root_path:
+        structural.append(root_path)
+    config = get_checklist_config(checklist_key)
+    for group_id in config.group_ids():
+        structural.append(resolve_custom_item_parent_yandex_path(dialog_id, checklist_key, group_id))
+        structural.append(resolve_item_group_parent_yandex_path(
+            dialog_id=dialog_id, checklist_key=checklist_key, group_id=group_id,
+        ))
+        structural.extend(path for path, _ in custom_grouping_folders(dialog_id, checklist_key, group_id))
+    for value in structural:
+        key = _path_key(value)
+        if key and (key == target or key.startswith(target + "/")):
+            return True
+    return False
+
+
 def build_custom_item_yandex_folder_spec(
     dialog_id: str,
     checklist_key: str,
@@ -1084,6 +1211,7 @@ def build_custom_item_yandex_folder_spec(
         dialog_id=dialog_id,
         checklist_key=checklist_key,
         group_id=group_id,
+        item_name=item_name,
     )
     folder_path = (
         normalize_yandex_disk_path(
@@ -1127,6 +1255,7 @@ def ensure_yandex_folder_for_custom_item(
         dialog_id=dialog_id,
         checklist_key=checklist_key,
         group_id=group_id,
+        item_name=item_name,
     )
 
     if not parent_path:
@@ -1138,6 +1267,9 @@ def ensure_yandex_folder_for_custom_item(
         else build_stable_custom_folder_target_path(
             parent_path=parent_path,
             item_name=item_name,
+            numbered=not is_custom_grouping_folder(
+                dialog_id, checklist_key, parent_path,
+            ),
         )
     )
     folder_name = folder_path.rstrip("/").rsplit("/", 1)[-1]
@@ -1341,10 +1473,28 @@ def build_item_yandex_relocation_spec(
     )
     same_group = int(source_group_id or 0) == int(target_group_id or 0)
     parent_override = clean_cell_value(target_parent_path_override)
+    source_parent_path = (
+        _split_yandex_parent_and_name(normalized_source_path)[0]
+        if normalized_source_path
+        else ""
+    )
+    placement_parent = "" if parent_override else _top_level_placement_parent(
+        dialog_id=dialog_id,
+        checklist_key=checklist_key,
+        item=item,
+        target_group_id=int(target_group_id or 0),
+        target_name=target_name,
+        source_parent=source_parent_path,
+        same_group=same_group,
+    )
     if parent_override:
         # Subitem: the folder goes into the folder of its (new) parent item.
         target_parent = normalize_yandex_disk_path(parent_override)
         same_group = False
+    elif placement_parent:
+        target_parent = placement_parent
+        if not source_parent_path or _path_key(placement_parent) != _path_key(source_parent_path):
+            same_group = False
     elif same_group and normalized_source_path:
         # A pure rename must keep the exact current parent directory.  Standard
         # items can live one or more levels below the common group root (for
@@ -1366,7 +1516,12 @@ def build_item_yandex_relocation_spec(
         if source_path
         else sanitize_yandex_folder_name(source_name or target_name)
     )
-    if is_custom and same_group:
+    if is_custom and target_parent and is_custom_grouping_folder(
+        dialog_id, checklist_key, target_parent,
+    ):
+        # Folders inside 05_ИОС carry no numbers, like the standard ones.
+        target_folder_name = sanitize_yandex_folder_name(target_name)
+    elif is_custom and same_group:
         source_prefix, _ = split_custom_folder_prefix(source_folder_name)
         target_folder_name = (
             f"{source_prefix:02d}_{sanitize_yandex_folder_name(target_name)}"
@@ -1422,6 +1577,80 @@ def build_item_yandex_relocation_spec(
             )
         ),
     }
+
+
+def _top_level_placement_parent(
+    *,
+    dialog_id: str,
+    checklist_key: str,
+    item: dict,
+    target_group_id: int,
+    target_name: str,
+    source_parent: str,
+    same_group: bool,
+) -> str:
+    """The folder a top-level item's folder belongs in, "" = default rule.
+
+    A custom item named «ИОС …» lives in the section's 05_ИОС. A standard
+    item in its own section lives where the template puts it (ИОС_2,3 in
+    05_ИОС): returning from «Не требуется» or another section must not drop
+    it to the section root, and a folder already dropped there goes back.
+    """
+    item = item or {}
+    if is_subitem(item):
+        return ""
+    config = get_checklist_config(checklist_key)
+    if config.is_not_required_group(target_group_id):
+        return ""
+    if bool(item.get("isCustom", False)):
+        grouping = custom_grouping_folder_for_name(
+            dialog_id, checklist_key, target_group_id, target_name,
+        )
+        if grouping:
+            return grouping
+        if (
+            same_group
+            and source_parent
+            and is_custom_grouping_folder(dialog_id, checklist_key, source_parent)
+        ):
+            # Renamed away from «ИОС …»: back to the section folder.
+            return resolve_custom_item_parent_yandex_path(
+                dialog_id, checklist_key, target_group_id,
+            )
+        return ""
+
+    definition_group_id, definition_name = resolve_standard_definition_identity(
+        config, item,
+    )
+    if not definition_name or int(definition_group_id or 0) != int(target_group_id or 0):
+        return ""
+    _, spec = _find_standard_item_yandex_spec(
+        checklist_key, definition_name, definition_group_id,
+    )
+    relative = (
+        clean_cell_value((spec or {}).get("relativePath"))
+        or clean_cell_value((spec or {}).get("folderName"))
+    ).replace("\\", "/").strip("/")
+    root_path = get_root_path_from_context(dialog_id, checklist_key)
+    if "/" not in relative or not root_path:
+        return ""
+    template_parent = normalize_yandex_disk_path(
+        f"{root_path.rstrip('/')}/{relative.rsplit('/', 1)[0]}"
+    )
+    if not same_group:
+        return template_parent
+    group_root = resolve_item_group_parent_yandex_path(
+        dialog_id=dialog_id,
+        checklist_key=checklist_key,
+        group_id=target_group_id,
+    )
+    if (
+        source_parent
+        and _path_key(source_parent) == _path_key(group_root)
+        and _path_key(template_parent) != _path_key(group_root)
+    ):
+        return template_parent
+    return ""
 
 
 def build_item_yandex_move_spec(
@@ -2303,28 +2532,26 @@ def mirror_document_file_to_yandex(
             ensure_upload_folder(dialog_id, upload_folder_path)
         target_path = build_yandex_file_target_path(upload_folder_path, filename)
 
-        # Recheck in the worker, not just when a job was queued. A prior PUT
-        # can have succeeded before a timeout/restart or a database failure.
-        from app.checklists.yandex_file_reconciliation import _remote_identity_result, REMOTE_FILE_CONFLICT_ERROR
+        # The checklist is the source of truth: the file is always uploaded,
+        # a file of the same name at this address is overwritten. Files are
+        # never compared before the upload (the same size or even the same
+        # checksum must not turn a replacement into a no-op).
+        from app.checklists.yandex_file_reconciliation import _remote_identity_result
         remote = yandex_disk_try_get_resource_meta(target_path)
         if remote is not None:
             if normalize_yandex_disk_path(remote.get('path') or '') != target_path:
                 raise RuntimeError('Ответ Яндекса относится к другому пути. Загрузка остановлена.')
-            matches, _ = _remote_identity_result(
-                local_path=Path(local_path), expected_name=safe_file_name(filename),
-                remote_meta=remote, hash_cache={},
-            )
-            if remote.get("type") == "file" and matches:
-                return {"ok": True, "folderAlias": folder_alias, "folderPath": folder_path,
-                        "folderUrl": folder_url, "filePath": target_path, "reused": True}
-            if not allow_replace or remote.get("type") != "file":
-                raise RuntimeError(REMOTE_FILE_CONFLICT_ERROR)
+            if remote.get("type") != "file":
+                raise RuntimeError(
+                    'На Яндекс.Диске по адресу файла находится папка. Загрузка остановлена: '
+                    + target_path
+                )
 
         upload_result = yandex_disk_upload_file(
             target_path=target_path,
             local_path=local_path,
             progress_callback=progress_callback,
-            overwrite=allow_replace,
+            overwrite=True,
         )
 
         confirmed = yandex_disk_try_get_resource_meta(target_path)

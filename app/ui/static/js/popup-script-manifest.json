@@ -1,6 +1,6 @@
 {
-  "stage": "8.19-folder-replace",
-  "generatedAt": "2026-09-30T05:15:44+00:00",
+  "stage": "8.20-item-move-delete",
+  "generatedAt": "2026-10-05T08:30:00+00:00",
   "loadOrder": [
     "checklist-host-diagnostics.js",
     "popup-bootstrap.js",
@@ -77,12 +77,12 @@
       "bytes": 5273
     },
     "popup-document-refresh.js": {
-      "sha256": "c96bb2f1c0cef23ff9fc1f59244ea1c4ffba68294047cb00cc2b20280eda5aa2",
-      "bytes": 7935
+      "sha256": "170d12430456aaa683155df0a7a6b5647b8981011ffcaf4bb192396a850a2ece",
+      "bytes": 10475
     },
     "popup-core.js": {
-      "sha256": "3df2b2abe47906920c3db89d85e4496c883a7e267bd0af1e545ff950e1486a42",
-      "bytes": 106373
+      "sha256": "b1ec1c8ab56b9f88f05d8eb4f3d33850651f25efc8996f40e1fa176351df7da4",
+      "bytes": 106427
     },
     "popup-document-list.js": {
       "sha256": "ea5f58ae65e8260ce606e1fd5a16d581ac955e4a11b0d90639a6f94d59bd05cf",
@@ -161,8 +161,8 @@
       "bytes": 2095
     },
     "popup-event-window-sync.js": {
-      "sha256": "9dd01158bcd5003a25306b7b0f10cca6a42d9741cfefd35d316a064fe4789f22",
-      "bytes": 10422
+      "sha256": "13672fde78a1a48b379392ab49f111027faa0781b9970379e01418c9e93107c0",
+      "bytes": 10559
     },
     "popup-event-session.js": {
       "sha256": "f157ba9da7f7a60478796aebefa61b025226f00d97f239f333f2a423c416d4ae",
@@ -334,12 +334,12 @@
       "bytes": 5273
     },
     "popup-document-refresh.js": {
-      "sha256": "c96bb2f1c0cef23ff9fc1f59244ea1c4ffba68294047cb00cc2b20280eda5aa2",
-      "bytes": 7935
+      "sha256": "170d12430456aaa683155df0a7a6b5647b8981011ffcaf4bb192396a850a2ece",
+      "bytes": 10475
     },
     "popup-core.js": {
-      "sha256": "3df2b2abe47906920c3db89d85e4496c883a7e267bd0af1e545ff950e1486a42",
-      "bytes": 106373
+      "sha256": "b1ec1c8ab56b9f88f05d8eb4f3d33850651f25efc8996f40e1fa176351df7da4",
+      "bytes": 106427
     },
     "popup-document-list.js": {
       "sha256": "ea5f58ae65e8260ce606e1fd5a16d581ac955e4a11b0d90639a6f94d59bd05cf",
@@ -414,8 +414,8 @@
       "bytes": 2095
     },
     "popup-event-window-sync.js": {
-      "sha256": "9dd01158bcd5003a25306b7b0f10cca6a42d9741cfefd35d316a064fe4789f22",
-      "bytes": 10422
+      "sha256": "13672fde78a1a48b379392ab49f111027faa0781b9970379e01418c9e93107c0",
+      "bytes": 10559
     },
     "popup-event-session.js": {
       "sha256": "f157ba9da7f7a60478796aebefa61b025226f00d97f239f333f2a423c416d4ae",

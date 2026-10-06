@@ -385,6 +385,11 @@ def reconcile_custom_item_yandex_folder(
         dialog_id,
         checklist_key,
         group_id,
+        item_name=item_name,
+    )
+    from app.checklists.yandex_folders import is_custom_grouping_folder
+    expected_unnumbered = is_custom_grouping_folder(
+        dialog_id, checklist_key, expected_parent,
     )
     if not expected_parent:
         return {"ok": False, "error": "Yandex custom folder parent is unavailable"}
@@ -456,7 +461,7 @@ def reconcile_custom_item_yandex_folder(
             if (
                 _path_key(_path_parent(candidate.get("path") or ""))
                 == expected_parent_key
-                and prefix > 0
+                and (prefix == 0 if expected_unnumbered else prefix > 0)
                 and sanitize_yandex_folder_name(base).casefold() == expected_base
             ):
                 correct.append(candidate)
@@ -575,6 +580,7 @@ def reconcile_custom_item_yandex_folder(
             parent_path=expected_parent,
             item_name=item_name,
             preserve_source_name=preserve_name,
+            numbered=not expected_unnumbered,
         )
         action = (
             "create_item_folder"

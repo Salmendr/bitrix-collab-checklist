@@ -423,3 +423,56 @@ def move_targets(item: dict, folder: str) -> list[str]:
         if not is_within(path, folder)
         and folder_key(path) != folder_key(parent_folder(folder))
     ]
+
+
+def item_move_targets(checklist_key: str, items: list[dict], item: dict) -> list[dict]:
+    """Where an item or a subitem can be moved inside its checklist.
+
+    A section makes it an item of that section; an item of a section makes
+    it a subitem of that item. An item with its own subitems moves only
+    between sections (items are two levels deep at most). «Не требуется»
+    is reached through the status, not from here.
+    """
+    from app.checklists.utils import normalize_status
+
+    config = get_checklist_config(checklist_key)
+    item_id = clean_cell_value(item.get("id"))
+    current_group = int(item.get("group") or 0)
+    current_parent = parent_id_of(item)
+    can_become_subitem = not children_of(items, item_id)
+    targets: list[dict] = []
+    for group in config.groups:
+        if config.is_not_required_group(group.id):
+            continue
+        targets.append({
+            "kind": "section",
+            "groupId": group.id,
+            "itemId": "",
+            "label": clean_cell_value(config.get_group_title(group.id)) or f"Раздел {group.id}",
+            "current": not current_parent and group.id == current_group,
+        })
+        if not can_become_subitem:
+            continue
+        hosts = sorted(
+            (
+                candidate for candidate in items
+                if int(candidate.get("group") or 0) == group.id
+                and not parent_id_of(candidate)
+                and clean_cell_value(candidate.get("id")) != item_id
+                and normalize_status(candidate.get("status")) != "Не требуется"
+            ),
+            key=lambda candidate: (
+                int(candidate.get("order") or 100000),
+                clean_cell_value(candidate.get("id")),
+            ),
+        )
+        for host in hosts:
+            host_id = clean_cell_value(host.get("id"))
+            targets.append({
+                "kind": "item",
+                "groupId": group.id,
+                "itemId": host_id,
+                "label": clean_cell_value(host.get("name")) or "Пункт",
+                "current": host_id == current_parent,
+            })
+    return targets

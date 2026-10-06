@@ -112,16 +112,25 @@
                 input.setAttribute('aria-label', options.title);
                 body.appendChild(input);
             } else if (options.kind === 'targets') {
+                if (options.note) {
+                    const note = doc.createElement('p');
+                    note.className = 'folder-dialog-note';
+                    note.textContent = options.note;
+                    body.appendChild(note);
+                }
                 const list = doc.createElement('div');
                 list.className = 'folder-dialog-targets';
+                const firstEnabled = options.targets.findIndex(target => !target.disabled);
                 options.targets.forEach((target, index) => {
                     const label = doc.createElement('label');
-                    label.className = 'folder-dialog-target';
+                    label.className = 'folder-dialog-target'
+                        + (target.disabled ? ' is-current' : '');
                     const radio = doc.createElement('input');
                     radio.type = 'radio';
                     radio.name = 'folderMoveTarget';
                     radio.value = target.value;
-                    radio.checked = index === 0;
+                    radio.checked = index === firstEnabled;
+                    radio.disabled = !!target.disabled;
                     const text = doc.createElement('span');
                     text.textContent = target.label;
                     text.style.paddingLeft = (target.depth * 16) + 'px';
@@ -241,10 +250,12 @@
         return result;
     }
 
-    function notifyChecklist(oldValue, newValue, targetItemId) {
+    function notifyChecklist(oldValue, newValue, targetItemId, structureChanged) {
         core.notifyParent('checklist-document-changed', {
             itemId: targetItemId || itemId,
-            folderChange: { oldValue, newValue }
+            folderChange: { oldValue, newValue },
+            // The popup takes the item list from the server (move, delete).
+            structureChanged: structureChanged === true
         });
     }
 
@@ -350,6 +361,90 @@
         });
     }
 
+    // The item (or subitem) of this window: to another section or into
+    // another item. Same edit session; Yandex Disk follows after Save.
+    async function moveItem() {
+        const raw = Array.isArray(bootstrap.itemMoveTargets) ? bootstrap.itemMoveTargets : [];
+        const isSubitem = bootstrap.isSubitem === true;
+        const targets = raw.map(target => {
+            const isSection = target.kind === 'section';
+            return {
+                value: (isSection ? 'section:' : 'item:') + String(target.groupId) + ':' + String(target.itemId || ''),
+                label: isSection
+                    ? 'Раздел «' + String(target.label || '') + '»'
+                        + (target.current ? ' — сейчас здесь' : '')
+                    : 'внутрь пункта «' + String(target.label || '') + '»'
+                        + (target.current ? ' — сейчас здесь' : ''),
+                depth: isSection ? 0 : 1,
+                disabled: !!target.current
+            };
+        });
+        if (!targets.some(target => !target.disabled)) {
+            alert('Переместить некуда');
+            return;
+        }
+        await openDialog({
+            kind: 'targets',
+            title: 'Переместить «' + itemName + '» в…',
+            submitLabel: 'Переместить',
+            note: bootstrap.itemHasSubitems === true
+                ? 'Пункт с подпунктами можно перенести только в другой раздел.'
+                : 'Раздел — пункт станет обычным пунктом раздела; пункт — станет его подпунктом.',
+            targets,
+            async onSubmit(value) {
+                const parts = String(value || '').split(':');
+                const kind = parts[0];
+                const groupId = Number(parts[1] || 0);
+                const hostId = parts.slice(2).join(':');
+                const body = { itemId, targetGroupId: groupId };
+                if (kind === 'item') {
+                    body.targetParentId = hostId;
+                } else if (isSubitem) {
+                    // A subitem becomes an item of the section.
+                    body.targetParentId = '';
+                }
+                await postJson(String(bootstrap.reorderItemApiUrl || ''), body);
+                notifyChecklist('', itemName, itemId, true);
+                global.location.reload();
+            }
+        });
+    }
+
+    async function deleteItem(button) {
+        const actor = core.getActor();
+        if (!deleteAllowedUserIds.has(String(actor.id || '').trim())) {
+            alert('У вас недостаточно прав на удаление пунктов');
+            return;
+        }
+        const isSubitem = bootstrap.isSubitem === true;
+        const what = isSubitem ? 'подпункт' : 'пункт';
+        const tail = isSubitem
+            ? 'со всеми папками и файлами'
+            : 'со всеми подпунктами, папками и файлами';
+        if (!global.confirm(
+            'Удалить ' + what + ' «' + itemName + '» ' + tail + '?\n\n'
+            + 'До сохранения изменений удаление можно отменить кнопкой «Отмена». '
+            + 'После сохранения папка на Яндекс.Диске уйдёт в корзину Яндекса.'
+        )) {
+            return;
+        }
+        button.disabled = true;
+        try {
+            await postJson(String(bootstrap.deleteItemApiUrl || ''), { itemId });
+            notifyChecklist(itemName, 'Удалён', itemId, true);
+            const backUrl = String(bootstrap.backUrl || '').trim();
+            if (backUrl) {
+                // A subitem: back to its parent item.
+                global.location.replace(backUrl);
+            } else {
+                core.returnToPopup({ forcePopup: true, preventDefault() {} });
+            }
+        } catch (error) {
+            alert(error && error.message ? error.message : 'Не удалось удалить пункт');
+            button.disabled = false;
+        }
+    }
+
     async function deleteFolder(button) {
         if (!relativeFolder) return;
         const actor = core.getActor();
@@ -410,7 +505,7 @@
     function hideDeleteWithoutRights() {
         const actor = core.getActor();
         if (deleteAllowedUserIds.has(String(actor && actor.id || '').trim())) return;
-        doc.querySelectorAll('[data-role="folder-delete"]').forEach(button => {
+        doc.querySelectorAll('[data-role="folder-delete"], [data-role="item-delete"]').forEach(button => {
             button.remove();
         });
     }
@@ -461,7 +556,9 @@
         'folder-create': createFolder,
         'folder-rename': renameFolder,
         'folder-move': moveFolder,
-        'folder-delete': deleteFolder
+        'folder-delete': deleteFolder,
+        'item-move': moveItem,
+        'item-delete': deleteItem
     };
     Object.keys(handlers).forEach(role => {
         doc.querySelectorAll('[data-role="' + role + '"]').forEach(button => {
