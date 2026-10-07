@@ -166,6 +166,16 @@ def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
     project_checklists_json = json.dumps(data.get("projectChecklists", []), ensure_ascii=False)
     dialog_id_json = json.dumps(dialog_id, ensure_ascii=False)
     phases_json = json.dumps(phases, ensure_ascii=False)
+    try:
+        from app.checklists.project_objects import checklist_object_views
+
+        project_object = checklist_object_views(dialog_id)
+    except Exception as exc:
+        from app.logging_utils import write_debug_log
+
+        write_debug_log("popup_project_object_failed", {"dialogId": dialog_id, "error": str(exc)})
+        project_object = {"byKey": {}}
+    project_object_json = json.dumps(project_object, ensure_ascii=False).replace("</", "<\\/")
     collab_title_json = json.dumps(collab_title_raw, ensure_ascii=False)
     checklist_key_json = json.dumps(checklist_key, ensure_ascii=False)
     checklist_title_json = json.dumps(title_raw, ensure_ascii=False)
@@ -187,6 +197,7 @@ def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
             "POPUP_PROGRESS_PERCENT": progress_percent,
             "POPUP_DIALOG_ID_JSON": dialog_id_json,
             "POPUP_PHASES_JSON": phases_json,
+            "POPUP_PROJECT_OBJECT_JSON": project_object_json,
             "POPUP_PROJECT_ROOT_YANDEX_PATH_JSON": project_root_yandex_path_json,
             "POPUP_PROJECT_ROOT_YANDEX_URL_JSON": project_root_yandex_url_json,
             "POPUP_PROJECT_ROOT_YANDEX_PREPARED_JSON": project_root_yandex_prepared_json,

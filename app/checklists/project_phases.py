@@ -191,16 +191,45 @@ def is_project_admin(user_id: str) -> bool:
     return clean_cell_value(user_id) in PROJECT_ADMIN_USER_IDS
 
 
+def object_gip_user_ids(dialog_id: str) -> set[str] | None:
+    """People of the ГИП fields taken from the Bitrix24 objects; None while
+    the project has no object data (the manual GIP list applies)."""
+    from app.checklists.project_objects import object_people_user_ids
+
+    try:
+        return object_people_user_ids(base_dialog_id(dialog_id))
+    except Exception as exc:
+        write_debug_log("project_object_people_failed", {"dialogId": dialog_id, "error": str(exc)})
+        return None
+
+
+def manager_user_ids(dialog_id: str) -> list[str]:
+    """Non-admin users who manage the project: the GIPs."""
+    object_ids = object_gip_user_ids(dialog_id)
+    if object_ids is not None:
+        return sorted(object_ids)
+    return [gip["userId"] for gip in list_gips(dialog_id)]
+
+
 def can_manage_phases(dialog_id: str, user_id: str) -> bool:
     user = clean_cell_value(user_id)
     if not user:
         return False
-    return is_project_admin(user) or any(gip["userId"] == user for gip in list_gips(dialog_id))
+    return is_project_admin(user) or user in manager_user_ids(dialog_id)
+
+
+def _refuse_when_object_driven(dialog_id: str) -> None:
+    if object_gip_user_ids(dialog_id) is not None:
+        raise PhaseError(
+            "ГИП подтягивается из объекта Битрикс24. Измените его в карточке объекта "
+            "и нажмите «Подтянуть данные из объекта» в админ-панели."
+        )
 
 
 def add_gip(dialog_id: str, *, user_id: str, user_name: str, acting_user_id: str) -> list[dict]:
     if not is_project_admin(acting_user_id):
         raise PhaseError("Назначать ГИП могут только администраторы")
+    _refuse_when_object_driven(dialog_id)
     user = clean_cell_value(user_id)
     if not user or not user.isdigit():
         raise PhaseError("Выберите сотрудника Битрикс24")
@@ -226,6 +255,7 @@ def add_gip(dialog_id: str, *, user_id: str, user_name: str, acting_user_id: str
 def remove_gip(dialog_id: str, *, user_id: str, acting_user_id: str) -> list[dict]:
     if not is_project_admin(acting_user_id):
         raise PhaseError("Назначать ГИП могут только администраторы")
+    _refuse_when_object_driven(dialog_id)
     base = base_dialog_id(dialog_id)
     conn = _conn()
     try:
@@ -669,5 +699,6 @@ def phase_summary(dialog_id: str, user_id: str = "") -> dict:
         "label": phase_name(number) if phases else "",
         "phases": phases,
         "gips": list_gips(base),
+        "managerUserIds": manager_user_ids(base),
         "adminUserIds": sorted(PROJECT_ADMIN_USER_IDS),
     }

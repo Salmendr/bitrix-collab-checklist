@@ -177,9 +177,24 @@ def load_project_context_rows() -> list[dict]:
             "projectRootUrl": clean_cell_value(yandex_disk.get("projectRootUrl")),
             "standardFoldersPrepared": bool(yandex_disk.get("standardFoldersPrepared")),
             "summary": get_project_summary(dialog_id),
+            "object": _project_object_row(dialog_id),
         })
 
     return result
+
+
+def _project_object_row(dialog_id: str) -> dict:
+    from app.checklists.project_phases import base_dialog_id
+    from app.checklists.project_objects import project_object_state
+
+    base = base_dialog_id(dialog_id)
+    if base != dialog_id:
+        # Stages use the object of the project chat.
+        return {"phaseOf": base}
+    try:
+        return project_object_state(dialog_id)
+    except Exception as exc:
+        return {"error": str(exc)}
 
 
 @router.get("/admin", response_class=HTMLResponse)
@@ -395,6 +410,54 @@ def admin_page(userId: str = ""):
         }
         .bitrix-users-box.visible {
             display: block;
+        }
+        .object-box {
+            margin-top: 10px;
+            padding-top: 8px;
+            border-top: 1px dashed #e4e7ec;
+            max-width: 560px;
+        }
+        .object-box .toolbar {
+            margin: 6px 0;
+        }
+        .object-id-input {
+            width: 150px;
+        }
+        .object-card {
+            margin-top: 6px;
+            padding: 8px 10px;
+            border: 1px solid #e4e7ec;
+            border-radius: 10px;
+            background: #fcfcfd;
+            font-size: 12px;
+            line-height: 1.45;
+        }
+        .object-card.main {
+            border-color: #84adff;
+            background: #f5f9ff;
+        }
+        .object-card label {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-weight: 700;
+        }
+        .object-card input[type="radio"] {
+            height: auto;
+        }
+        .object-choice {
+            display: flex;
+            gap: 6px;
+            align-items: center;
+            margin-top: 6px;
+            font-size: 12px;
+        }
+        .object-choice select {
+            max-width: 420px;
+            height: 30px;
+            border: 1px solid #d0d7de;
+            border-radius: 8px;
+            font-size: 12px;
         }
     </style>
 </head>
@@ -817,6 +880,7 @@ def admin_page(userId: str = ""):
                             placeholder="projectId"
                             style="margin-top:6px;"
                         >
+                        ${renderObjectBox(item)}
                     </td>
                     <td>
                         <span class="${preparedClass}">${preparedText}</span>
@@ -840,12 +904,141 @@ def admin_page(userId: str = ""):
             });
         }
 
-        async function reloadProjects() {
+        const WORK_TYPE_ORDER = ['Концепция', 'ОПР', 'ПД', 'РД', 'Дизайн', 'ППТ'];
+
+        function peopleText(list) {
+            return (Array.isArray(list) ? list : [])
+                .map(person => person && (person.name || ('ID ' + person.userId)))
+                .filter(Boolean)
+                .join(', ');
+        }
+
+        function renderChoice(item, field, label, variants, pinned) {
+            if (!Array.isArray(variants) || variants.length < 2) return '';
+            const options = variants.map(variant => {
+                const value = String(variant.value || '');
+                const ids = (variant.objectIds || []).map(id => '#' + id).join(', ');
+                return `<option value="${esc(value)}" ${value === pinned ? 'selected' : ''}>${esc(value)} (${esc(ids)})</option>`;
+            }).join('');
+            return `
+                <div class="object-choice">
+                    <span>${label}:</span>
+                    <select data-role="object-choice" data-field="${field}" data-dialog-id="${esc(item.dialogId)}">
+                        <option value="" ${pinned ? '' : 'selected'}>по основному объекту</option>
+                        ${options}
+                    </select>
+                </div>
+            `;
+        }
+
+        function renderObjectCard(item, object, state) {
+            const created = object.createdTime ? String(object.createdTime).slice(0, 10) : '';
+            const types = (object.workTypes || []).slice().sort((a, b) => WORK_TYPE_ORDER.indexOf(a) - WORK_TYPE_ORDER.indexOf(b)).join(', ');
+            if (object.error) {
+                return `<div class="object-card"><b>#${esc(object.id)}</b> <span class="badge warn">${esc(object.error)}</span></div>`;
+            }
+            const rows = [
+                types ? `Тип работ: <b>${esc(types)}</b>` : 'Тип работ: —',
+                object.assigned ? `Ответственный: ${esc(peopleText([object.assigned]))}` : '',
+                (object.workGroupLeaders || []).length ? `Руководитель РГ: ${esc(peopleText(object.workGroupLeaders))}` : '',
+                (object.conceptResponsibles || []).length ? `Отв. за Концепцию/Эскиз: ${esc(peopleText(object.conceptResponsibles))}` : '',
+                object.legalName ? `Юр. наименование: ${esc(object.legalName)}` : '',
+                object.cipher ? `Шифр: ${esc(object.cipher)}` : '',
+            ].filter(Boolean).map(row => `<div>${row}</div>`).join('');
+            return `
+                <div class="object-card ${object.isMain ? 'main' : ''}">
+                    <label>
+                        <input type="radio" name="main-object-${esc(item.dialogId)}" data-role="main-object"
+                            data-dialog-id="${esc(item.dialogId)}" value="${esc(object.id)}" ${object.isMain ? 'checked' : ''}>
+                        #${esc(object.id)} ${esc(object.title || '')}
+                        ${object.isMain ? '<span class="badge good">основной</span>' : ''}
+                        ${object.id === state.autoMainObjectId ? '<span class="badge">авто</span>' : ''}
+                    </label>
+                    <div class="muted">создан ${esc(created)}</div>
+                    ${rows}
+                </div>
+            `;
+        }
+
+        function renderObjectBox(item) {
+            const state = item.object || {};
+            if (state.phaseOf) {
+                return `<div class="object-box muted">Объект Битрикс24 берётся из проекта ${esc(state.phaseOf)}.</div>`;
+            }
+            const objects = Array.isArray(state.objects) ? state.objects : [];
+            const statusText = {
+                resolved: 'данные получены',
+                partial: 'получены не все объекты',
+                error: 'ошибка',
+                pending: 'ожидает загрузки',
+                missing: 'объект не задан'
+            }[state.status] || (state.status || '');
+            const fetched = state.fetchedAt ? ' · ' + String(state.fetchedAt).replace('T', ' ').slice(0, 16) : '';
+            return `
+                <div class="object-box">
+                    <b>Объект Битрикс24</b>
+                    <div class="toolbar">
+                        <input class="object-id-input" data-role="object-id" data-dialog-id="${esc(item.dialogId)}"
+                            value="${esc(state.objectItemId || '')}" placeholder="ID объекта">
+                        <button type="button" class="primary" data-action="object-fetch" data-dialog-id="${esc(item.dialogId)}">Подтянуть данные из объекта</button>
+                    </div>
+                    ${statusText ? `<div class="muted">${esc(statusText)}${esc(fetched)}</div>` : ''}
+                    ${state.error ? `<div class="badge warn">${esc(state.error)}</div>` : ''}
+                    ${objects.length > 1 && state.mainObjectOverride ? `
+                        <div class="muted">Основной объект выбран вручную.
+                            <button type="button" data-action="main-object-auto" data-dialog-id="${esc(item.dialogId)}">Вернуть автоматический</button>
+                        </div>` : ''}
+                    ${objects.map(object => renderObjectCard(item, object, state)).join('')}
+                    ${renderChoice(item, 'legalName', 'Наименование', state.legalNames, state.legalNamePinned || '')}
+                    ${renderChoice(item, 'cipher', 'Шифр', state.ciphers, state.cipherPinned || '')}
+                </div>
+            `;
+        }
+
+        async function fetchProjectObject(dialogId) {
+            const input = document.querySelector('[data-role="object-id"][data-dialog-id="' + CSS.escape(dialogId) + '"]');
+            const objectItemId = input ? String(input.value || '').trim() : '';
+            if (!objectItemId && !confirm('ID объекта пустой: данные объекта будут удалены из проекта. Продолжить?')) {
+                return;
+            }
             try {
-                setStatus('Загружаем проекты...');
+                setStatus('Запрашиваем объекты в Битрикс24...');
+                const result = await apiPost('api/admin/project-object/fetch', { dialogId, objectItemId });
+                setStatus(result);
+                await reloadProjects(true);
+            } catch (e) {
+                setStatus('Ошибка: ' + String(e.message || e));
+            }
+        }
+
+        async function setMainObject(dialogId, objectId) {
+            try {
+                const result = await apiPost('api/admin/project-object/main', { dialogId, objectId });
+                setStatus(result);
+                await reloadProjects(true);
+            } catch (e) {
+                setStatus('Ошибка: ' + String(e.message || e));
+                await reloadProjects(true);
+            }
+        }
+
+        async function chooseObjectValue(dialogId, field, value) {
+            try {
+                const result = await apiPost('api/admin/project-object/choose', { dialogId, field, value });
+                setStatus(result);
+                await reloadProjects(true);
+            } catch (e) {
+                setStatus('Ошибка: ' + String(e.message || e));
+                await reloadProjects(true);
+            }
+        }
+
+        async function reloadProjects(keepStatus) {
+            try {
+                if (keepStatus !== true) setStatus('Загружаем проекты...');
                 const result = await apiGet('api/admin/projects');
                 renderProjects(result.items || []);
-                setStatus(result);
+                if (keepStatus !== true) setStatus(result);
             } catch (e) {
                 setStatus('Ошибка: ' + String(e.message || e));
             }
@@ -992,6 +1185,25 @@ def admin_page(userId: str = ""):
 
             if (action === 'delete') {
                 deleteProject(dialogId);
+            }
+
+            if (action === 'object-fetch') {
+                fetchProjectObject(dialogId);
+            }
+
+            if (action === 'main-object-auto') {
+                setMainObject(dialogId, 0);
+            }
+        });
+
+        projectsBody.addEventListener('change', function (event) {
+            const el = event.target;
+            if (!el || !el.dataset) return;
+            if (el.dataset.role === 'main-object') {
+                setMainObject(el.dataset.dialogId, el.value);
+            }
+            if (el.dataset.role === 'object-choice') {
+                chooseObjectValue(el.dataset.dialogId, el.dataset.field, el.value);
             }
         });
 
@@ -1157,6 +1369,62 @@ async def api_admin_update_project(request: Request):
         "projectId": project_id,
         "summary": get_project_summary(dialog_id),
     })
+
+
+def _admin_object_call(payload: dict, action):
+    from app.checklists.project_objects import ProjectObjectError, project_object_state
+
+    if not is_admin_user(clean_cell_value(payload.get("userId"))):
+        return json_admin_denied()
+    dialog_id = normalize_dialog_id(payload.get("dialogId"))
+    if not dialog_id:
+        return JSONResponse({"ok": False, "error": "dialogId is required"}, status_code=400)
+    try:
+        action(dialog_id)
+    except ProjectObjectError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+    return JSONResponse({"ok": True, "dialogId": dialog_id, "object": project_object_state(dialog_id)})
+
+
+@router.post("/api/admin/project-object/fetch")
+def api_admin_project_object_fetch(payload: dict):
+    """Store the object id (when given) and read the objects from Bitrix24."""
+    from app.checklists import project_objects
+
+    def action(dialog_id):
+        if "objectItemId" in payload:
+            entered = clean_cell_value(payload.get("objectItemId"))
+            stored = project_objects.project_object_state(dialog_id).get("objectItemId") or 0
+            if entered != str(stored or ""):
+                return project_objects.set_object_item_id(dialog_id, entered, source="admin")
+        return project_objects.refresh_project_objects(dialog_id, source="admin")
+
+    return _admin_object_call(payload, action)
+
+
+@router.post("/api/admin/project-object/main")
+def api_admin_project_object_main(payload: dict):
+    from app.checklists import project_objects
+
+    return _admin_object_call(
+        payload,
+        lambda dialog_id: project_objects.set_main_object(dialog_id, payload.get("objectId")),
+    )
+
+
+@router.post("/api/admin/project-object/choose")
+def api_admin_project_object_choose(payload: dict):
+    from app.checklists import project_objects
+
+    return _admin_object_call(
+        payload,
+        lambda dialog_id: project_objects.choose_value(
+            dialog_id,
+            clean_cell_value(payload.get("field")),
+            payload.get("value"),
+            check_rights=False,
+        ),
+    )
 
 
 @router.post("/api/admin/delete-project")

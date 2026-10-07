@@ -97,8 +97,26 @@ def api_save_project_storage_context(
         incoming_bitrix = {}
     merged_bitrix = dict(previous_bitrix if isinstance(previous_bitrix, dict) else {})
     merged_bitrix.update(incoming_bitrix)
+    # The object id may also come at the top level of the payload.
+    top_level_object_id = clean_cell_value(payload.get("objectItemId") or payload.get("objectId"))
+    if top_level_object_id:
+        merged_bitrix["objectItemId"] = top_level_object_id
     merged_bitrix.setdefault("objectEntityTypeId", DEFAULT_OBJECT_ENTITY_TYPE_ID)
+    previous_object_id = normalize_project_bitrix_context(previous_bitrix).get("objectItemId") or 0
     normalized_bitrix = normalize_project_bitrix_context(merged_bitrix)
+    object_id = normalized_bitrix.get("objectItemId") or 0
+    object_changed = bool(object_id) and object_id != previous_object_id
+    if object_changed:
+        # Cards of the previous object no longer apply; they are read below.
+        normalized_bitrix.update({
+            "objects": [],
+            "objectUsers": {},
+            "objectsFetchedAt": "",
+            "objectsAttemptAt": "",
+            "objectsStatus": "pending",
+            "objectsError": "",
+            "mainObjectId": 0,
+        })
 
     normalized_payload = {
         "dialogId": dialog_id,
@@ -119,6 +137,19 @@ def api_save_project_storage_context(
         "projectRootPath": clean_cell_value(yandex_disk.get("projectRootPath")),
         "mirrorTargets": storage_mode.get("mirrorTargets") if isinstance(storage_mode, dict) else [],
     })
+
+    from app.checklists.project_objects import needs_auto_fetch, refresh_in_background
+
+    object_fetch_started = False
+    if object_id and (object_changed or needs_auto_fetch(dialog_id)):
+        # Read the object cards once, without delaying the answer to n8n.
+        refresh_in_background(
+            dialog_id,
+            object_item_id=object_id,
+            source="n8n_context_saved",
+            if_needed=not object_changed,
+        )
+        object_fetch_started = True
 
     queue_result = enqueue_yandex_warmup(dialog_id, source="n8n_context_saved")
     file_reconciliation = {}
@@ -151,6 +182,7 @@ def api_save_project_storage_context(
         "foldersCount": len((context.get("yandexDisk") or {}).get("folders") or {}) if context else 0,
         "itemMappingsCount": len(context.get("itemMappings") or []) if context else 0,
         "bitrix": (context or {}).get("bitrix") or {},
+        "objectFetchStarted": object_fetch_started,
     }
 
 

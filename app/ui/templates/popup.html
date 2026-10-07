@@ -12,7 +12,7 @@
             });
         </script>
         <script src="ui-static/js/checklist-host-diagnostics.js?v=8.19-folder-replace"></script>
-        <link rel="stylesheet" href="ui-static/css/popup-bootstrap.css?v=8.19-folder-replace">
+        <link rel="stylesheet" href="ui-static/css/popup-bootstrap.css?v=8.21-project-object">
         <!-- Stage 6.2: popup styles are loaded through popup-bootstrap.css. -->
     </head>
     <body>
@@ -35,6 +35,7 @@
                             </div>
                             <div id="projectRootFolderBox" style="display:none; align-self:flex-end; min-width:260px;"></div>
                         </div>
+                        <div id="projectObjectBar" class="project-object-bar" hidden></div>
                     </div>
                     <div class="header-right">
                         <div
@@ -134,6 +135,7 @@
             window.CHECKLIST_POPUP_BOOTSTRAP = Object.freeze({
                 dialogId: [[POPUP_DIALOG_ID_JSON]],
                 phases: [[POPUP_PHASES_JSON]],
+                projectObject: [[POPUP_PROJECT_OBJECT_JSON]],
                 projectRootYandexPath: [[POPUP_PROJECT_ROOT_YANDEX_PATH_JSON]],
                 projectRootYandexUrl: [[POPUP_PROJECT_ROOT_YANDEX_URL_JSON]],
                 projectRootYandexPrepared: [[POPUP_PROJECT_ROOT_YANDEX_PREPARED_JSON]],
@@ -195,6 +197,7 @@
         <script src="ui-static/js/popup-event-opr.js?v=8.15.1-bitrix-hotfix"></script>
         <script src="ui-static/js/popup-event-generic.js?v=8.15.1-bitrix-hotfix"></script>
         <script src="ui-static/js/popup-renderer-registry.js?v=8.15.1-bitrix-hotfix"></script>
-        <script src="ui-static/js/popup-render-orchestrator.js?v=8.17-folders"></script>
-        <script src="ui-static/js/popup-project-phases.js?v=8.18-phases"></script>
+        <script src="ui-static/js/popup-render-orchestrator.js?v=8.21-project-object"></script>
+        <script src="ui-static/js/popup-project-phases.js?v=8.21-project-object"></script>
+        <script src="ui-static/js/popup-project-object.js?v=8.21-project-object"></script>
         <script src="ui-static/js/popup-init.js?v=8.15.5-id-yandex-folder-return"></script>

@@ -120,8 +120,15 @@ def _save_resolution(dialog_id: str, context: dict, bitrix: dict) -> dict:
     return get_project_storage_context(dialog_id) or updated
 
 
+def _project_dialog_id(dialog_id: str) -> str:
+    # Stages share the Bitrix object of the project chat.
+    from app.checklists.project_phases import base_dialog_id
+
+    return base_dialog_id(normalize_dialog_id(dialog_id))
+
+
 def get_project_curator(dialog_id: str) -> dict:
-    normalized_dialog_id = normalize_dialog_id(dialog_id)
+    normalized_dialog_id = _project_dialog_id(dialog_id)
     context = get_project_storage_context(normalized_dialog_id)
     if not context:
         return {
@@ -144,7 +151,7 @@ def resolve_project_curator(
     force: bool = False,
     allow_cached: bool = True,
 ) -> dict:
-    normalized_dialog_id = normalize_dialog_id(dialog_id)
+    normalized_dialog_id = _project_dialog_id(dialog_id)
     context = get_project_storage_context(normalized_dialog_id)
     if not context:
         raise ProjectCuratorError("project storage context not found")
@@ -152,6 +159,13 @@ def resolve_project_curator(
     bitrix = normalize_project_bitrix_context(context.get("bitrix"))
     entity_type_id = _positive_int(bitrix.get("objectEntityTypeId"))
     object_item_id = _positive_int(bitrix.get("objectItemId"))
+    try:
+        from app.checklists.project_objects import project_object_state
+
+        # The curator is the Ответственный of the main object.
+        object_item_id = _positive_int(project_object_state(normalized_dialog_id).get("mainObjectId")) or object_item_id
+    except Exception:
+        pass
     cached_curator = dict(bitrix.get("curator") or {})
 
     if not force and allow_cached and clean_cell_value(cached_curator.get("userId")):

@@ -5,6 +5,9 @@
     // Stage 1 is the chat dialog itself; stage N ≥ 2 has its own dialog id.
     // Adding stages: administrators and the project GIPs. Editing the GIP
     // list: administrators only. The server checks both again.
+    // When the project has a Bitrix24 object, the field shows the people of
+    // the object of this checklist («Главный Концептолог» / «Главный
+    // Дизайнер» in Концепция and Дизайн) and is not edited here.
 
     const doc = global.document;
     const phaseBarEl = doc.getElementById('projectPhaseBar');
@@ -23,6 +26,14 @@
         adminUserIds: Array.isArray(bootstrapPhases.adminUserIds)
             ? bootstrapPhases.adminUserIds.map(String)
             : [],
+        managerUserIds: Array.isArray(bootstrapPhases.managerUserIds)
+            ? bootstrapPhases.managerUserIds.map(String)
+            : null,
+        object: (
+            popupBootstrap.projectObject
+            && popupBootstrap.projectObject.byKey
+            && typeof popupBootstrap.projectObject.byKey === 'object'
+        ) ? (popupBootstrap.projectObject.byKey[String(currentChecklistKey || 'id')] || null) : null,
         busy: false,
         gipPickerOpen: false
     };
@@ -51,7 +62,13 @@
     function canManagePhases() {
         const userId = currentUserId();
         if (!userId) return false;
-        return isAdmin() || state.gips.some(gip => text(gip.userId) === userId);
+        if (isAdmin()) return true;
+        if (state.managerUserIds) return state.managerUserIds.includes(userId);
+        return state.gips.some(gip => text(gip.userId) === userId);
+    }
+
+    function objectDriven() {
+        return !!(state.object && state.object.objectDriven);
     }
 
     function phaseUrl(phaseDialogId) {
@@ -79,6 +96,7 @@
         if (!result) return;
         if (Array.isArray(result.phases)) state.phases = result.phases;
         if (Array.isArray(result.gips)) state.gips = result.gips;
+        if (Array.isArray(result.managerUserIds)) state.managerUserIds = result.managerUserIds.map(String);
         renderPhaseBar();
         renderGipControl();
     }
@@ -257,8 +275,35 @@
         }
     }
 
+    function renderObjectPeople() {
+        const object = state.object || {};
+        const people = Array.isArray(object.people) ? object.people : [];
+        const chips = people.map(person => {
+            const roles = Array.isArray(person.roles) ? person.roles.join(', ') : '';
+            const title = roles + (person.objectId ? ' · объект #' + person.objectId : '');
+            return `<span class="project-gip-chip" title="${escHtml(title)}">`
+                + `<span>${escHtml(person.name || ('ID ' + person.userId))}</span>`
+                + '</span>';
+        }).join('');
+        const empty = people.length ? '' : '<span class="project-gip-empty">не назначен</span>';
+        gipControlEl.innerHTML = `
+            <span class="project-gip-label">${escHtml(object.peopleLabel || 'ГИП')}:</span>
+            <span class="project-gip-list">${chips}${empty}</span>
+        `;
+        gipControlEl.hidden = false;
+    }
+
     function renderGipControl() {
         if (!gipControlEl) return;
+        if (objectDriven()) {
+            if (gipPicker && typeof gipPicker.destroy === 'function') {
+                gipPicker.destroy();
+                gipPicker = null;
+            }
+            state.gipPickerOpen = false;
+            renderObjectPeople();
+            return;
+        }
         const admin = isAdmin();
         const chips = state.gips.map(gip => (
             `<span class="project-gip-chip" title="ID ${escHtml(gip.userId)}">`
@@ -338,8 +383,16 @@
             : null
     ).catch(() => null).then(renderAllPhaseControls);
 
+    // The Bitrix24 object data arrived (popup-project-object.js).
+    function applyObject(view, managerUserIds) {
+        state.object = view && typeof view === 'object' ? view : null;
+        if (Array.isArray(managerUserIds)) state.managerUserIds = managerUserIds.map(String);
+        renderAllPhaseControls();
+    }
+
     global.ChecklistPopupProjectPhases = Object.freeze({
         render: renderAllPhaseControls,
+        applyObject,
         canManagePhases,
         phaseUrl,
         state

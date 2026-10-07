@@ -1,6 +1,6 @@
 {
-  "stage": "8.20-item-move-delete",
-  "generatedAt": "2026-10-05T08:30:00+00:00",
+  "stage": "8.21-project-object",
+  "generatedAt": "2026-10-07T12:00:00+00:00",
   "loadOrder": [
     "checklist-host-diagnostics.js",
     "popup-bootstrap.js",
@@ -49,6 +49,7 @@
     "popup-renderer-registry.js",
     "popup-render-orchestrator.js",
     "popup-project-phases.js",
+    "popup-project-object.js",
     "popup-init.js"
   ],
   "extractedModules": {
@@ -300,7 +301,8 @@
     "Stage 8.17 uploads whole folders: a folder dropped into an item becomes a subitem, deeper levels become folders of the subitem; empty folders are kept.",
     "Stage 8.17.1 shows the folder and Yandex buttons for subitems as for items.",
     "Stage 8.18 adds project stages (tabs above the checklist list, «Добавить этап») and the project GIP field.",
-    "Stage 8.19: folders are uploaded by drag and drop only; popup-open diagnostics are compact."
+    "Stage 8.19: folders are uploaded by drag and drop only; popup-open diagnostics are compact.",
+    "Stage 8.21: the Bitrix24 object of the project in the header (legal name, cipher, «Перейти к объекту»); the GIP field shows the people of the object of each checklist."
   ],
   "hashMode": "utf8-lf",
   "lineEndingNote": "Hashes are calculated from bytes written to disk. This is stable for Windows CRLF and Unix LF.",
@@ -470,8 +472,8 @@
       "bytes": 2244
     },
     "popup-render-orchestrator.js": {
-      "sha256": "86ab13ffcb37e2357753db83118df63af3827d4b747ebd48607fabdfc3e338b6",
-      "bytes": 11479
+      "sha256": "80af00d76b021d48d8170299ddb6d7d64f90f6bd2f99504f01e8a50f04885eac",
+      "bytes": 11569
     },
     "popup-init.js": {
       "sha256": "4596fcfe86614d66f79a923ff65a5b0c8e579dabf2fb7c45b4b99646a9f42b47",
@@ -490,8 +492,12 @@
       "bytes": 6389
     },
     "popup-project-phases.js": {
-      "sha256": "5c8748479ed96aed7176630e3c3ba9b3358a43597e1bdd6c5879ae80ccf17e6a",
-      "bytes": 14903
+      "sha256": "a62ed10df113c4771ccd7da2ce5b0977d9a59857b2575c7e83599f8b99c7977b",
+      "bytes": 17496
+    },
+    "popup-project-object.js": {
+      "sha256": "43642148433fd2cc45cc4c54270bcdea62b4c93282113024c920879757fa86a5",
+      "bytes": 13746
     }
   }
 }
