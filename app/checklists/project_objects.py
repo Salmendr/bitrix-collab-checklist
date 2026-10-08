@@ -78,6 +78,13 @@ ROLE_CONCEPT_RESPONSIBLE = "Ответственный за Концепцию/�
 # An automatic first read that failed is retried after this many seconds.
 AUTO_RETRY_SECONDS = 3600
 MAX_RELATED_OBJECTS = 30
+# Version of the cached cards: older caches are read again once.
+# 2: the legal name and the cipher are shown by the title of a linked element.
+OBJECTS_SCHEMA = 2
+
+# CRM entity types of a «Привязка к элементам CRM» field.
+CRM_TYPE_IDS = {"LEAD": 1, "DEAL": 2, "CONTACT": 3, "COMPANY": 4, "QUOTE": 7, "SMART_INVOICE": 31}
+CRM_TYPE_ABBRS = {"L": 1, "D": 2, "C": 3, "CO": 4, "Q": 7, "SI": 31}
 
 _SAVE_LOCK = threading.Lock()
 _FETCH_LOCKS_GUARD = threading.Lock()
@@ -234,12 +241,28 @@ def _response_error(response: Any) -> str:
     return ""
 
 
+def _raw_values(value: Any) -> list:
+    """Values of a field as stored, without splitting text."""
+    if value is None or value is False or value == "":
+        return []
+    if isinstance(value, (list, tuple)):
+        result = []
+        for entry in value:
+            result.extend(_raw_values(entry))
+        return result
+    return [value]
+
+
 def normalize_object_item(item: dict, object_id: int) -> dict:
     return {
         "id": _positive_int(item.get("id") or item.get("ID")) or int(object_id),
         "title": _text_value(item.get("title") or item.get("TITLE")),
-        "legalName": _text_value(_field(item, FIELD_LEGAL_NAME)),
-        "cipher": _text_value(_field(item, FIELD_CIPHER)),
+        # Resolved to text by resolve_display_fields(): the fields may link
+        # to other elements and hold their ids.
+        "legalNameRaw": _raw_values(_field(item, FIELD_LEGAL_NAME)),
+        "cipherRaw": _raw_values(_field(item, FIELD_CIPHER)),
+        "legalName": "",
+        "cipher": "",
         "assignedById": (parse_user_ids(item.get("assignedById") or item.get("ASSIGNED_BY_ID")) or [""])[0],
         "workGroupLeaderIds": parse_user_ids(_field(item, FIELD_WORK_GROUP_LEADER)),
         "conceptResponsibleIds": parse_user_ids(_field(item, FIELD_CONCEPT_RESPONSIBLE)),
@@ -271,6 +294,218 @@ def fetch_object(object_id: int) -> tuple[dict | None, str]:
     if not item:
         return None, "Объект не найден"
     return normalize_object_item(item, object_id), ""
+
+
+# ---------------------------------------------------------------------------
+# Text of the legal name and the cipher
+# ---------------------------------------------------------------------------
+
+def fetch_field_meta() -> tuple[dict, str]:
+    """Descriptions of the object fields (type and link settings)."""
+    from app.bitrix.client import bitrix_webhook_call
+
+    try:
+        response = bitrix_webhook_call(
+            "crm.item.fields",
+            {"entityTypeId": OBJECT_ENTITY_TYPE_ID, "useOriginalUfNames": "N"},
+        )
+    except Exception as exc:
+        return {}, f"Битрикс24 недоступен: {exc}"
+    error = _response_error(response)
+    if error:
+        return {}, error
+    result = response.get("result") if isinstance(response, dict) else None
+    fields = result.get("fields") if isinstance(result, dict) and isinstance(result.get("fields"), dict) else result
+    if not isinstance(fields, dict):
+        return {}, "Битрикс24 не вернул описание полей"
+    meta: dict = {}
+    for camel in (FIELD_LEGAL_NAME, FIELD_CIPHER):
+        entry = fields.get(camel) or fields.get(_original_uf_name(camel))
+        if not isinstance(entry, dict):
+            entry = next(
+                (
+                    value for value in fields.values()
+                    if isinstance(value, dict)
+                    and clean_cell_value(value.get("upperName")).upper() == _original_uf_name(camel)
+                ),
+                None,
+            )
+        if isinstance(entry, dict):
+            meta[camel] = entry
+    return meta, ""
+
+
+def _field_type(meta: dict) -> str:
+    return clean_cell_value((meta or {}).get("type") or (meta or {}).get("userTypeId")).lower()
+
+
+def _field_settings(meta: dict) -> dict:
+    settings = (meta or {}).get("settings")
+    return settings if isinstance(settings, dict) else {}
+
+
+def _crm_reference(value: Any, settings: dict) -> tuple[int, int]:
+    """(entityTypeId, id) of a value of a CRM link field."""
+    text = clean_cell_value(value)
+    match = re.fullmatch(r"T([0-9a-fA-F]+)_(\d+)", text)
+    if match:
+        return int(match.group(1), 16), int(match.group(2))
+    match = re.fullmatch(r"DYNAMIC_(\d+)_(\d+)", text, re.IGNORECASE)
+    if match:
+        return int(match.group(1)), int(match.group(2))
+    match = re.fullmatch(r"([A-Z]{1,2})_(\d+)", text)
+    if match and match.group(1) in CRM_TYPE_ABBRS:
+        return CRM_TYPE_ABBRS[match.group(1)], int(match.group(2))
+    if re.fullmatch(r"\d+", text):
+        # A plain id: the field links to a single entity type.
+        enabled = []
+        for key, flag in settings.items():
+            if clean_cell_value(flag).upper() != "Y":
+                continue
+            key = clean_cell_value(key).upper()
+            dynamic = re.fullmatch(r"DYNAMIC_(\d+)", key)
+            if dynamic:
+                enabled.append(int(dynamic.group(1)))
+            elif key in CRM_TYPE_IDS:
+                enabled.append(CRM_TYPE_IDS[key])
+        if len(enabled) == 1:
+            return enabled[0], int(text)
+    return 0, 0
+
+
+def _crm_title(entity_type_id: int, item_id: int) -> tuple[str, str]:
+    from app.bitrix.client import bitrix_webhook_call
+
+    try:
+        response = bitrix_webhook_call(
+            "crm.item.get",
+            {"entityTypeId": int(entity_type_id), "id": int(item_id), "useOriginalUfNames": "N"},
+        )
+    except Exception as exc:
+        return "", f"Битрикс24 недоступен: {exc}"
+    error = _response_error(response)
+    if error:
+        return "", error
+    item = _response_item(response)
+    title = _text_value(item.get("title") or item.get("TITLE"))
+    if not title:
+        # Contacts have a name instead of a title.
+        title = " ".join(
+            part for part in (
+                _text_value(item.get("lastName")),
+                _text_value(item.get("name")),
+                _text_value(item.get("secondName")),
+            ) if part
+        )
+    return title, "" if title else "у связанного элемента нет названия"
+
+
+def _list_element_name(settings: dict, element_id: int) -> tuple[str, str]:
+    from app.bitrix.client import bitrix_webhook_call
+
+    iblock_id = _positive_int(settings.get("IBLOCK_ID"))
+    if not iblock_id:
+        return "", "в описании поля нет списка"
+    try:
+        response = bitrix_webhook_call(
+            "lists.element.get",
+            {
+                "IBLOCK_TYPE_ID": clean_cell_value(settings.get("IBLOCK_TYPE_ID")) or "lists",
+                "IBLOCK_ID": iblock_id,
+                "ELEMENT_ID": int(element_id),
+            },
+        )
+    except Exception as exc:
+        return "", f"Битрикс24 недоступен: {exc}"
+    error = _response_error(response)
+    if error:
+        return "", error
+    rows = response.get("result") if isinstance(response, dict) else None
+    row = rows[0] if isinstance(rows, list) and rows and isinstance(rows[0], dict) else {}
+    name = _text_value(row.get("NAME") or row.get("name"))
+    return name, "" if name else "элемент списка не найден"
+
+
+def resolve_display_value(raw: list, meta: dict | None, cache: dict) -> tuple[str, str]:
+    """Text of a field value: the title of a linked element, the value of a
+    list option, or the text itself. Returns (text, error)."""
+    values = _raw_values(raw)
+    if not values:
+        return "", ""
+    field_type = _field_type(meta or {})
+    settings = _field_settings(meta or {})
+    texts: list[str] = []
+    errors: list[str] = []
+    for value in values:
+        key = (field_type, clean_cell_value(value))
+        if field_type == "crm" or not meta:
+            # One request per linked element, however the value is written.
+            # Prefixed values (T42e_42, CO_5) name their entity type even
+            # without the field description.
+            reference = _crm_reference(value, settings)
+            if reference[0] and reference[1]:
+                key = ("crm", *reference)
+        if key in cache:
+            text, error = cache[key]
+        elif len(key) == 3:
+            text, error = _crm_title(key[1], key[2])
+        elif field_type == "crm":
+            text, error = "", f"не удалось определить, на что ссылается значение {value}"
+        elif field_type == "iblock_element":
+            element_id = _positive_int(value)
+            text, error = _list_element_name(settings, element_id) if element_id else (_text_value(value), "")
+        elif field_type == "enumeration":
+            items = (meta or {}).get("items")
+            options = {
+                clean_cell_value(entry.get("ID") or entry.get("id")): _text_value(entry.get("VALUE") or entry.get("value"))
+                for entry in (items if isinstance(items, list) else [])
+                if isinstance(entry, dict)
+            }
+            text = options.get(clean_cell_value(value), "")
+            error = "" if text else f"нет варианта списка {value}"
+        elif not meta and re.fullmatch(r"\d+", clean_cell_value(value)):
+            # The field description is unknown: an id is not a name.
+            text, error = "", f"не удалось получить описание поля (значение {value})"
+        else:
+            text, error = _text_value(value), ""
+        cache[key] = (text, error)
+        if text and text not in texts:
+            texts.append(text)
+        if error:
+            errors.append(error)
+    return ", ".join(texts), "; ".join(errors)
+
+
+def resolve_display_fields(objects: list[dict]) -> list[str]:
+    """Fill legalName and cipher of loaded objects; returns errors."""
+    loaded = [
+        entry for entry in objects
+        if not clean_cell_value(entry.get("error"))
+        and (entry.get("legalNameRaw") or entry.get("cipherRaw"))
+    ]
+    if not loaded:
+        return []
+    meta, meta_error = fetch_field_meta()
+    cache: dict = {}
+    errors: list[str] = []
+    if meta_error:
+        errors.append("описание полей: " + meta_error)
+    for entry in loaded:
+        for field, camel, label in (
+            ("legalName", FIELD_LEGAL_NAME, "юр. наименование"),
+            ("cipher", FIELD_CIPHER, "шифр"),
+        ):
+            text, error = resolve_display_value(entry.get(field + "Raw") or [], meta.get(camel), cache)
+            entry[field] = text
+            entry[field + "Error"] = error
+            if error:
+                errors.append(f"#{entry.get('id')} {label}: {error}")
+    write_debug_log("project_objects_display_fields", {
+        "fields": {camel: {"type": _field_type(value), "settings": _field_settings(value)} for camel, value in meta.items()},
+        "metaError": meta_error,
+        "errors": errors,
+    })
+    return errors
 
 
 def _resolve_user_names(user_ids: list[str]) -> dict[str, str]:
@@ -318,19 +553,91 @@ def _resolve_user_names(user_ids: list[str]) -> dict[str, str]:
 # Context storage
 # ---------------------------------------------------------------------------
 
-def _load_bitrix(base: str) -> dict:
-    from app.checklists.storage import get_project_storage_context
+# What was read from Bitrix24 and what was chosen lives in its own table:
+# the project context row is rewritten as a whole by other code (n8n, Yandex
+# folder preparation) from copies read earlier, which would undo these keys.
+# ``bitrix`` of the context keeps the input: objectItemId (n8n, admin panel),
+# and the curator.
+STATE_KEYS = frozenset({
+    "rootId",
+    "objects",
+    "objectUsers",
+    "objectsStatus",
+    "objectsError",
+    "objectsFetchedAt",
+    "objectsAttemptAt",
+    "objectsSchema",
+    "mainObjectId",
+    "legalNameChoice",
+    "cipherChoice",
+})
+# Valid only for the object they were read from.
+ROOT_BOUND_KEYS = STATE_KEYS - {"legalNameChoice", "cipherChoice"}
 
-    context = get_project_storage_context(base) or {}
-    bitrix = context.get("bitrix")
-    return dict(bitrix) if isinstance(bitrix, dict) else {}
+
+def _ensure_state_table(conn) -> None:
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS project_object_states (
+            base_dialog_id TEXT PRIMARY KEY,
+            state_json TEXT NOT NULL,
+            updated_at TEXT
+        )
+    """)
 
 
-def _update_bitrix(base: str, changes: dict) -> dict:
-    """Merge keys into ``bitrix`` of the base context without touching the
-    rest of the row (n8n may rewrite the row at the same time)."""
+def _read_state(conn, base: str) -> dict:
     import json
 
+    _ensure_state_table(conn)
+    row = conn.execute(
+        "SELECT state_json FROM project_object_states WHERE base_dialog_id = ?",
+        (base,),
+    ).fetchone()
+    if not row:
+        return {}
+    try:
+        state = json.loads(row["state_json"] or "{}")
+    except Exception:
+        state = {}
+    return state if isinstance(state, dict) else {}
+
+
+def _load_bitrix(base: str) -> dict:
+    """``bitrix`` of the project context with the stored object state."""
+    import json
+
+    conn = get_conn()
+    try:
+        # Only this column: the whole context (folders) is much larger.
+        row = conn.execute(
+            "SELECT bitrix_json FROM project_storage_contexts WHERE dialog_id = ?",
+            (base,),
+        ).fetchone()
+        state = _read_state(conn, base)
+    finally:
+        conn.close()
+    try:
+        raw = json.loads(row["bitrix_json"] or "{}") if row else {}
+    except Exception:
+        raw = {}
+    bitrix = {
+        key: value for key, value in (raw if isinstance(raw, dict) else {}).items()
+        if key not in STATE_KEYS
+    }
+    if _positive_int(state.get("rootId")) != _positive_int(bitrix.get("objectItemId")):
+        # Read for another object id (n8n or the admin panel changed it).
+        state = {key: value for key, value in state.items() if key not in ROOT_BOUND_KEYS}
+    bitrix.update(state)
+    return bitrix
+
+
+def _update_bitrix(base: str, changes: dict) -> None:
+    """Store object state keys in their table, other keys in ``bitrix`` of
+    the base context (only that column, the rest of the row is kept)."""
+    import json
+
+    state_changes = {key: value for key, value in changes.items() if key in STATE_KEYS}
+    bitrix_changes = {key: value for key, value in changes.items() if key not in STATE_KEYS}
     with _SAVE_LOCK:
         conn = get_conn()
         try:
@@ -340,21 +647,37 @@ def _update_bitrix(base: str, changes: dict) -> dict:
             ).fetchone()
             if not row:
                 raise ProjectObjectError("Контекст проекта не найден")
-            try:
-                bitrix = json.loads(row["bitrix_json"] or "{}")
-            except Exception:
-                bitrix = {}
-            if not isinstance(bitrix, dict):
-                bitrix = {}
-            bitrix.update(changes)
-            conn.execute(
-                "UPDATE project_storage_contexts SET bitrix_json = ? WHERE dialog_id = ?",
-                (json.dumps(bitrix, ensure_ascii=False), base),
-            )
+            if bitrix_changes:
+                try:
+                    bitrix = json.loads(row["bitrix_json"] or "{}")
+                except Exception:
+                    bitrix = {}
+                if not isinstance(bitrix, dict):
+                    bitrix = {}
+                bitrix.update(bitrix_changes)
+                # Object state kept here by the first version.
+                for key in STATE_KEYS:
+                    bitrix.pop(key, None)
+                conn.execute(
+                    "UPDATE project_storage_contexts SET bitrix_json = ? WHERE dialog_id = ?",
+                    (json.dumps(bitrix, ensure_ascii=False), base),
+                )
+            if state_changes:
+                state = _read_state(conn, base)
+                state.update(state_changes)
+                conn.execute(
+                    """
+                    INSERT INTO project_object_states(base_dialog_id, state_json, updated_at)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT(base_dialog_id) DO UPDATE SET
+                        state_json = excluded.state_json,
+                        updated_at = excluded.updated_at
+                    """,
+                    (base, json.dumps(state, ensure_ascii=False), _iso_now()),
+                )
             conn.commit()
         finally:
             conn.close()
-    return bitrix
 
 
 def _cached_objects(bitrix: dict) -> list[dict]:
@@ -421,6 +744,7 @@ def refresh_project_objects(
         started_at = _iso_now()
         if not root_id:
             changes = {
+                "rootId": 0,
                 "objectItemId": 0,
                 "objects": [],
                 "objectUsers": {},
@@ -435,15 +759,16 @@ def refresh_project_objects(
         root, error = fetch_object(root_id)
         if not root:
             changes = {
+                "rootId": root_id,
                 "objectItemId": root_id,
                 "objectEntityTypeId": OBJECT_ENTITY_TYPE_ID,
                 "objectsStatus": "error",
                 "objectsError": error,
                 "objectsAttemptAt": started_at,
             }
-            if root_id != stored_id:
+            if root_id != stored_id or _positive_int(bitrix.get("rootId")) != root_id:
                 # Another object: the cards of the old one no longer apply.
-                changes.update({"objects": [], "objectUsers": {}, "objectsFetchedAt": ""})
+                changes.update({"objects": [], "objectUsers": {}, "objectsFetchedAt": "", "mainObjectId": 0})
             _update_bitrix(base, changes)
             write_debug_log("project_objects_fetch_failed", {
                 "dialogId": base, "objectItemId": root_id, "source": source, "error": error,
@@ -472,6 +797,8 @@ def refresh_project_objects(
         if main_id and main_id != root_id:
             fetch_related(objects[main_id].get("relatedIds") or [])
 
+        errors.extend(resolve_display_fields(list(objects.values())))
+
         user_ids: list[str] = []
         for entry in objects.values():
             for user_id in (
@@ -489,6 +816,7 @@ def refresh_project_objects(
         main = objects.get(main_id) or root
         fetched_at = _iso_now()
         changes = {
+            "rootId": root_id,
             "objectItemId": root_id,
             "objectEntityTypeId": OBJECT_ENTITY_TYPE_ID,
             "objects": ordered,
@@ -497,6 +825,7 @@ def refresh_project_objects(
             "objectsError": "; ".join(errors),
             "objectsFetchedAt": fetched_at,
             "objectsAttemptAt": started_at,
+            "objectsSchema": OBJECTS_SCHEMA,
             "objectTitle": clean_cell_value(main.get("title")),
         }
         override = _positive_int(bitrix.get("mainObjectId"))
@@ -536,9 +865,18 @@ def needs_auto_fetch(dialog_id: str, bitrix: dict | None = None) -> bool:
         bitrix = _load_bitrix(_base(dialog_id))
     if not _positive_int(bitrix.get("objectItemId")):
         return False
-    if clean_cell_value(bitrix.get("objectsFetchedAt")) and _cached_objects(bitrix):
-        return False
     attempt = _parse_time(bitrix.get("objectsAttemptAt"))
+    fetched = _parse_time(bitrix.get("objectsFetchedAt"))
+    if fetched and _cached_objects(bitrix):
+        if _positive_int(bitrix.get("objectsSchema")) >= OBJECTS_SCHEMA:
+            return False
+        # Cards cached by an older version: read them again once (a failed
+        # read is retried later, like the first one).
+        return not (
+            clean_cell_value(bitrix.get("objectsStatus")) == "error"
+            and attempt
+            and (datetime.now(timezone.utc) - attempt).total_seconds() < AUTO_RETRY_SECONDS
+        )
     if attempt and (datetime.now(timezone.utc) - attempt).total_seconds() < AUTO_RETRY_SECONDS:
         return False
     return True
@@ -645,11 +983,14 @@ def checklist_people(objects: list[dict], main_id: int, checklist_key: str, name
     return people
 
 
-def _variants(objects: list[dict], main_id: int, field: str) -> list[dict]:
+def _variants(objects: list[dict], main_id: int, field: str, schema: int = OBJECTS_SCHEMA) -> list[dict]:
     result: list[dict] = []
     for entry in _ordered_candidates(objects, main_id):
         value = clean_cell_value(entry.get(field))
         if not value:
+            continue
+        if field == "legalName" and schema < 2 and value.isdigit():
+            # Cached by the first version: the id of a linked element.
             continue
         existing = next((variant for variant in result if variant["value"] == value), None)
         if existing:
@@ -673,7 +1014,9 @@ def _object_brief(entry: dict, main_id: int, names: dict) -> dict:
         "id": object_id,
         "title": clean_cell_value(entry.get("title")),
         "legalName": clean_cell_value(entry.get("legalName")),
+        "legalNameError": clean_cell_value(entry.get("legalNameError")),
         "cipher": clean_cell_value(entry.get("cipher")),
+        "cipherError": clean_cell_value(entry.get("cipherError")),
         "workTypes": [
             WORK_TYPE_NAMES.get(work_type, str(work_type))
             for work_type in entry.get("workTypes") or []
@@ -702,7 +1045,7 @@ def project_object_state(dialog_id: str, bitrix: dict | None = None) -> dict:
     objects = _cached_objects(bitrix)
     names = bitrix.get("objectUsers") if isinstance(bitrix.get("objectUsers"), dict) else {}
     main_id = _main_object_id(bitrix, objects)
-    legal_names = _variants(objects, main_id, "legalName")
+    legal_names = _variants(objects, main_id, "legalName", _positive_int(bitrix.get("objectsSchema")))
     ciphers = _variants(objects, main_id, "cipher")
     return {
         "baseDialogId": base,

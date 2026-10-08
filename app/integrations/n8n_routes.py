@@ -106,17 +106,12 @@ def api_save_project_storage_context(
     normalized_bitrix = normalize_project_bitrix_context(merged_bitrix)
     object_id = normalized_bitrix.get("objectItemId") or 0
     object_changed = bool(object_id) and object_id != previous_object_id
-    if object_changed:
-        # Cards of the previous object no longer apply; they are read below.
-        normalized_bitrix.update({
-            "objects": [],
-            "objectUsers": {},
-            "objectsFetchedAt": "",
-            "objectsAttemptAt": "",
-            "objectsStatus": "pending",
-            "objectsError": "",
-            "mainObjectId": 0,
-        })
+    # What was read from the object is kept apart from the context (see
+    # project_objects); the cards of another object id are not shown.
+    from app.checklists.project_objects import STATE_KEYS
+
+    for key in STATE_KEYS:
+        normalized_bitrix.pop(key, None)
 
     normalized_payload = {
         "dialogId": dialog_id,

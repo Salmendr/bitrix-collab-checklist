@@ -1,6 +1,6 @@
 {
-  "stage": "8.21-project-object",
-  "generatedAt": "2026-10-07T12:00:00+00:00",
+  "stage": "8.21.1-legal-name",
+  "generatedAt": "2026-10-08T00:00:00+00:00",
   "loadOrder": [
     "checklist-host-diagnostics.js",
     "popup-bootstrap.js",
@@ -302,7 +302,8 @@
     "Stage 8.17.1 shows the folder and Yandex buttons for subitems as for items.",
     "Stage 8.18 adds project stages (tabs above the checklist list, «Добавить этап») and the project GIP field.",
     "Stage 8.19: folders are uploaded by drag and drop only; popup-open diagnostics are compact.",
-    "Stage 8.21: the Bitrix24 object of the project in the header (legal name, cipher, «Перейти к объекту»); the GIP field shows the people of the object of each checklist."
+    "Stage 8.21: the Bitrix24 object of the project in the header (legal name, cipher, «Перейти к объекту»); the GIP field shows the people of the object of each checklist.",
+    "Stage 8.21.1: the legal name is the title of the linked element; object data kept in its own table."
   ],
   "hashMode": "utf8-lf",
   "lineEndingNote": "Hashes are calculated from bytes written to disk. This is stable for Windows CRLF and Unix LF.",
@@ -496,8 +497,8 @@
       "bytes": 17496
     },
     "popup-project-object.js": {
-      "sha256": "43642148433fd2cc45cc4c54270bcdea62b4c93282113024c920879757fa86a5",
-      "bytes": 13746
+      "sha256": "c374baae9886b0dc73c2126a2de41963bf0258671986b4fc6f6a433604fe4c1a",
+      "bytes": 14037
     }
   }
 }

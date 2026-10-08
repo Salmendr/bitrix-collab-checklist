@@ -171,6 +171,20 @@ def save_project_storage_context(dialog_id: str, payload: dict):
         bitrix_context = {}
 
     conn = get_conn()
+    if "bitrix" not in payload:
+        # Callers that only update folders do not pass the Bitrix24 data
+        # (object id, curator): keep what is stored.
+        row = conn.execute(
+            "SELECT bitrix_json FROM project_storage_contexts WHERE dialog_id = ?",
+            (dialog_id,),
+        ).fetchone()
+        if row:
+            try:
+                stored = json.loads(row["bitrix_json"] or "{}")
+            except Exception:
+                stored = {}
+            if isinstance(stored, dict):
+                bitrix_context = stored
     conn.execute("""
         INSERT INTO project_storage_contexts(
             dialog_id,

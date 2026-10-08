@@ -943,7 +943,9 @@ def admin_page(userId: str = ""):
                 (object.workGroupLeaders || []).length ? `Руководитель РГ: ${esc(peopleText(object.workGroupLeaders))}` : '',
                 (object.conceptResponsibles || []).length ? `Отв. за Концепцию/Эскиз: ${esc(peopleText(object.conceptResponsibles))}` : '',
                 object.legalName ? `Юр. наименование: ${esc(object.legalName)}` : '',
+                object.legalNameError ? `<span class="badge warn">Юр. наименование: ${esc(object.legalNameError)}</span>` : '',
                 object.cipher ? `Шифр: ${esc(object.cipher)}` : '',
+                object.cipherError ? `<span class="badge warn">Шифр: ${esc(object.cipherError)}</span>` : '',
             ].filter(Boolean).map(row => `<div>${row}</div>`).join('');
             return `
                 <div class="object-card ${object.isMain ? 'main' : ''}">

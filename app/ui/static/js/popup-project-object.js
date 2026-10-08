@@ -26,6 +26,7 @@
         loading: false,
         busy: false
     };
+    let renderedHtml = '';
 
     function text(value) {
         return String(value == null ? '' : value).trim();
@@ -249,6 +250,7 @@
         if (!view || !view.configured) {
             barEl.hidden = true;
             barEl.innerHTML = '';
+            renderedHtml = '';
             return;
         }
         const parts = [];
@@ -272,9 +274,15 @@
         if (!parts.length) {
             barEl.hidden = true;
             barEl.innerHTML = '';
+            renderedHtml = '';
             return;
         }
-        barEl.innerHTML = parts.join('');
+        const html = parts.join('');
+        // Same content: keep the nodes (a «Скопировано» hint stays visible).
+        if (html !== renderedHtml) {
+            barEl.innerHTML = html;
+            renderedHtml = html;
+        }
         barEl.hidden = false;
     }
 
