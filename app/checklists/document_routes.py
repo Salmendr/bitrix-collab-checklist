@@ -2349,7 +2349,7 @@ def api_checklist_folder(
     ui_static_base_url = (
         f"{app_base_path}/ui-static"
     )
-    ui_asset_version = "8.20-item-move-delete"
+    ui_asset_version = "8.22-header"
     popup_url = (
         f"{app_base_path}/popup"
         f"?dialogId={quote(dialog_id, safe='')}"
@@ -2543,6 +2543,9 @@ def api_checklist_folder(
             ),
             "FOLDER_ARCHIVE_JS_URL": html.escape(
                 f"{ui_static_base_url}/js/folder-archive-ui.js?v={ui_asset_version}"
+            ),
+            "FOLDER_LINK_MENU_JS_URL": html.escape(
+                f"{ui_static_base_url}/js/checklist-link-menu.js?v={ui_asset_version}"
             ),
             "FOLDER_TREE_ACTIONS_JS_URL": html.escape(
                 f"{ui_static_base_url}/js/folder-tree-actions.js?v={ui_asset_version}"

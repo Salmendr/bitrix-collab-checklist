@@ -2,6 +2,15 @@
 
 const yandexStructurePollers = new Map();
 
+// The Yandex button of an item: «Перейти по ссылке» / «Скопировать ссылку».
+function openYandexLink(button, url) {
+    if (window.ChecklistLinkMenu) {
+        window.ChecklistLinkMenu.open(button, url);
+    } else {
+        window.open(url, '_blank', 'noopener,noreferrer');
+    }
+}
+
 function getLocalChecklistItem(itemId) {
     const targetId = String(itemId || '').trim();
     return (Array.isArray(items) ? items : []).find(item => (
@@ -843,7 +852,7 @@ function bindDocumentActions() {
                 ).trim();
 
                 if (storedUrl) {
-                    window.open(storedUrl, '_blank', 'noopener,noreferrer');
+                    openYandexLink(this, storedUrl);
                     return;
                 }
 
@@ -870,7 +879,7 @@ function bindDocumentActions() {
                 const folderPath = String(result.path || storedPath).trim();
 
                 if (folderUrl) {
-                    window.open(folderUrl, '_blank', 'noopener,noreferrer');
+                    openYandexLink(this, folderUrl);
                     return;
                 }
 

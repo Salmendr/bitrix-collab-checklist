@@ -12,7 +12,7 @@
             });
         </script>
         <script src="ui-static/js/checklist-host-diagnostics.js?v=8.19-folder-replace"></script>
-        <link rel="stylesheet" href="ui-static/css/popup-bootstrap.css?v=8.21.2-legal-name-box">
+        <link rel="stylesheet" href="ui-static/css/popup-bootstrap.css?v=8.22-header">
         <!-- Stage 6.2: popup styles are loaded through popup-bootstrap.css. -->
     </head>
     <body>
@@ -20,22 +20,27 @@
             <div class="modal">
                 <div class="header">
                     <div class="header-main">
-                        <div class="title" id="popupTitle">[[POPUP_FULL_TITLE]]</div>
-                        <div id="projectGipControl" class="project-gip-control" hidden></div>
-                        <div id="idReminderControl" class="id-reminder-control" hidden>
-                            <label id="idReminderToggleLabel" hidden><input type="checkbox" id="idReminderEnabled" disabled> Включить оповещения</label>
-                            <button type="button" id="idReminderSettings" class="id-reminder-settings" hidden>Настроить</button>
-                            <span id="idReminderSummary" class="id-reminder-summary" aria-live="polite"></span>
-                        </div>
-                        <div style="display:flex; align-items:flex-end; gap:10px; flex-wrap:wrap;">
-                            <div class="progress-box">
+                        <!-- Top row: fixed cells, text wraps inside its cell. -->
+                        <div class="header-top-row">
+                            <div class="title header-cell header-title-cell" id="popupTitle">[[POPUP_FULL_TITLE]]</div>
+                            <div id="projectGipControl" class="project-gip-control header-cell" hidden></div>
+                            <div id="idReminderControl" class="id-reminder-control header-cell" hidden>
+                                <label id="idReminderToggleLabel" hidden><input type="checkbox" id="idReminderEnabled" disabled> Включить оповещения</label>
+                                <button type="button" id="idReminderSettings" class="id-reminder-settings" hidden>Настроить</button>
+                                <span id="idReminderSummary" class="id-reminder-summary" aria-live="polite"></span>
+                            </div>
+                            <div class="progress-box header-cell">
                                 <div class="progress-label">Прогресс</div>
                                 <div class="progress-value" id="progressValue">[[POPUP_PROGRESS_PERCENT]]%</div>
                                 <div class="progress-track"><div class="progress-bar" id="progressBar"></div></div>
                             </div>
-                            <div id="projectRootFolderBox" style="display:none; align-self:flex-end; min-width:260px;"></div>
                         </div>
-                        <div id="projectObjectBar" class="project-object-bar" hidden></div>
+                        <!-- Bottom row: object, «Перейти к объекту», Yandex, «Графики». -->
+                        <div class="header-bottom-row">
+                            <div id="projectObjectBar" class="project-object-bar" hidden></div>
+                            <div id="projectRootFolderBox" class="project-root-folder-box" style="display:none;"></div>
+                            <div id="projectChartsBox" class="project-charts-box" hidden></div>
+                        </div>
                     </div>
                     <div class="header-right">
                         <div
@@ -154,20 +159,21 @@
             });
         </script>
         <script src="ui-static/js/popup-bootstrap.js?v=8.15.1-bitrix-hotfix"></script>
+        <script src="ui-static/js/checklist-link-menu.js?v=8.22-header"></script>
         <script src="ui-static/js/checklist-action-icons.js?v=8.15.9"></script>
         <script src="ui-static/js/popup-api-client.js?v=8.15.1-bitrix-hotfix"></script>
         <script src="ui-static/js/popup-bitrix-bridge.js?v=8.15.1-bitrix-hotfix"></script>
         <script src="ui-static/js/checklist-window-channel.js?v=8.15.1-bitrix-hotfix"></script>
         <script src="ui-static/js/popup-client-session.js?v=8.15.1-bitrix-hotfix"></script>
         <script src="ui-static/js/popup-document-refresh.js?v=8.20-item-move-delete"></script>
-        <script src="ui-static/js/popup-core.js?v=8.20-item-move-delete"></script>
+        <script src="ui-static/js/popup-core.js?v=8.22-header"></script>
         <script src="ui-static/js/popup-document-list.js?v=8.17.1-links"></script>
         <script src="ui-static/js/popup-subitems.js?v=8.16-subitems"></script>
         <script src="ui-static/js/document-assignment-history.js?v=8.15.1-bitrix-hotfix"></script>
         <script src="ui-static/js/public-folder-share.js?v=8.15.8-staged-upload"></script>
         <script src="ui-static/js/upload-staging.js?v=8.19-folder-replace"></script>
         <script src="ui-static/js/folder-upload-planner.js?v=8.17-folders"></script>
-        <script src="ui-static/js/popup-document-actions.js?v=8.17-folders"></script>
+        <script src="ui-static/js/popup-document-actions.js?v=8.22-header"></script>
         <script src="ui-static/js/popup-window-channel.js?v=8.15.5-id-yandex-folder-return"></script>
         <script src="ui-static/js/popup-upload-progress.js?v=8.15.1-bitrix-hotfix"></script>
         <script src="ui-static/js/popup-upload-manager.js?v=8.19-folder-replace"></script>
@@ -199,5 +205,5 @@
         <script src="ui-static/js/popup-renderer-registry.js?v=8.15.1-bitrix-hotfix"></script>
         <script src="ui-static/js/popup-render-orchestrator.js?v=8.21-project-object"></script>
         <script src="ui-static/js/popup-project-phases.js?v=8.21-project-object"></script>
-        <script src="ui-static/js/popup-project-object.js?v=8.21.1-legal-name"></script>
+        <script src="ui-static/js/popup-project-object.js?v=8.22-header"></script>
         <script src="ui-static/js/popup-init.js?v=8.15.5-id-yandex-folder-return"></script>

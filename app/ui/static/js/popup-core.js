@@ -2357,9 +2357,19 @@
                         this.dataset.folderUrl || ''
                     ).trim();
                     if (url) {
-                        window.open(url, '_blank', 'noopener');
+                        openYandexLinkMenu(this, url);
                     }
                 });
+            }
+
+            // Buttons leading to Yandex Disk: «Перейти по ссылке» /
+            // «Скопировать ссылку».
+            function openYandexLinkMenu(button, url) {
+                if (window.ChecklistLinkMenu) {
+                    window.ChecklistLinkMenu.open(button, url);
+                } else {
+                    window.open(url, '_blank', 'noopener');
+                }
             }
 
 
@@ -2381,17 +2391,17 @@
                 projectRootFolderBoxEl.style.display = 'flex';
 
                 const buttonText = isReady
-                    ? 'Открыть Проект на Яндекс Диске'
-                    : 'Готовим структуру Яндекс.Диска...';
+                    ? 'Открыть Проект в Яндексе'
+                    : 'Готовим папки Яндекса...';
 
                 projectRootFolderBoxEl.innerHTML = `
                     <button
-                        class="doc-btn"
+                        class="header-link-button"
                         type="button"
                         data-role="view-project-root-folder"
                         data-folder-url="${esc(folderUrl)}"
                         title="${esc(folderPath || 'Корневая папка проекта')}"
-                        style="min-width:260px; width:260px; height:32px; white-space:nowrap;"
+                        aria-haspopup="menu"
                         ${isReady ? '' : 'disabled'}
                     >
                         ${esc(buttonText)}
@@ -2413,7 +2423,7 @@
                 btn.addEventListener('click', function () {
                     const url = String(this.dataset.folderUrl || '').trim();
                     if (url) {
-                        window.open(url, '_blank', 'noopener');
+                        openYandexLinkMenu(this, url);
                     }
                 });
             }

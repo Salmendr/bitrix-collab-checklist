@@ -946,6 +946,9 @@ def admin_page(userId: str = ""):
                 object.legalNameError ? `<span class="badge warn">Юр. наименование: ${esc(object.legalNameError)}</span>` : '',
                 object.cipher ? `Шифр: ${esc(object.cipher)}` : '',
                 object.cipherError ? `<span class="badge warn">Шифр: ${esc(object.cipherError)}</span>` : '',
+                (object.contracts || []).length
+                    ? 'Договоры: ' + object.contracts.map(contract => `${esc(contract.title || ('#' + contract.id))} (${contract.chartsUrl ? `<a href="${esc(contract.chartsUrl)}" target="_blank" rel="noopener">графики</a>` : 'нет ссылки на графики'})`).join('; ')
+                    : (object.contractsError ? `<span class="badge warn">Договоры: ${esc(object.contractsError)}</span>` : 'Договоров нет'),
             ].filter(Boolean).map(row => `<div>${row}</div>`).join('');
             return `
                 <div class="object-card ${object.isMain ? 'main' : ''}">

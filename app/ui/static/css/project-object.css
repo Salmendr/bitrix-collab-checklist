@@ -1,16 +1,147 @@
-/* Bitrix24 object of the project: a line under the title and progress. */
+/* Checklist header: a top row of fixed cells (title, GIP, notifications,
+   progress) and a bottom row (object, «Перейти к объекту», Yandex,
+   «Графики»). Text wraps inside its cell, the cells do not move. */
 .header {
-    /* The legal name box is sized by the width of the whole top panel. */
+    /* Cells are sized by the width of the whole top panel. */
     container-type: inline-size;
+    /* Without room for both, the save state goes under the cells instead
+       of covering them. */
+    flex-wrap: wrap;
+}
+
+.header-right {
+    margin-left: auto;
 }
 
 .header-main {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+}
+
+.header-top-row {
+    display: flex;
+    flex-wrap: nowrap;
+    align-items: flex-start;
+    gap: 18px;
+    min-width: 0;
+}
+
+.header-cell {
+    flex: 0 0 auto;
+    min-width: 0;
+}
+
+.header-title-cell {
+    flex: 0 1 auto;
+    min-width: 140px;
+    max-width: 33.333vw;
+    max-width: 33.333cqw;
+    overflow-wrap: break-word;
+}
+
+.header-top-row .project-gip-control {
+    flex: 0 0 auto;
+    flex-wrap: nowrap;
+    align-items: flex-start;
+    margin: 0;
+}
+
+.header-top-row .project-gip-label {
+    padding-top: 5px;
+    white-space: nowrap;
+}
+
+/* People one under another; more than three rows scroll, the scrollbar is
+   shown on hover. */
+.header-top-row .project-gip-list {
+    display: flex;
+    flex: 0 0 auto;
+    flex-direction: column;
+    flex-wrap: nowrap;
+    align-items: stretch;
+    gap: 4px;
+    min-width: 0;
+    max-height: 86px;
+    overflow-x: hidden;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: transparent transparent;
+}
+
+.header-top-row .project-gip-list:hover {
+    scrollbar-color: #c1c7d0 transparent;
+}
+
+.header-top-row .project-gip-list::-webkit-scrollbar {
+    width: 6px;
+}
+
+.header-top-row .project-gip-list::-webkit-scrollbar-thumb {
+    border-radius: 3px;
+    background: transparent;
+}
+
+.header-top-row .project-gip-list:hover::-webkit-scrollbar-thumb {
+    background: #c1c7d0;
+}
+
+.header-top-row .project-gip-chip {
+    flex: 0 0 auto;
+    line-height: 18px;
+    white-space: nowrap;
+}
+
+.header-top-row .project-gip-add {
+    margin-top: 2px;
+    white-space: nowrap;
+}
+
+/* Notifications: the checkbox, «Настроить» under it, the schedule below. */
+.header-top-row .id-reminder-control {
+    flex-direction: column;
+    flex-wrap: nowrap;
+    align-items: flex-start;
+    gap: 2px;
+    max-width: 240px;
+    margin: 0;
+    padding-top: 4px;
+}
+
+.header-top-row .id-reminder-summary {
+    white-space: normal;
+    overflow-wrap: break-word;
+}
+
+.header-top-row .id-reminder-settings {
+    padding: 0;
+}
+
+.header-top-row .progress-box {
+    flex: 0 0 auto;
+    min-width: 150px;
+}
+
+.header-bottom-row {
+    display: flex;
     flex-wrap: wrap;
-    row-gap: 6px;
+    align-items: center;
+    gap: 6px 14px;
+    min-width: 0;
+}
+
+.project-root-folder-box,
+.project-charts-box {
+    display: flex;
+    align-items: center;
+}
+
+.project-charts-box[hidden] {
+    display: none;
 }
 
 .project-object-bar {
-    flex: 0 0 100%;
+    flex: 0 1 auto;
     display: flex;
     flex-wrap: wrap;
     align-items: center;
@@ -168,7 +299,8 @@
     font-weight: 700;
 }
 
-.project-object-link {
+.project-object-link,
+.header-link-button {
     display: inline-flex;
     align-items: center;
     padding: 4px 10px;
@@ -182,8 +314,23 @@
     white-space: nowrap;
 }
 
-.project-object-link:hover {
+.header-link-button {
+    font-family: inherit;
+    line-height: 1.35;
+    cursor: pointer;
+}
+
+.project-object-link:hover,
+.header-link-button:hover:not(:disabled):not(.is-disabled) {
     background: #dbeafe;
+}
+
+.header-link-button:disabled,
+.header-link-button.is-disabled {
+    border-color: #e4e7ec;
+    background: #f2f4f7;
+    color: #98a2b3;
+    cursor: default;
 }
 
 .project-object-note {

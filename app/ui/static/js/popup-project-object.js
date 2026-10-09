@@ -3,11 +3,13 @@
 
     // The Bitrix24 object of the project in the checklist header: the legal
     // name and the cipher (click copies), «Перейти к объекту» (the card of
-    // the object of this checklist, else of the main object) and «выбрать»
-    // for administrators and GIPs when the objects give several variants.
+    // the object of this checklist, else of the main object), «выбрать»
+    // for administrators and GIPs when the objects give several variants,
+    // and «Графики» (the link in the contract of the main object).
 
     const doc = global.document;
     const barEl = doc.getElementById('projectObjectBar');
+    const chartsEl = doc.getElementById('projectChartsBox');
     if (!barEl) return;
 
     const bootstrapObject = (
@@ -244,7 +246,36 @@
             + '</span>';
     }
 
+    let renderedChartsHtml = '';
+
+    function renderCharts(view) {
+        if (!chartsEl) return;
+        if (!view || !view.configured || !view.objectDriven) {
+            chartsEl.hidden = true;
+            chartsEl.innerHTML = '';
+            renderedChartsHtml = '';
+            return;
+        }
+        const charts = view.charts && typeof view.charts === 'object' ? view.charts : {};
+        const url = text(charts.url);
+        const html = url
+            ? '<button type="button" class="header-link-button" data-role="open-charts"'
+                + ' title="' + escHtml('Графики' + (charts.title ? ' — ' + charts.title : '')) + '">Графики</button>'
+            : '<button type="button" class="header-link-button is-disabled" data-role="open-charts"'
+                + ' aria-disabled="true" title="' + escHtml(charts.hint || 'В договоре нет ссылки на графики') + '">Графики</button>';
+        if (html !== renderedChartsHtml) {
+            chartsEl.innerHTML = html;
+            renderedChartsHtml = html;
+        }
+        chartsEl.hidden = false;
+    }
+
     function render() {
+        renderBar();
+        renderCharts(currentView());
+    }
+
+    function renderBar() {
         const view = currentView();
         state.renderedKey = currentKey();
         if (!view || !view.configured) {
@@ -284,6 +315,16 @@
             renderedHtml = html;
         }
         barEl.hidden = false;
+    }
+
+    if (chartsEl) {
+        chartsEl.addEventListener('click', function (event) {
+            const button = event.target.closest('[data-role="open-charts"]');
+            if (!button || button.getAttribute('aria-disabled') === 'true') return;
+            const view = currentView();
+            const url = text(view && view.charts && view.charts.url);
+            if (url) global.open(url, '_blank', 'noopener,noreferrer');
+        });
     }
 
     barEl.addEventListener('click', function (event) {

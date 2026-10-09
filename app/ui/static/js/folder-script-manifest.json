@@ -1,5 +1,5 @@
 {
-  "stage": "8.20-item-move-delete",
+  "stage": "8.22-header",
   "hashMode": "utf8-lf",
   "modules": {
     "checklist-window-channel.js": {
@@ -63,12 +63,16 @@
       "bytes": 6389
     },
     "folder-tree-actions.js": {
-      "sha256": "196a36047e00e6e0ac08182a39888a75eee01fa61544237102af5f87a30dd1dd",
-      "bytes": 23502
+      "sha256": "92edd4a02052940c7c5dc4b408741682fbcfb0818ba98e9b311a1dbef38bc11f",
+      "bytes": 24207
     },
     "folder-replace.js": {
       "sha256": "39848dff392fa366e2950280611f2a4eb17395c100392804502e7f6669f774ed",
       "bytes": 13194
+    },
+    "checklist-link-menu.js": {
+      "sha256": "37b829a1119dfe0ecbfa2892510dd53de1bf6c363dd9d8929bd6a1785dfbe219",
+      "bytes": 5944
     }
   },
   "loadOrder": [
@@ -87,6 +91,7 @@
     "folder-uploads.js",
     "folder-replacement.js",
     "folder-archive-ui.js",
+    "checklist-link-menu.js",
     "folder-tree-actions.js",
     "folder-replace.js"
   ],
@@ -127,7 +132,8 @@
     "The folder public-link action is icon-only, permanently disabled in the current interface and cannot be re-enabled by edit-session refresh.",
     "Stage 8.17 shows a Yandex-like path bar, the folder tree with a view action per folder, nested folder pages and folder create/rename/move/delete/ZIP actions.",
     "Stage 8.17.1 resolves the item Yandex folder like the popup (structure state first), publishes nested folders on the first click and hides folder deletion from users without file-delete rights.",
-    "Stage 8.19 adds «Заменить папку»: the old contents go to the archive, the dropped folder takes their place."
+    "Stage 8.19 adds «Заменить папку»: the old contents go to the archive, the dropped folder takes their place.",
+    "Stage 8.22: menu «Перейти по ссылке / Скопировать ссылку» for Yandex links."
   ],
-  "generatedAt": "2026-09-30T05:15:44+00:00"
+  "generatedAt": "2026-10-09T00:00:00+00:00"
 }

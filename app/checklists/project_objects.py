@@ -80,7 +80,13 @@ AUTO_RETRY_SECONDS = 3600
 MAX_RELATED_OBJECTS = 30
 # Version of the cached cards: older caches are read again once.
 # 2: the legal name and the cipher are shown by the title of a linked element.
-OBJECTS_SCHEMA = 2
+OBJECTS_SCHEMA = 3
+# 3: the contracts of every object (charts link).
+
+# Smart process «Договоры с заказчиками» linked to the objects.
+CONTRACT_ENTITY_TYPE_ID = 1060
+FIELD_CONTRACT_CHARTS = "ufCrm16_1791507200770"
+MAX_CONTRACTS_PER_OBJECT = 20
 
 # CRM entity types of a «Привязка к элементам CRM» field.
 CRM_TYPE_IDS = {"LEAD": 1, "DEAL": 2, "CONTACT": 3, "COMPANY": 4, "QUOTE": 7, "SMART_INVOICE": 31}
@@ -270,6 +276,8 @@ def normalize_object_item(item: dict, object_id: int) -> dict:
         "relatedIds": parse_object_ids(_field(item, FIELD_RELATED)),
         "createdTime": clean_cell_value(item.get("createdTime") or item.get("CREATED_TIME")),
         "error": "",
+        # The whole card while reading (links to contracts); not stored.
+        "_raw": item,
     }
 
 
@@ -300,8 +308,8 @@ def fetch_object(object_id: int) -> tuple[dict | None, str]:
 # Text of the legal name and the cipher
 # ---------------------------------------------------------------------------
 
-def fetch_field_meta() -> tuple[dict, str]:
-    """Descriptions of the object fields (type and link settings)."""
+def fetch_object_fields() -> tuple[dict, str]:
+    """Descriptions of all object fields (type and link settings)."""
     from app.bitrix.client import bitrix_webhook_call
 
     try:
@@ -318,6 +326,11 @@ def fetch_field_meta() -> tuple[dict, str]:
     fields = result.get("fields") if isinstance(result, dict) and isinstance(result.get("fields"), dict) else result
     if not isinstance(fields, dict):
         return {}, "Битрикс24 не вернул описание полей"
+    return fields, ""
+
+
+def display_field_meta(fields: dict) -> dict:
+    """Descriptions of the legal name and the cipher fields."""
     meta: dict = {}
     for camel in (FIELD_LEGAL_NAME, FIELD_CIPHER):
         entry = fields.get(camel) or fields.get(_original_uf_name(camel))
@@ -332,7 +345,7 @@ def fetch_field_meta() -> tuple[dict, str]:
             )
         if isinstance(entry, dict):
             meta[camel] = entry
-    return meta, ""
+    return meta
 
 
 def _field_type(meta: dict) -> str:
@@ -476,7 +489,7 @@ def resolve_display_value(raw: list, meta: dict | None, cache: dict) -> tuple[st
     return ", ".join(texts), "; ".join(errors)
 
 
-def resolve_display_fields(objects: list[dict]) -> list[str]:
+def resolve_display_fields(objects: list[dict], fields: dict, meta_error: str = "") -> list[str]:
     """Fill legalName and cipher of loaded objects; returns errors."""
     loaded = [
         entry for entry in objects
@@ -485,7 +498,7 @@ def resolve_display_fields(objects: list[dict]) -> list[str]:
     ]
     if not loaded:
         return []
-    meta, meta_error = fetch_field_meta()
+    meta = display_field_meta(fields)
     cache: dict = {}
     errors: list[str] = []
     if meta_error:
@@ -506,6 +519,173 @@ def resolve_display_fields(objects: list[dict]) -> list[str]:
         "errors": errors,
     })
     return errors
+
+
+# ---------------------------------------------------------------------------
+# Contracts with the customer (charts link)
+# ---------------------------------------------------------------------------
+
+def parse_links(value: Any) -> list[str]:
+    """Web links of a field value (a link field or text)."""
+    result: list[str] = []
+    for entry in _raw_values(value):
+        if isinstance(entry, dict):
+            entry = entry.get("value") or entry.get("VALUE") or entry.get("url") or ""
+        for text in re.split(r"\s+", clean_cell_value(entry)):
+            text = text.strip().strip("<>\"'")
+            if not text:
+                continue
+            if re.match(r"^https?://\S+$", text, re.IGNORECASE):
+                link = text
+            elif re.match(r"^(www\.)?[\w-]+(\.[\w-]+)+(/\S*)?$", text, re.IGNORECASE):
+                link = "https://" + text
+            else:
+                continue
+            if link not in result:
+                result.append(link)
+    return result
+
+
+def _contract_entry(item: dict, contract_id: int) -> dict:
+    return {
+        "id": _positive_int(item.get("id") or item.get("ID")) or int(contract_id),
+        "title": _text_value(item.get("title") or item.get("TITLE")),
+        "createdTime": clean_cell_value(item.get("createdTime") or item.get("CREATED_TIME")),
+        "chartsUrls": parse_links(_field(item, FIELD_CONTRACT_CHARTS)),
+    }
+
+
+def contract_link_fields(fields: dict) -> dict:
+    """Object fields linking to contracts: {field name: settings}."""
+    result: dict = {}
+    for name, meta in (fields or {}).items():
+        if not isinstance(meta, dict) or _field_type(meta) != "crm":
+            continue
+        settings = _field_settings(meta)
+        if clean_cell_value(settings.get(f"DYNAMIC_{CONTRACT_ENTITY_TYPE_ID}")).upper() == "Y":
+            result[name] = settings
+    return result
+
+
+def fetch_contracts(entry: dict, link_fields: dict) -> tuple[list[dict], str]:
+    """Contracts of an object: its children in Bitrix24 (the «Договоры с
+    заказчиками» tab) and the contracts in its link fields."""
+    from app.bitrix.client import bitrix_webhook_call
+
+    object_id = _positive_int(entry.get("id"))
+    contracts: dict[int, dict] = {}
+    errors: list[str] = []
+    try:
+        response = bitrix_webhook_call(
+            "crm.item.list",
+            {
+                "entityTypeId": CONTRACT_ENTITY_TYPE_ID,
+                f"filter[parentId{OBJECT_ENTITY_TYPE_ID}]": object_id,
+                "select[]": [
+                    "id",
+                    "title",
+                    "createdTime",
+                    f"parentId{OBJECT_ENTITY_TYPE_ID}",
+                    FIELD_CONTRACT_CHARTS,
+                ],
+                "order[id]": "ASC",
+                "useOriginalUfNames": "N",
+            },
+        )
+        error = _response_error(response)
+    except Exception as exc:
+        response, error = {}, f"Битрикс24 недоступен: {exc}"
+    if error:
+        errors.append(error)
+    else:
+        result = response.get("result") if isinstance(response, dict) else None
+        items = result.get("items") if isinstance(result, dict) else result
+        for item in items if isinstance(items, list) else []:
+            # Only children of this object, whatever the filter did.
+            if not isinstance(item, dict) or _positive_int(item.get(f"parentId{OBJECT_ENTITY_TYPE_ID}")) != object_id:
+                continue
+            if len(contracts) < MAX_CONTRACTS_PER_OBJECT:
+                contract = _contract_entry(item, 0)
+                if contract["id"]:
+                    contracts[contract["id"]] = contract
+
+    raw = entry.get("_raw") if isinstance(entry.get("_raw"), dict) else {}
+    for name, settings in link_fields.items():
+        value = raw.get(name)
+        if value is None:
+            value = raw.get(_original_uf_name(name))
+        for reference in _raw_values(value):
+            entity_type_id, contract_id = _crm_reference(reference, settings)
+            if entity_type_id != CONTRACT_ENTITY_TYPE_ID or not contract_id or contract_id in contracts:
+                continue
+            if len(contracts) >= MAX_CONTRACTS_PER_OBJECT:
+                break
+            try:
+                response = bitrix_webhook_call(
+                    "crm.item.get",
+                    {"entityTypeId": CONTRACT_ENTITY_TYPE_ID, "id": contract_id, "useOriginalUfNames": "N"},
+                )
+                error = _response_error(response)
+            except Exception as exc:
+                response, error = {}, f"Битрикс24 недоступен: {exc}"
+            if error:
+                errors.append(f"договор #{contract_id}: {error}")
+                continue
+            item = _response_item(response)
+            if item:
+                contracts[contract_id] = _contract_entry(item, contract_id)
+    ordered = sorted(contracts.values(), key=lambda contract: _created_sort_key(contract))
+    # With contracts found one way, an error of the other way does not matter.
+    return ordered, "" if ordered else "; ".join(errors)
+
+
+def resolve_contracts(objects: list[dict], fields: dict) -> None:
+    link_fields = contract_link_fields(fields)
+    for entry in objects:
+        if clean_cell_value(entry.get("error")):
+            continue
+        contracts, error = fetch_contracts(entry, link_fields)
+        entry["contracts"] = contracts
+        entry["contractsError"] = error
+    write_debug_log("project_objects_contracts", {
+        "linkFields": sorted(link_fields),
+        "objects": [
+            {
+                "id": entry.get("id"),
+                "contracts": [
+                    {"id": contract["id"], "charts": len(contract["chartsUrls"])}
+                    for contract in entry.get("contracts") or []
+                ],
+                "error": entry.get("contractsError") or "",
+            }
+            for entry in objects
+            if not clean_cell_value(entry.get("error"))
+        ],
+    })
+
+
+def charts_link(objects: list[dict], main_id: int) -> dict:
+    """The charts link of the first contract of the main object that has one."""
+    main = next((entry for entry in objects if _positive_int(entry.get("id")) == main_id), None)
+    if not main:
+        return {"url": "", "title": "", "contractId": 0, "hint": ""}
+    contracts = [contract for contract in main.get("contracts") or [] if isinstance(contract, dict)]
+    for contract in contracts:
+        urls = contract.get("chartsUrls") or []
+        if urls:
+            return {
+                "url": urls[0],
+                "title": clean_cell_value(contract.get("title")),
+                "contractId": _positive_int(contract.get("id")),
+                "hint": "",
+            }
+    if contracts:
+        hint = "В договоре нет ссылки на графики"
+    elif clean_cell_value(main.get("contractsError")):
+        hint = "Не удалось получить договор: " + clean_cell_value(main.get("contractsError"))
+    else:
+        hint = "У основного объекта нет договора с заказчиком"
+    return {"url": "", "title": "", "contractId": 0, "hint": hint}
 
 
 def _resolve_user_names(user_ids: list[str]) -> dict[str, str]:
@@ -797,7 +977,11 @@ def refresh_project_objects(
         if main_id and main_id != root_id:
             fetch_related(objects[main_id].get("relatedIds") or [])
 
-        errors.extend(resolve_display_fields(list(objects.values())))
+        fields, fields_error = fetch_object_fields()
+        errors.extend(resolve_display_fields(list(objects.values()), fields, fields_error))
+        resolve_contracts(list(objects.values()), fields)
+        for entry in objects.values():
+            entry.pop("_raw", None)
 
         user_ids: list[str] = []
         for entry in objects.values():
@@ -1031,6 +1215,16 @@ def _object_brief(entry: dict, main_id: int, names: dict) -> dict:
             {"userId": user_id, "name": clean_cell_value(names.get(user_id))}
             for user_id in entry.get("conceptResponsibleIds") or []
         ],
+        "contracts": [
+            {
+                "id": _positive_int(contract.get("id")),
+                "title": clean_cell_value(contract.get("title")),
+                "chartsUrl": (contract.get("chartsUrls") or [""])[0],
+            }
+            for contract in entry.get("contracts") or []
+            if isinstance(contract, dict)
+        ],
+        "contractsError": clean_cell_value(entry.get("contractsError")),
         "isMain": object_id == main_id,
         "error": clean_cell_value(entry.get("error")),
         "path": object_card_path(object_id),
@@ -1115,6 +1309,8 @@ def checklist_object_view(dialog_id: str, checklist_key: str, *, bitrix: dict | 
         "mainObjectId": main_id,
         "objectPath": path,
         "objectUrl": (origin + path) if (origin and path) else "",
+        # «Графики»: the first contract of the main object with a link.
+        "charts": charts_link(objects, main_id) if main_id else {"url": "", "title": "", "contractId": 0, "hint": ""},
         "peopleLabel": PEOPLE_FIELD_LABELS.get(key, DEFAULT_PEOPLE_FIELD_LABEL),
         "people": checklist_people(objects, main_id, key, names) if main_id else [],
     }

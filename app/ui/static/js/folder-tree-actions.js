@@ -510,12 +510,21 @@
         });
     }
 
+    // Links to Yandex Disk: «Перейти по ссылке» / «Скопировать ссылку».
+    function openYandexLink(button, url) {
+        if (global.ChecklistLinkMenu) {
+            global.ChecklistLinkMenu.open(button, url);
+        } else {
+            global.open(url, '_blank', 'noopener,noreferrer');
+        }
+    }
+
     // Nested folders are published on Yandex Disk on the first click.
     async function openYandexFolder(button) {
         if (button.dataset.loading === '1') return;
         const cached = String(button.dataset.yandexUrl || '');
         if (cached) {
-            global.open(cached, '_blank', 'noopener,noreferrer');
+            openYandexLink(button, cached);
             return;
         }
         button.dataset.loading = '1';
@@ -530,7 +539,7 @@
                 throw new Error(result && result.error || 'Не удалось открыть папку на Яндекс.Диске');
             }
             button.dataset.yandexUrl = url;
-            global.open(url, '_blank', 'noopener,noreferrer');
+            openYandexLink(button, url);
         } catch (error) {
             alert(error && error.message ? error.message : 'Не удалось открыть папку на Яндекс.Диске');
         } finally {
@@ -543,6 +552,12 @@
         button.addEventListener('click', event => {
             event.preventDefault();
             openYandexFolder(button);
+        });
+    });
+    doc.querySelectorAll('a.folder-yandex-link[href]').forEach(link => {
+        link.addEventListener('click', event => {
+            event.preventDefault();
+            openYandexLink(link, link.href);
         });
     });
 
