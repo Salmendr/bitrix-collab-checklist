@@ -2129,12 +2129,8 @@
                     const status = String(
                         button.dataset.yandexStatus || ''
                     ).trim().toLowerCase();
-                    const itemBlocked = [
-                        'queued',
-                        'running',
-                        'disabled'
-                    ].includes(status);
-                    const disabled = availability.disabled || itemBlocked;
+                    // The item state is checked by the server on the click.
+                    const disabled = availability.disabled;
                     const title = getItemYandexButtonTitle(
                         status,
                         availability.disabled,

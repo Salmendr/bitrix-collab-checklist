@@ -2,6 +2,19 @@
 
 const yandexStructurePollers = new Map();
 
+// The checklist can be re-rendered while a click waits for the server; the
+// menu then goes next to the button that is on the page now.
+function currentYandexItemButton(itemId, fallback) {
+    const id = String(itemId || '').trim();
+    if (!id) return fallback;
+    const escaped = window.CSS && typeof window.CSS.escape === 'function'
+        ? window.CSS.escape(id)
+        : id.replace(/["\\]/g, '\\$&');
+    return document.querySelector(
+        '[data-role="view-yandex-folder"][data-item-id="' + escaped + '"]'
+    ) || fallback;
+}
+
 // The Yandex button of an item: «Перейти по ссылке» / «Скопировать ссылку».
 function openYandexLink(button, url) {
     if (window.ChecklistLinkMenu) {
@@ -858,7 +871,10 @@ function bindDocumentActions() {
                 ).trim();
 
                 if (storedUrl) {
-                    openYandexLink(this, storedUrl);
+                    openYandexLink(
+                        currentYandexItemButton(itemId, this),
+                        storedUrl
+                    );
                     return;
                 }
 
@@ -885,7 +901,10 @@ function bindDocumentActions() {
                 const folderPath = String(result.path || storedPath).trim();
 
                 if (folderUrl) {
-                    openYandexLink(this, folderUrl);
+                    openYandexLink(
+                        currentYandexItemButton(itemId, this),
+                        folderUrl
+                    );
                     return;
                 }
 

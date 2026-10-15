@@ -207,11 +207,10 @@ function buildDocumentCell(item) {
         // error the same button offers the retry.
         showYandexAction = showDocumentActions || yandexRetry || yandexConflict;
     }
-    const yandexButtonDisabled = (
-        stageYandexDisabled
-        || yandexPending
-        || yandexDisabled
-    );
+    // Only an unavailable stage folder locks the button. The state of the
+    // item (a pending, disabled or stale folder job) is checked by the
+    // server on the click, which also repairs a job that got stuck.
+    const yandexButtonDisabled = stageYandexDisabled;
     const yandexButtonTitle = stageYandexDisabled
         ? 'Открыть папку пункта на Яндекс.Диске'
         : yandexConflict

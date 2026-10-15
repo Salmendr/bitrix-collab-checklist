@@ -10,6 +10,9 @@
     let menuEl = null;
     let anchorEl = null;
     let closeTimer = null;
+    // Where the last click was: the menu goes there when its button has
+    // already left the page (the list was drawn again meanwhile).
+    let lastPointer = null;
 
     function ensureStyle() {
         if (doc.getElementById(STYLE_ID)) return;
@@ -66,8 +69,22 @@
         anchorEl = null;
     }
 
+    function anchorRect(anchor) {
+        const rect = anchor.isConnected ? anchor.getBoundingClientRect() : null;
+        if (rect && (rect.width || rect.height)) return rect;
+        if (lastPointer) {
+            return {
+                left: lastPointer.x,
+                right: lastPointer.x,
+                top: lastPointer.y,
+                bottom: lastPointer.y
+            };
+        }
+        return rect || { left: 8, right: 8, top: 8, bottom: 8 };
+    }
+
     function place(anchor) {
-        const rect = anchor.getBoundingClientRect();
+        const rect = anchorRect(anchor);
         const width = menuEl.offsetWidth;
         const height = menuEl.offsetHeight;
         const viewportWidth = doc.documentElement.clientWidth || global.innerWidth;
@@ -127,6 +144,9 @@
         go.focus({ preventScroll: true });
     }
 
+    doc.addEventListener('pointerdown', function (event) {
+        lastPointer = { x: event.clientX, y: event.clientY };
+    }, true);
     doc.addEventListener('mousedown', function (event) {
         if (!menuEl || menuEl.hidden) return;
         if (menuEl.contains(event.target) || (anchorEl && anchorEl.contains(event.target))) return;

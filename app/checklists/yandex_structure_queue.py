@@ -433,9 +433,12 @@ def process_yandex_structure_job(job_id: str) -> dict:
             )
             if (job.get('result') or {}).get('manualFileRecovery'):
                 from app.checklists.yandex_mirror_reconciliation import reconcile_yandex_mirror_documents
+                from app.checklists.yandex_structure_jobs import real_item_id as _files_item_id
+                # A job of inner folders carries "<itemId>::subfolders"; the
+                # files belong to the item itself.
                 recovery_result = reconcile_yandex_mirror_documents(
                     source='manual_structure_completed', dialog_id=dialog_id,
-                    checklist_key=checklist_key, item_id=item_id,
+                    checklist_key=checklist_key, item_id=_files_item_id(item_id),
                 )
             else:
                 from app.checklists.yandex_structure_jobs import real_item_id as _real_item_id
@@ -594,6 +597,51 @@ def enqueue_yandex_structure_job(job_id: str, source: str = "") -> dict:
         "jobId": normalized_job_id,
         "queueSize": YANDEX_STRUCTURE_QUEUE.qsize(),
     }
+
+
+def heal_stale_yandex_structure_job(job: dict | None, *, source: str) -> dict:
+    """Put back to work a job that waits for nothing.
+
+    A "queued" job missing from the worker queue is queued again; a job left
+    "running" that no worker runs is run again. A job in work is returned as
+    it is.
+    """
+    current = dict(job or {})
+    job_id = clean_cell_value(current.get("job_id"))
+    status = clean_cell_value(current.get("status")).lower()
+    if not job_id or status not in {"queued", "running"}:
+        return current
+    with YANDEX_STRUCTURE_GUARD:
+        in_work = (
+            job_id in YANDEX_STRUCTURE_QUEUED_JOB_IDS
+            or job_id in YANDEX_STRUCTURE_RUNNING_JOB_IDS
+        )
+    if in_work:
+        return current
+    if status == "running":
+        from app.checklists.yandex_structure_jobs import (
+            requeue_stale_running_yandex_structure_job,
+        )
+        current = requeue_stale_running_yandex_structure_job(job_id) or current
+        persist_item_yandex_structure_state(
+            dialog_id=normalize_dialog_id(current.get("dialog_id")),
+            checklist_key=normalize_checklist_key(current.get("checklist_key")),
+            item_id=clean_cell_value(current.get("item_id")),
+            job=current,
+        )
+    enqueue_result = enqueue_yandex_structure_job(job_id, source=source)
+    write_debug_log("yandex_structure_stale_job_healed", {
+        "jobId": job_id,
+        "source": source,
+        "previousStatus": status,
+        "status": clean_cell_value(current.get("status")),
+        "dialogId": clean_cell_value(current.get("dialog_id")),
+        "checklistKey": clean_cell_value(current.get("checklist_key")),
+        "itemId": clean_cell_value(current.get("item_id")),
+        "action": clean_cell_value(current.get("action")),
+        "queued": bool(enqueue_result.get("queued")),
+    })
+    return get_yandex_structure_job(job_id) or current
 
 
 def enqueue_pending_yandex_structure_jobs(source: str = "startup") -> dict:

@@ -1,5 +1,5 @@
 {
-  "stage": "8.23-leaders",
+  "stage": "8.24-yandex-sync",
   "generatedAt": "2026-10-15T00:00:00+00:00",
   "loadOrder": [
     "checklist-host-diagnostics.js",
@@ -306,7 +306,8 @@
     "Stage 8.21: the Bitrix24 object of the project in the header (legal name, cipher, «Перейти к объекту»); the GIP field shows the people of the object of each checklist.",
     "Stage 8.21.1: the legal name is the title of the linked element; object data kept in its own table.",
     "Stage 8.22: header of fixed cells, «Графики», menu «Перейти по ссылке / Скопировать ссылку» for Yandex buttons.",
-    "Stage 8.23: «Руководители» see «Перейти к Договору» and «Графики»; folders open read only in the view mode."
+    "Stage 8.23: «Руководители» see «Перейти к Договору» and «Графики»; folders open read only in the view mode.",
+    "Stage 8.24: the item Yandex button stays clickable and the server repairs stuck folder jobs; its menu opens next to the button after a redraw."
   ],
   "hashMode": "utf8-lf",
   "lineEndingNote": "Hashes are calculated from bytes written to disk. This is stable for Windows CRLF and Unix LF.",
@@ -344,12 +345,12 @@
       "bytes": 10475
     },
     "popup-core.js": {
-      "sha256": "11a227a3d279da14aedf73e3a81eebe89bbe435be83a8b560dc22938234c7038",
-      "bytes": 106829
+      "sha256": "901b65d36ee19753a6bc2069e900347fd8a925b962fa322fcce5ee285bce6599",
+      "bytes": 106705
     },
     "popup-document-list.js": {
-      "sha256": "ed53d02a53e13e40cf0e668f0a068251bafd1e918e77c37abe327e3fd9656945",
-      "bytes": 19097
+      "sha256": "090e04eea9d27f2431e71e23fc089a5573bee8f65dccd2779df225a3b22fea73",
+      "bytes": 19246
     },
     "document-assignment-history.js": {
       "sha256": "8ca593270b9e1e0170187046f5480c5fc8a7237c8dc62d1a89677e4f17d65e62",
@@ -360,8 +361,8 @@
       "bytes": 12564
     },
     "popup-document-actions.js": {
-      "sha256": "5354ba28c16dc92eb8085ee68cd0d195908a15f7f9a128240a99e3f3963d2e45",
-      "bytes": 34574
+      "sha256": "9ea6b91ff512f3bd5da3d649f113819a605a8356af7f0d197e2a69084def21be",
+      "bytes": 35323
     },
     "popup-window-channel.js": {
       "sha256": "5b9abaff9f29705db8745e4737f28bfb449fc23b4ae3ef2cf47050607f2f5723",
@@ -504,8 +505,8 @@
       "bytes": 18245
     },
     "checklist-link-menu.js": {
-      "sha256": "37b829a1119dfe0ecbfa2892510dd53de1bf6c363dd9d8929bd6a1785dfbe219",
-      "bytes": 5944
+      "sha256": "4d4f9a736e171ae4ad528428cd7e56f4c252b5f133855f6595dfb64d99ec816c",
+      "bytes": 6706
     }
   }
 }

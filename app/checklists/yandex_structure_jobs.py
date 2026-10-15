@@ -949,6 +949,31 @@ def retry_yandex_structure_job(job_id: str) -> dict | None:
     return get_yandex_structure_job(job_id)
 
 
+def requeue_stale_running_yandex_structure_job(job_id: str) -> dict | None:
+    """Queue again one job left "running" although no worker runs it."""
+    ensure_yandex_structure_jobs_table()
+    now = utc_now_iso()
+    conn = get_conn()
+    try:
+        conn.execute(
+            """
+            UPDATE yandex_structure_jobs
+            SET status = 'queued',
+                error = 'worker interrupted; queued for recovery',
+                started_at = '',
+                finished_at = '',
+                updated_at = ?
+            WHERE job_id = ?
+              AND status = 'running'
+            """,
+            (now, clean_cell_value(job_id)),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return get_yandex_structure_job(job_id)
+
+
 def requeue_interrupted_yandex_structure_jobs() -> int:
     ensure_yandex_structure_jobs_table()
     now = utc_now_iso()

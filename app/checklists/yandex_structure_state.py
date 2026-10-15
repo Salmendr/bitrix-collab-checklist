@@ -145,6 +145,75 @@ def attach_latest_yandex_structure_states(
     return enriched
 
 
+STALE_ITEM_FOLDER_STATUSES = frozenset({"queued", "running", "disabled"})
+
+
+def clear_stale_item_yandex_structure_status(
+    *,
+    dialog_id: str,
+    checklist_key: str,
+    item_id: str,
+) -> str:
+    """Clear a folder state no job stands behind.
+
+    The item says its folder operation waits or was switched off, but the
+    item has no folder job at all, so nothing would ever change that state.
+    Returns the cleared status, or "" when nothing was cleared.
+    """
+    from app.checklists.yandex_structure_jobs import (
+        get_latest_yandex_structure_job_for_item,
+    )
+    storage_dialog_id = make_storage_dialog_id(dialog_id, checklist_key)
+    normalized_item_id = clean_cell_value(item_id)
+    conn = get_conn()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        if get_latest_yandex_structure_job_for_item(
+            dialog_id=dialog_id,
+            checklist_key=checklist_key,
+            item_id=normalized_item_id,
+        ):
+            conn.commit()
+            return ""
+        row = conn.execute(
+            "SELECT data_json FROM checklists WHERE dialog_id = ?",
+            (storage_dialog_id,),
+        ).fetchone()
+        try:
+            data = json.loads(row["data_json"] or "{}") if row else {}
+        except Exception:
+            data = {}
+        if not isinstance(data, dict):
+            data = {}
+        cleared = ""
+        for item in data.get("items") or []:
+            if clean_cell_value(item.get("id")) != normalized_item_id:
+                continue
+            status = clean_cell_value(item.get("yandexFolderStatus")).lower()
+            if status not in STALE_ITEM_FOLDER_STATUSES:
+                break
+            has_folder = bool(
+                clean_cell_value(item.get("yandexFolderPath"))
+                or clean_cell_value(item.get("yandexFolderUrl"))
+            )
+            item["yandexFolderStatus"] = "ready" if has_folder else ""
+            item["yandexFolderError"] = ""
+            cleared = status
+            break
+        if cleared:
+            conn.execute(
+                "UPDATE checklists SET data_json = ? WHERE dialog_id = ?",
+                (json.dumps(data, ensure_ascii=False), storage_dialog_id),
+            )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+    return cleared
+
+
 def persist_item_yandex_structure_state(
     *,
     dialog_id: str,

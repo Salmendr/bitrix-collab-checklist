@@ -210,7 +210,15 @@ def ensure_yandex_upload_job_for_reconciliation(
         if row:
             record = dict(row)
             status = clean_cell_value(record.get("status")).lower()
-            if status in {"error", "conflict"} and not manual_retry:
+            # The file is confirmed absent on Yandex by now. A failure of
+            # Yandex availability (a wrong token, the network) is uploaded
+            # again; any other failure waits for a manual retry.
+            from app.checklists.yandex_upload_preflight import is_yandex_unavailable_error
+            failure_held = status == "conflict" or (
+                status == "error"
+                and not is_yandex_unavailable_error(record.get("error"))
+            )
+            if failure_held and not manual_retry:
                 conn.commit()
                 return {**record, "reconciledAction": "unrecoverable_manual_retry_required"}
             if force_requeue_synced and status != "running":

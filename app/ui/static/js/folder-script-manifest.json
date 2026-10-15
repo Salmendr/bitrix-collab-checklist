@@ -1,5 +1,5 @@
 {
-  "stage": "8.23-leaders",
+  "stage": "8.24-yandex-sync",
   "hashMode": "utf8-lf",
   "modules": {
     "checklist-window-channel.js": {
@@ -71,8 +71,8 @@
       "bytes": 13194
     },
     "checklist-link-menu.js": {
-      "sha256": "37b829a1119dfe0ecbfa2892510dd53de1bf6c363dd9d8929bd6a1785dfbe219",
-      "bytes": 5944
+      "sha256": "4d4f9a736e171ae4ad528428cd7e56f4c252b5f133855f6595dfb64d99ec816c",
+      "bytes": 6706
     }
   },
   "loadOrder": [

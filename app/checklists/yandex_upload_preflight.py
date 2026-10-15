@@ -9,11 +9,72 @@ def is_manual_recovery(source):
     return clean_cell_value(source).startswith('manual_')
 
 
+# Yandex refused or could not be reached: a wrong or expired token, the
+# network, an overloaded Yandex. Nothing was judged about the files or the
+# folders then, so such an error does not wait for a manual retry: the next
+# start checks the item again by itself.
+_YANDEX_AUTH_ERROR_MARKERS = (
+    '(status 401)',
+    '(status 403)',
+    'unauthorizederror',
+    'не авторизован',
+)
+_YANDEX_UNAVAILABLE_ERROR_MARKERS = _YANDEX_AUTH_ERROR_MARKERS + (
+    '(status 429)',
+    '(status 500)',
+    '(status 502)',
+    '(status 503)',
+    '(status 504)',
+    'max retries exceeded',
+    'connection aborted',
+    'connection reset',
+    'connectionerror',
+    'connecttimeout',
+    'readtimeout',
+    'read timed out',
+    'connect timeout',
+    'failed to establish a new connection',
+    'name or service not known',
+    'temporary failure in name resolution',
+    'remote end closed connection',
+    'yandex disk is disabled',
+    'yandex remote verification failed',
+    # The probe of the file failed (find_existing_yandex_document).
+    'не удалось проверить все допустимые пути файла',
+)
+
+
+def _error_text(value):
+    return clean_cell_value(str(value or '')).casefold()
+
+
+def is_yandex_auth_error(value):
+    text = _error_text(value)
+    return bool(text) and any(marker in text for marker in _YANDEX_AUTH_ERROR_MARKERS)
+
+
+def is_yandex_unavailable_error(value):
+    text = _error_text(value)
+    return bool(text) and any(marker in text for marker in _YANDEX_UNAVAILABLE_ERROR_MARKERS)
+
+
 def requires_manual_recovery(item, jobs=()):
-    return (clean_cell_value(item.get('yandexStructureStatus')).lower() in {'error', 'conflict'}
-            or any(clean_cell_value(d.get('mirrorStatus')).lower() in {'error', 'conflict'}
-                   for d in item.get('documents', []))
-            or any(clean_cell_value(j.get('status')).lower() in {'error', 'conflict'} for j in jobs))
+    """A failure judged on Yandex (a conflict, a folder error) waits for a
+    manual retry; a failure of Yandex availability does not."""
+    if (clean_cell_value(item.get('yandexStructureStatus')).lower() in {'error', 'conflict'}
+            and not is_yandex_unavailable_error(item.get('yandexFolderError'))):
+        return True
+    for document in item.get('documents', []) or []:
+        status = clean_cell_value(document.get('mirrorStatus')).lower()
+        if status == 'conflict' or (
+                status == 'error' and not is_yandex_unavailable_error(document.get('mirrorError'))):
+            return True
+    for job in jobs:
+        status = clean_cell_value(job.get('status')).lower()
+        if status == 'conflict' or (
+                status == 'error' and not is_yandex_unavailable_error(job.get('error'))):
+            return True
+    return False
 
 
 def require_exclusive_item_folder(dialog_id, checklist_key, item, items, context=None):

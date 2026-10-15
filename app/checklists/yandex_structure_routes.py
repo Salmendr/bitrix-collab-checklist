@@ -16,9 +16,11 @@ from app.checklists.yandex_structure_jobs import (
 )
 from app.checklists.yandex_structure_queue import (
     enqueue_yandex_structure_job,
+    heal_stale_yandex_structure_job,
 )
 from app.checklists.yandex_structure_state import (
     build_yandex_structure_item_fields,
+    clear_stale_item_yandex_structure_status,
     persist_item_yandex_structure_state,
 )
 from app.checklists.yandex_custom_recovery import (
@@ -35,6 +37,55 @@ from app.yandex_disk.client import is_yandex_disk_enabled
 
 
 router = APIRouter()
+
+
+def _disabled_job_can_run(job: dict) -> bool:
+    """A folder job switched off only because Yandex Disk was off runs when
+    Yandex is on again. A job switched off for its own reason (the folder
+    was unknown, the project keeps no item folders) never runs: the item
+    then simply has no folder operation."""
+    if clean_cell_value(job.get("status")).lower() != "disabled":
+        return False
+    if "yandex disk is disabled" not in clean_cell_value(job.get("error")).casefold():
+        return False
+    action = clean_cell_value(job.get("action"))
+    source_path = clean_cell_value(job.get("source_path"))
+    target_path = clean_cell_value(job.get("target_path"))
+    if action in {"rename_item_folder", "move_item_folder", "move_item_subfolder"}:
+        return bool(source_path and target_path)
+    return bool(source_path or target_path)
+
+
+def _settle_item_structure_job(
+    *,
+    dialog_id: str,
+    checklist_key: str,
+    item_id: str,
+    source: str,
+) -> dict:
+    """The latest folder job of the item, with a stuck one put back to work
+    and a stale item state without any job cleared."""
+    latest = get_latest_yandex_structure_job_for_item(
+        dialog_id=dialog_id,
+        checklist_key=checklist_key,
+        item_id=item_id,
+    ) or {}
+    if latest:
+        return heal_stale_yandex_structure_job(latest, source=source)
+    cleared = clear_stale_item_yandex_structure_status(
+        dialog_id=dialog_id,
+        checklist_key=checklist_key,
+        item_id=item_id,
+    )
+    if cleared:
+        write_debug_log("yandex_item_stale_folder_status_cleared", {
+            "dialogId": dialog_id,
+            "checklistKey": checklist_key,
+            "itemId": item_id,
+            "source": source,
+            "previousStatus": cleared,
+        })
+    return {}
 
 
 def _public_job(job: dict | None) -> dict:
@@ -116,6 +167,17 @@ async def api_get_yandex_recovery_state(
             status_code=400,
         )
 
+    yandex_enabled = bool(is_yandex_disk_enabled())
+    latest = {}
+    if yandex_enabled:
+        latest = await run_in_threadpool(
+            _settle_item_structure_job,
+            dialog_id=dialog_id,
+            checklist_key=checklist_key,
+            item_id=item_id,
+            source="popup_state",
+        )
+
     data = get_checklist(dialog_id, checklist_key)
     item = next(
         (
@@ -131,15 +193,19 @@ async def api_get_yandex_recovery_state(
             status_code=404,
         )
 
-    latest = get_latest_yandex_structure_job_for_item(
-        dialog_id=dialog_id,
-        checklist_key=checklist_key,
-        item_id=item_id,
-    ) or {}
+    if not yandex_enabled:
+        latest = get_latest_yandex_structure_job_for_item(
+            dialog_id=dialog_id,
+            checklist_key=checklist_key,
+            item_id=item_id,
+        ) or {}
     folder_state = build_yandex_structure_item_fields(item=item, job=latest)
     structure_status = clean_cell_value(
         folder_state.get("yandexFolderStatus")
     ).lower()
+    if structure_status == "disabled" and not _disabled_job_can_run(latest):
+        # Nothing to retry for the folder: the files decide the action.
+        structure_status = ""
 
     mirror_errors = []
     mirror_pending = []
@@ -170,7 +236,6 @@ async def api_get_yandex_recovery_state(
     ) or {}
     if clean_cell_value(subfolder_latest.get("status")).lower() in {"error", "conflict"}:
         structure_status = "error"
-    yandex_enabled = bool(is_yandex_disk_enabled())
     if not yandex_enabled:
         action = "unavailable"
     elif structure_status in {"error", "conflict", "disabled"}:
@@ -305,11 +370,13 @@ async def _run_manual_yandex_recovery(
         )
         return {"ok": True, "job": _public_job(retried), "files": {}}, 200
 
-    latest = get_latest_yandex_structure_job_for_item(
+    latest = await run_in_threadpool(
+        _settle_item_structure_job,
         dialog_id=dialog_id,
         checklist_key=checklist_key,
         item_id=item_id,
-    ) or {}
+        source=source,
+    )
     status = clean_cell_value(latest.get("status")).lower()
 
     if status in {"queued", "running"}:
@@ -377,7 +444,10 @@ async def _run_manual_yandex_recovery(
         status = custom_status
 
     # Standard items do not use custom-folder discovery.  Preserve the
-    # existing retry contract for their failed structure jobs.
+    # existing retry contract for their failed structure jobs. A job switched
+    # off for its own reason is no failure: the files are checked below.
+    if status == "disabled" and not _disabled_job_can_run(latest):
+        status = ""
     if status in {"error", "disabled", "cancelled"}:
         if not clean_cell_value(latest.get("job_id")):
             return {

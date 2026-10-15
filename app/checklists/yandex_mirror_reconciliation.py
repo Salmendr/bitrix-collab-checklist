@@ -1,5 +1,12 @@
 from __future__ import annotations
-from app.checklists.yandex_upload_preflight import is_manual_recovery, requires_manual_recovery, require_exclusive_item_folder
+from app.checklists.yandex_upload_preflight import (
+    is_manual_recovery,
+    is_yandex_auth_error,
+    is_yandex_unavailable_error,
+    mark_manual_structure_continuation,
+    requires_manual_recovery,
+    require_exclusive_item_folder,
+)
 
 import json
 import threading
@@ -118,6 +125,43 @@ def _record_error(
     })
 
 
+def _retry_unavailable_structure_job(job: dict, *, source: str) -> bool:
+    """Run again a folder job that failed only because Yandex was
+    unavailable (a wrong token, the network). The files of the item are
+    verified when the folder job completes."""
+    job_id = clean_cell_value(job.get("job_id"))
+    if not job_id:
+        return False
+    retried = retry_yandex_structure_job(job_id) or {}
+    if clean_cell_value(retried.get("status")).lower() != "queued":
+        return False
+    from app.checklists.yandex_structure_state import (
+        persist_item_yandex_structure_state,
+    )
+    persist_item_yandex_structure_state(
+        dialog_id=clean_cell_value(retried.get("dialog_id")),
+        checklist_key=clean_cell_value(retried.get("checklist_key")) or "id",
+        item_id=clean_cell_value(retried.get("item_id")),
+        job=retried,
+    )
+    mark_manual_structure_continuation(job_id)
+    enqueue_result = enqueue_yandex_structure_job(
+        job_id,
+        source=f"{source}_unavailable_retry",
+    )
+    write_debug_log("yandex_structure_unavailable_retry_queued", {
+        "jobId": job_id,
+        "source": source,
+        "dialogId": clean_cell_value(retried.get("dialog_id")),
+        "checklistKey": clean_cell_value(retried.get("checklist_key")),
+        "itemId": clean_cell_value(retried.get("item_id")),
+        "action": clean_cell_value(retried.get("action")),
+        "previousError": clean_cell_value(job.get("error")),
+        "queued": bool(enqueue_result.get("queued")),
+    })
+    return True
+
+
 def _conflicts_are_files_only(remote_result: dict) -> bool:
     conflicts = list(remote_result.get("conflicts") or [])
     return bool(conflicts) and all(
@@ -167,7 +211,9 @@ def reconcile_yandex_mirror_documents(
     The pass never deletes or blindly overwrites remote Yandex content. It
     probes only the owning item's directory, compares name, size and checksum,
     and queues upload only after confirmed absence. Previously failed items
-    remain held until an explicit manual recovery request.
+    remain held until an explicit manual recovery request, unless they failed
+    only because Yandex was unavailable: those are checked again. When Yandex
+    refuses the token, an automatic pass stops at once and marks nothing.
     """
     requested_dialog_id = normalize_dialog_id(dialog_id)
     requested_checklist_key = (
@@ -216,11 +262,17 @@ def reconcile_yandex_mirror_documents(
         "customRepairsCompleted": 0,
         "customConflicts": 0,
         "manualRequired": 0,
+        "structureRetriesQueued": 0,
         "errors": [],
     }
     context_cache: dict[str, dict] = {}
+    # The error of a refused token: an automatic pass stops with it.
+    aborted = ""
+    stop_on_auth_error = not is_manual_recovery(source)
 
     for row in rows:
+        if aborted:
+            break
         storage_id = clean_cell_value(row["dialog_id"])
         try:
             raw_data = json.loads(row["data_json"] or "{}")
@@ -254,6 +306,8 @@ def reconcile_yandex_mirror_documents(
             # from a recovery pass merely because their definition changed.
             stats["checklists"] += 1
             for raw_item in raw_data.get("items") or []:
+                if aborted:
+                    break
                 item = migrate_legacy_document_fields(raw_item)
                 item_id = clean_cell_value(item.get("id"))
                 if requested_item_id and item_id != requested_item_id:
@@ -267,6 +321,25 @@ def reconcile_yandex_mirror_documents(
                 if not is_manual_recovery(source) and requires_manual_recovery(item, current_jobs):
                     stats['manualRequired'] += 1
                     continue
+                if not is_manual_recovery(source):
+                    # A folder job that failed only because Yandex was
+                    # unavailable runs again; the files follow it.
+                    from app.checklists.yandex_structure_jobs import subfolder_job_item_id
+                    structure_jobs = [
+                        current_jobs[-1],
+                        get_latest_yandex_structure_job_for_item(
+                            dialog_id=dialog_id, checklist_key=checklist_key,
+                            item_id=subfolder_job_item_id(item_id)) or {},
+                    ]
+                    retried_structure = False
+                    for structure_job in structure_jobs:
+                        if (clean_cell_value(structure_job.get("status")).lower() == "error"
+                                and is_yandex_unavailable_error(structure_job.get("error"))
+                                and _retry_unavailable_structure_job(structure_job, source=source)):
+                            retried_structure = True
+                    if retried_structure:
+                        stats["structureRetriesQueued"] += 1
+                        continue
 
                 custom_recovery: dict = {}
                 if bool(item.get("isCustom", False)):
@@ -286,6 +359,9 @@ def reconcile_yandex_mirror_documents(
                         elif custom_recovery.get("queued"):
                             stats["customRepairsQueued"] += 1
                     except Exception as exc:
+                        if stop_on_auth_error and is_yandex_auth_error(exc):
+                            aborted = str(exc)
+                            break
                         _record_error(
                             stats,
                             storage_id=storage_id,
@@ -381,6 +457,8 @@ def reconcile_yandex_mirror_documents(
                         stats["structureRepairsExisting"] += 1
 
                 for document in normalize_documents_list(item.get("documents")):
+                    if aborted:
+                        break
                     stats["documents"] += 1
                     document_id = clean_cell_value(document.get("id"))
                     try:
@@ -451,6 +529,17 @@ def reconcile_yandex_mirror_documents(
                             explicit_replacement_override = False
 
                             if remote_status == "unavailable":
+                                auth_error = next((
+                                    clean_cell_value(probe.get("error"))
+                                    for probe in remote_result.get("probeErrors") or []
+                                    if is_yandex_auth_error(probe.get("error"))
+                                ), "")
+                                if stop_on_auth_error and auth_error:
+                                    # A refused token says nothing about the
+                                    # files: nothing is marked, the next
+                                    # start checks them again.
+                                    aborted = auth_error
+                                    continue
                                 error = clean_cell_value(
                                     remote_result.get("error")
                                 ) or "Yandex remote verification failed"
@@ -729,6 +818,9 @@ def reconcile_yandex_mirror_documents(
                                 if enqueue_result.get("queued"):
                                     stats["queued"] += 1
                     except Exception as exc:
+                        if stop_on_auth_error and is_yandex_auth_error(exc):
+                            aborted = str(exc)
+                            break
                         from app.checklists.yandex_scope import YandexScopeError
                         if isinstance(exc, YandexScopeError):
                             fail_document_upload_job_for_remote_conflict(
@@ -745,11 +837,25 @@ def reconcile_yandex_mirror_documents(
                             error=exc,
                         )
         except Exception as exc:
+            if stop_on_auth_error and is_yandex_auth_error(exc):
+                aborted = str(exc)
+                break
             _record_error(
                 stats,
                 storage_id=storage_id,
                 error=exc,
             )
+
+    if aborted:
+        stats["ok"] = False
+        stats["aborted"] = "yandex_unauthorized"
+        stats["abortError"] = aborted
+        write_debug_log("yandex_mirror_reconciliation_aborted", {
+            "source": source,
+            "reason": "yandex_unauthorized",
+            "error": aborted,
+            "documentsChecked": stats["documents"],
+        })
 
     if is_manual_recovery(source) and requested_dialog_id and requested_item_id:
         from app.checklists.yandex_replacement_cleanup import retry_item_replacement_cleanup
