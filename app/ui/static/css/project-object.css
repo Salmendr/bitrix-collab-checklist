@@ -320,13 +320,14 @@
     cursor: pointer;
 }
 
-.project-object-link:hover,
+.project-object-link:hover:not(.is-disabled),
 .header-link-button:hover:not(:disabled):not(.is-disabled) {
     background: #dbeafe;
 }
 
 .header-link-button:disabled,
-.header-link-button.is-disabled {
+.header-link-button.is-disabled,
+.project-object-link.is-disabled {
     border-color: #e4e7ec;
     background: #f2f4f7;
     color: #98a2b3;

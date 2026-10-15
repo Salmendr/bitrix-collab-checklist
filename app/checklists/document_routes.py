@@ -2180,8 +2180,15 @@ def api_checklist_folder(
     userId: str = "",
     userName: str = "",
     folder: str = "",
+    readOnly: str = "",
 ):
     from app.checklists import folder_page
+
+    # Opened from a checklist in the view mode: no changes in this window
+    # and in the folders opened from it, whatever happens to the session.
+    read_only = clean_cell_value(readOnly).lower() in {"1", "true", "yes"}
+    if read_only:
+        sessionId = ""
 
     dialog_id = normalize_dialog_id(dialogId)
     checklist_key = normalize_checklist_key(
@@ -2308,6 +2315,7 @@ def api_checklist_folder(
         session_id=session_id,
         user_id=clean_cell_value(userId),
         user_name=clean_cell_value(userName),
+        read_only=read_only,
     )
     from app.checklists.storage import get_project_storage_context
     is_top_level = not clean_cell_value(target_item.get("parentItemId")) and not item_allows_plain_folders(target_item)
@@ -2349,7 +2357,7 @@ def api_checklist_folder(
     ui_static_base_url = (
         f"{app_base_path}/ui-static"
     )
-    ui_asset_version = "8.22-header"
+    ui_asset_version = "8.23-leaders"
     popup_url = (
         f"{app_base_path}/popup"
         f"?dialogId={quote(dialog_id, safe='')}"
@@ -2401,6 +2409,7 @@ def api_checklist_folder(
             or "Пункт"
         ),
         "sessionId": clean_cell_value(sessionId),
+        "readOnly": read_only,
         "userId": clean_cell_value(userId),
         "userName": clean_cell_value(userName),
         "popupUrl": popup_url,

@@ -743,13 +743,7 @@ function bindDocumentActions() {
 
     document.querySelectorAll('[data-role="view-folder"]').forEach(btn => {
         btn.addEventListener('click', function () {
-            if (
-                this.disabled
-                || (
-                    typeof isEditingAllowed === 'function'
-                    && !isEditingAllowed()
-                )
-            ) {
+            if (this.disabled) {
                 return;
             }
 
@@ -761,8 +755,17 @@ function bindDocumentActions() {
                     folderUrl,
                     window.location.href
                 );
+                // Without the edit session (another user edits the
+                // checklist) the folder window opens read only and stays
+                // so until it is closed, even when this popup gets the
+                // session later.
+                const editingAllowed = (
+                    typeof isEditingAllowed !== 'function'
+                    || isEditingAllowed()
+                );
                 const editSessionId = (
-                    typeof getActiveEditSessionId === 'function'
+                    editingAllowed
+                    && typeof getActiveEditSessionId === 'function'
                         ? getActiveEditSessionId()
                         : ''
                 );
@@ -771,6 +774,9 @@ function bindDocumentActions() {
                         'sessionId',
                         editSessionId
                     );
+                } else {
+                    targetUrl.searchParams.delete('sessionId');
+                    targetUrl.searchParams.set('readOnly', '1');
                 }
                 const actor = (
                     typeof getCurrentEditorIdentity === 'function'

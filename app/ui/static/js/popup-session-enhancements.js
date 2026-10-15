@@ -476,8 +476,9 @@ function setActionButtonState() {
         cancelBtn.disabled = popupFinalizationInProgress;
     }
 
+    // Folders open in the view mode too (read only, see view-folder).
     document.querySelectorAll('[data-role="view-folder"]').forEach(button => {
-        button.disabled = !editingAllowed;
+        button.disabled = !!popupFinalizationInProgress;
         button.setAttribute(
             'aria-disabled',
             button.disabled ? 'true' : 'false'

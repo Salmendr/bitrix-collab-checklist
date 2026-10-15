@@ -44,7 +44,17 @@
     const folderItemName = String(
         bootstrap.itemName || 'Пункт'
     );
-    const folderBootstrapSessionId = String(
+    // Opened from a checklist in the view mode (another user edits it):
+    // no changes in this window until it is closed, even when the checklist
+    // gets the edit session later. The folders opened from here are read
+    // only too (the server passes readOnly=1 on in every link).
+    const folderReadOnly = bootstrap.readOnly === true;
+    const READ_ONLY_MESSAGE = (
+        'Только просмотр: папка открыта, когда чек-лист редактировал '
+        + 'другой сотрудник. Чтобы вносить изменения, закройте это окно '
+        + 'и откройте папку заново из чек-листа, когда сессия перейдёт к вам.'
+    );
+    const folderBootstrapSessionId = folderReadOnly ? '' : String(
         bootstrap.sessionId || ''
     ).trim();
     const folderPopupUrl = String(
@@ -218,6 +228,9 @@
     }
 
     function getFolderEditSessionId() {
+        if (folderReadOnly) {
+            return '';
+        }
         try {
             const openerApi = (
                 global.opener
@@ -255,6 +268,10 @@
         actionName = 'изменение'
     ) {
         const sessionId = getFolderEditSessionId();
+
+        if (!sessionId && folderReadOnly) {
+            throw new Error(READ_ONLY_MESSAGE);
+        }
 
         if (!sessionId) {
             throw new Error(
@@ -307,10 +324,12 @@
                     'aria-disabled',
                     'true'
                 );
-                element.title = (
-                    'Недоступно без активной '
-                    + 'сессии редактирования'
-                );
+                element.title = folderReadOnly
+                    ? 'Только просмотр'
+                    : (
+                        'Недоступно без активной '
+                        + 'сессии редактирования'
+                    );
                 return;
             }
 
@@ -567,8 +586,23 @@
         );
     }
 
+    function showReadOnlyNotice() {
+        if (!folderReadOnly || global.document.getElementById('folderReadOnlyNotice')) {
+            return;
+        }
+        global.document.body.classList.add('folder-read-only');
+        const notice = global.document.createElement('div');
+        notice.id = 'folderReadOnlyNotice';
+        notice.className = 'folder-read-only-notice';
+        notice.setAttribute('role', 'status');
+        notice.textContent = READ_ONLY_MESSAGE;
+        const anchor = global.document.querySelector('.folder-shell') || global.document.body;
+        anchor.insertBefore(notice, anchor.firstChild);
+    }
+
     global.ChecklistFolderCore = Object.freeze({
         bootstrap,
+        readOnly: folderReadOnly,
         channel: folderWindowChannel,
         getActor: getFolderDeleteActor,
         getSessionId: getFolderEditSessionId,
@@ -603,10 +637,14 @@
     if (global.document.readyState === 'loading') {
         global.document.addEventListener(
             'DOMContentLoaded',
-            applyFolderEditSessionState,
+            function () {
+                showReadOnlyNotice();
+                applyFolderEditSessionState();
+            },
             { once: true }
         );
     } else {
+        showReadOnlyNotice();
         applyFolderEditSessionState();
     }
 })(window);

@@ -519,6 +519,29 @@ def admin_page(userId: str = ""):
                 <tbody id="permissionsBody"></tbody>
             </table>
 
+            <div class="section-title">Руководители</div>
+            <div class="muted">
+                Руководители видят кнопки «Перейти к Договору» и «Графики». Это постоянные участники из списка ниже,
+                администраторы и все, кто стоит в полях ответственных объекта проекта (Ответственный, Руководитель рабочей группы,
+                Ответственный за Концепцию/Эскиз) или в поле «Ответственный» договора с заказчиком — они видны у каждого проекта.
+            </div>
+            <div class="toolbar">
+                <input id="leaderUserIdInput" class="permission-input-id" type="text" placeholder="ID">
+                <input id="leaderUserNameInput" class="permission-input-name" type="text" placeholder="Имя сотрудника (необязательно)">
+                <button id="addLeaderBtn" type="button" class="primary">Добавить руководителя</button>
+            </div>
+            <table class="permissions-table">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Сотрудник</th>
+                        <th>Добавлен</th>
+                        <th>Действия</th>
+                    </tr>
+                </thead>
+                <tbody id="leadersBody"></tbody>
+            </table>
+
             <div id="bitrixUsersBox" class="bitrix-users-box">
                 <b>Сотрудники из Bitrix</b>
                 <div class="muted">Нажми «Добавить» рядом с нужным сотрудником. Если список пустой, админка открыта не внутри Bitrix или REST user.get недоступен.</div>
@@ -947,7 +970,7 @@ def admin_page(userId: str = ""):
                 object.cipher ? `Шифр: ${esc(object.cipher)}` : '',
                 object.cipherError ? `<span class="badge warn">Шифр: ${esc(object.cipherError)}</span>` : '',
                 (object.contracts || []).length
-                    ? 'Договоры: ' + object.contracts.map(contract => `${esc(contract.title || ('#' + contract.id))} (${contract.chartsUrl ? `<a href="${esc(contract.chartsUrl)}" target="_blank" rel="noopener">графики</a>` : 'нет ссылки на графики'})`).join('; ')
+                    ? 'Договоры: ' + object.contracts.map(contract => `${esc(contract.title || ('#' + contract.id))} (${contract.chartsUrl ? `<a href="${esc(contract.chartsUrl)}" target="_blank" rel="noopener">графики</a>` : 'нет ссылки на графики'}${contract.assigned ? ', ответственный: ' + esc(peopleText([contract.assigned])) : ''})`).join('; ')
                     : (object.contractsError ? `<span class="badge warn">Договоры: ${esc(object.contractsError)}</span>` : 'Договоров нет'),
             ].filter(Boolean).map(row => `<div>${row}</div>`).join('');
             return `
@@ -994,6 +1017,7 @@ def admin_page(userId: str = ""):
                             <button type="button" data-action="main-object-auto" data-dialog-id="${esc(item.dialogId)}">Вернуть автоматический</button>
                         </div>` : ''}
                     ${objects.map(object => renderObjectCard(item, object, state)).join('')}
+                    ${(state.responsibles || []).length ? `<div class="muted" style="margin-top:6px;">Руководители по полям: ${esc(peopleText(state.responsibles))}</div>` : ''}
                     ${renderChoice(item, 'legalName', 'Наименование', state.legalNames, state.legalNamePinned || '')}
                     ${renderChoice(item, 'cipher', 'Шифр', state.ciphers, state.cipherPinned || '')}
                 </div>
@@ -1037,6 +1061,60 @@ def admin_page(userId: str = ""):
                 await reloadProjects(true);
             }
         }
+
+        const leadersBody = document.getElementById('leadersBody');
+
+        function renderLeaders(items) {
+            const list = Array.isArray(items) ? items : [];
+            leadersBody.innerHTML = list.length ? list.map(item => `
+                <tr>
+                    <td><b>${esc(item.userId)}</b></td>
+                    <td>${esc(item.name || '')}</td>
+                    <td class="muted">${esc(item.addedBy === 'default' ? 'по умолчанию' : (item.addedAt || '').replace('T', ' ').slice(0, 16))}</td>
+                    <td><button type="button" class="danger" data-action="leader-remove" data-user-id="${esc(item.userId)}">Убрать</button></td>
+                </tr>
+            `).join('') : '<tr><td colspan="4" class="muted">Постоянных руководителей нет.</td></tr>';
+        }
+
+        async function reloadLeaders() {
+            try {
+                const result = await apiGet('api/admin/leaders');
+                renderLeaders(result.items || []);
+            } catch (e) {
+                setStatus('Ошибка: ' + String(e.message || e));
+            }
+        }
+
+        async function addLeader() {
+            const targetUserId = String(document.getElementById('leaderUserIdInput').value || '').trim();
+            const targetUserName = String(document.getElementById('leaderUserNameInput').value || '').trim();
+            try {
+                const result = await apiPost('api/admin/leaders/add', { targetUserId, targetUserName });
+                renderLeaders(result.items || []);
+                document.getElementById('leaderUserIdInput').value = '';
+                document.getElementById('leaderUserNameInput').value = '';
+                setStatus(result);
+            } catch (e) {
+                setStatus('Ошибка: ' + String(e.message || e));
+            }
+        }
+
+        async function removeLeader(userId) {
+            if (!confirm('Убрать сотрудника ' + userId + ' из постоянных руководителей?')) return;
+            try {
+                const result = await apiPost('api/admin/leaders/remove', { targetUserId: userId });
+                renderLeaders(result.items || []);
+                setStatus(result);
+            } catch (e) {
+                setStatus('Ошибка: ' + String(e.message || e));
+            }
+        }
+
+        document.getElementById('addLeaderBtn').addEventListener('click', addLeader);
+        leadersBody.addEventListener('click', function (event) {
+            const btn = event.target.closest('button[data-action="leader-remove"]');
+            if (btn) removeLeader(btn.dataset.userId);
+        });
 
         async function reloadProjects(keepStatus) {
             try {
@@ -1214,6 +1292,7 @@ def admin_page(userId: str = ""):
 
         reloadProjects();
         reloadPermissions();
+        reloadLeaders();
     </script>
 </body>
 </html>
@@ -1430,6 +1509,44 @@ def api_admin_project_object_choose(payload: dict):
             check_rights=False,
         ),
     )
+
+
+@router.get("/api/admin/leaders")
+def api_admin_leaders(userId: str = ""):
+    from app.checklists.project_leaders import list_permanent_leaders
+
+    if not is_admin_user(userId):
+        return json_admin_denied()
+    return JSONResponse({"ok": True, "items": list_permanent_leaders()})
+
+
+@router.post("/api/admin/leaders/add")
+def api_admin_leaders_add(payload: dict):
+    from app.checklists.project_leaders import LeaderError, add_permanent_leader
+
+    user_id = clean_cell_value(payload.get("userId"))
+    if not is_admin_user(user_id):
+        return json_admin_denied()
+    try:
+        items = add_permanent_leader(
+            clean_cell_value(payload.get("targetUserId")),
+            clean_cell_value(payload.get("targetUserName")),
+            acting_user_id=user_id,
+        )
+    except LeaderError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+    return JSONResponse({"ok": True, "items": items})
+
+
+@router.post("/api/admin/leaders/remove")
+def api_admin_leaders_remove(payload: dict):
+    from app.checklists.project_leaders import remove_permanent_leader
+
+    user_id = clean_cell_value(payload.get("userId"))
+    if not is_admin_user(user_id):
+        return json_admin_denied()
+    items = remove_permanent_leader(clean_cell_value(payload.get("targetUserId")), acting_user_id=user_id)
+    return JSONResponse({"ok": True, "items": items})
 
 
 @router.post("/api/admin/delete-project")

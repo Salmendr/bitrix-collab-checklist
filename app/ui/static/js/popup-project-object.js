@@ -4,8 +4,10 @@
     // The Bitrix24 object of the project in the checklist header: the legal
     // name and the cipher (click copies), «Перейти к объекту» (the card of
     // the object of this checklist, else of the main object), «выбрать»
-    // for administrators and GIPs when the objects give several variants,
-    // and «Графики» (the link in the contract of the main object).
+    // for administrators and GIPs when the objects give several variants.
+    // «Руководители» (administrators, permanent leaders, the responsible
+    // people of the objects and contracts) also see «Перейти к Договору»
+    // and «Графики» (the contract of the main object and its charts link).
 
     const doc = global.document;
     const barEl = doc.getElementById('projectObjectBar');
@@ -22,6 +24,9 @@
             : {},
         managerUserIds: Array.isArray(bootstrapObject.managerUserIds)
             ? bootstrapObject.managerUserIds.map(String)
+            : [],
+        leaderUserIds: Array.isArray(bootstrapObject.leaderUserIds)
+            ? bootstrapObject.leaderUserIds.map(String)
             : [],
         renderedKey: '',
         menu: '',
@@ -65,10 +70,24 @@
         return state.managerUserIds.includes(userId);
     }
 
+    function isAdminUser() {
+        const userId = currentUserId();
+        const phases = global.ChecklistPopupProjectPhases;
+        return !!(userId && phases && phases.state && Array.isArray(phases.state.adminUserIds)
+            && phases.state.adminUserIds.includes(userId));
+    }
+
+    function isLeader() {
+        const userId = currentUserId();
+        if (!userId) return false;
+        return isAdminUser() || state.leaderUserIds.includes(userId);
+    }
+
     function applyPayload(result) {
         if (!result || typeof result !== 'object') return;
         if (result.byKey && typeof result.byKey === 'object') state.byKey = result.byKey;
         if (Array.isArray(result.managerUserIds)) state.managerUserIds = result.managerUserIds.map(String);
+        if (Array.isArray(result.leaderUserIds)) state.leaderUserIds = result.leaderUserIds.map(String);
         pushToGipField();
         render();
     }
@@ -130,8 +149,14 @@
     }
 
     function openObject(event, view) {
-        const path = text(view && view.objectPath);
+        openCard(event, { path: view && view.objectPath, url: view && view.objectUrl });
+    }
+
+    // A Bitrix24 card: in the Bitrix24 slider, outside Bitrix24 in a new tab.
+    function openCard(event, card) {
+        const path = text(card && card.path);
         if (!path) return;
+        const view = { objectPath: path, objectUrl: text(card && card.url) };
         const bx = global.BX24;
         const bridge = global.ChecklistPopupBitrix;
         if (bx && typeof bx.openPath === 'function') {
@@ -250,7 +275,7 @@
 
     function renderCharts(view) {
         if (!chartsEl) return;
-        if (!view || !view.configured || !view.objectDriven) {
+        if (!view || !view.configured || !view.objectDriven || !isLeader()) {
             chartsEl.hidden = true;
             chartsEl.innerHTML = '';
             renderedChartsHtml = '';
@@ -299,8 +324,19 @@
         if (cipher) parts.push(fieldHtml('cipher', 'Шифр:', cipher, ciphers, view));
         if (text(view.objectPath)) {
             const href = objectUrl(view) || '#';
-            parts.push('<a class="project-object-link" href="' + escHtml(href) + '" target="_blank" rel="noopener"'
+            parts.push('<a class="project-object-link" data-role="open-object" href="' + escHtml(href) + '" target="_blank" rel="noopener"'
                 + ' title="Объект #' + escHtml(view.objectId) + ' в Битрикс24">Перейти к объекту</a>');
+        }
+        if (view.objectDriven && isLeader()) {
+            const contract = view.contract && typeof view.contract === 'object' ? view.contract : {};
+            if (text(contract.path)) {
+                const href = objectUrl({ objectPath: contract.path, objectUrl: contract.url }) || '#';
+                parts.push('<a class="project-object-link" data-role="open-contract" href="' + escHtml(href) + '" target="_blank" rel="noopener"'
+                    + ' title="' + escHtml('Договор #' + contract.id + (contract.title ? ' — ' + contract.title : '')) + '">Перейти к Договору</a>');
+            } else {
+                parts.push('<span class="project-object-link is-disabled" data-role="open-contract" aria-disabled="true"'
+                    + ' title="' + escHtml(contract.hint || 'У основного объекта нет договора с заказчиком') + '">Перейти к Договору</span>');
+            }
         }
         if (!parts.length) {
             barEl.hidden = true;
@@ -346,6 +382,11 @@
             return;
         }
         const link = event.target.closest('.project-object-link');
+        if (link && link.dataset.role === 'open-contract') {
+            if (link.getAttribute('aria-disabled') === 'true') return;
+            openCard(event, view && view.contract);
+            return;
+        }
         if (link) openObject(event, view);
     });
 

@@ -750,3 +750,15 @@
 .folder-replace-progress[hidden] {
     display: none;
 }
+
+/* A folder window opened from a checklist in the view mode. */
+.folder-read-only-notice {
+    margin: 0 0 12px;
+    padding: 10px 14px;
+    border: 1px solid #fedf89;
+    border-radius: 10px;
+    background: #fffaeb;
+    color: #93370d;
+    font-size: 13px;
+    line-height: 1.45;
+}

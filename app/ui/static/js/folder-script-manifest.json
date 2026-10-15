@@ -1,5 +1,5 @@
 {
-  "stage": "8.22-header",
+  "stage": "8.23-leaders",
   "hashMode": "utf8-lf",
   "modules": {
     "checklist-window-channel.js": {
@@ -11,8 +11,8 @@
       "bytes": 5819
     },
     "folder-core.js": {
-      "sha256": "e1a832aca22f3276433acbaa095a8b8af4b77d0d8575fabf3572fa63047de400",
-      "bytes": 18484
+      "sha256": "956c39c5c5eab40f3b229209c29e7a9ea2f0286f16a50f4d03eda9e507e99925",
+      "bytes": 20317
     },
     "public-folder-share.js": {
       "sha256": "0a76ada593bbad042556d0cf528f0f167681694c523f8a652cac9b7737325338",
@@ -133,7 +133,8 @@
     "Stage 8.17 shows a Yandex-like path bar, the folder tree with a view action per folder, nested folder pages and folder create/rename/move/delete/ZIP actions.",
     "Stage 8.17.1 resolves the item Yandex folder like the popup (structure state first), publishes nested folders on the first click and hides folder deletion from users without file-delete rights.",
     "Stage 8.19 adds «Заменить папку»: the old contents go to the archive, the dropped folder takes their place.",
-    "Stage 8.22: menu «Перейти по ссылке / Скопировать ссылку» for Yandex links."
+    "Stage 8.22: menu «Перейти по ссылке / Скопировать ссылку» for Yandex links.",
+    "Stage 8.23: a folder window opened in the view mode stays read only with every folder opened from it."
   ],
-  "generatedAt": "2026-10-09T00:00:00+00:00"
+  "generatedAt": "2026-10-15T00:00:00+00:00"
 }

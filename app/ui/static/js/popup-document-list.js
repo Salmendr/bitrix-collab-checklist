@@ -95,8 +95,7 @@ function buildSubitemFolderRows(item, documents, itemId) {
                 data-role="view-folder"
                 data-item-id="${esc(itemId)}"
                 data-folder-url="${esc(folderUrl)}"
-                title="Открыть папку «${esc(folder)}»"
-                ${editingAllowed ? '' : 'disabled'}
+                title="Открыть папку «${esc(folder)}»${editingAllowed ? '' : ' (только просмотр)'}"
             >
                 <span class="doc-folder-row-icon" aria-hidden="true">📁</span>
                 <span class="doc-folder-row-name">${esc(folder)}</span>
@@ -370,10 +369,8 @@ function buildDocumentCell(item) {
                         data-icon="view-folder"
                         data-item-id="${esc(itemId)}"
                         data-folder-url="${esc(folderViewUrl)}"
-                        title="Открыть папку пункта"
+                        title="Открыть папку пункта${editingAllowed ? '' : ' (только просмотр)'}"
                         aria-label="Открыть папку пункта"
-                        aria-disabled="${editingAllowed ? 'false' : 'true'}"
-                        ${editingAllowed ? '' : 'disabled'}
                     >
                         ${iconSvg('folder')}
                     </button>

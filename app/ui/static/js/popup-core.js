@@ -2319,16 +2319,17 @@
                 stageFolderBoxEl.style.display = 'flex';
 
                 const stageFolderEnabled = !!folderUrl && !yandexDisabled;
-                const buttonText = 'Открыть Стадию в Яндекс Диске';
+                const buttonText = 'Открыть Стадию в Яндексе';
 
                 stageFolderBoxEl.innerHTML = `
                     <button
-                        class="doc-btn"
+                        class="header-link-button"
                         type="button"
                         data-role="view-stage-folder"
                         data-folder-url="${esc(stageFolderEnabled ? folderUrl : '')}"
                         data-yandex-disabled="${yandexDisabled ? '1' : '0'}"
-                        title="Открыть Стадию в Яндекс Диске"
+                        title="Открыть папку стадии на Яндекс.Диске"
+                        aria-haspopup="menu"
                         aria-disabled="${stageFolderEnabled ? 'false' : 'true'}"
                         ${stageFolderEnabled ? '' : 'disabled'}
                     >

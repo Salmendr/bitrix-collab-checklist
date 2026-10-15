@@ -80,8 +80,9 @@ AUTO_RETRY_SECONDS = 3600
 MAX_RELATED_OBJECTS = 30
 # Version of the cached cards: older caches are read again once.
 # 2: the legal name and the cipher are shown by the title of a linked element.
-OBJECTS_SCHEMA = 3
+OBJECTS_SCHEMA = 4
 # 3: the contracts of every object (charts link).
+# 4: the Ответственный of every contract («Руководители»).
 
 # Smart process «Договоры с заказчиками» linked to the objects.
 CONTRACT_ENTITY_TYPE_ID = 1060
@@ -550,6 +551,7 @@ def _contract_entry(item: dict, contract_id: int) -> dict:
     return {
         "id": _positive_int(item.get("id") or item.get("ID")) or int(contract_id),
         "title": _text_value(item.get("title") or item.get("TITLE")),
+        "assignedById": (parse_user_ids(item.get("assignedById") or item.get("ASSIGNED_BY_ID")) or [""])[0],
         "createdTime": clean_cell_value(item.get("createdTime") or item.get("CREATED_TIME")),
         "chartsUrls": parse_links(_field(item, FIELD_CONTRACT_CHARTS)),
     }
@@ -584,6 +586,7 @@ def fetch_contracts(entry: dict, link_fields: dict) -> tuple[list[dict], str]:
                 "select[]": [
                     "id",
                     "title",
+                    "assignedById",
                     "createdTime",
                     f"parentId{OBJECT_ENTITY_TYPE_ID}",
                     FIELD_CONTRACT_CHARTS,
@@ -662,6 +665,37 @@ def resolve_contracts(objects: list[dict], fields: dict) -> None:
             if not clean_cell_value(entry.get("error"))
         ],
     })
+
+
+def contract_card(objects: list[dict], main_id: int) -> dict:
+    """«Перейти к Договору»: the contract the charts come from, else the
+    first contract of the main object."""
+    main = next((entry for entry in objects if _positive_int(entry.get("id")) == main_id), None)
+    contracts = [
+        contract for contract in (main or {}).get("contracts") or []
+        if isinstance(contract, dict) and _positive_int(contract.get("id"))
+    ]
+    chosen = next((contract for contract in contracts if contract.get("chartsUrls")), None)
+    chosen = chosen or (contracts[0] if contracts else None)
+    if not chosen:
+        hint = (
+            "Не удалось получить договор: " + clean_cell_value((main or {}).get("contractsError"))
+            if clean_cell_value((main or {}).get("contractsError"))
+            else "У основного объекта нет договора с заказчиком"
+        )
+        return {"id": 0, "title": "", "path": "", "hint": hint}
+    contract_id = _positive_int(chosen.get("id"))
+    return {
+        "id": contract_id,
+        "title": clean_cell_value(chosen.get("title")),
+        "path": f"/crm/type/{CONTRACT_ENTITY_TYPE_ID}/details/{contract_id}/",
+        "hint": "",
+    }
+
+
+def _with_url(card: dict, origin: str) -> dict:
+    path = clean_cell_value(card.get("path"))
+    return {**card, "url": (origin + path) if (origin and path) else ""}
 
 
 def charts_link(objects: list[dict], main_id: int) -> dict:
@@ -989,6 +1023,7 @@ def refresh_project_objects(
                 [entry.get("assignedById")]
                 + list(entry.get("workGroupLeaderIds") or [])
                 + list(entry.get("conceptResponsibleIds") or [])
+                + [contract.get("assignedById") for contract in entry.get("contracts") or [] if isinstance(contract, dict)]
             ):
                 user_id = clean_cell_value(user_id)
                 if user_id and user_id not in user_ids:
@@ -1220,6 +1255,10 @@ def _object_brief(entry: dict, main_id: int, names: dict) -> dict:
                 "id": _positive_int(contract.get("id")),
                 "title": clean_cell_value(contract.get("title")),
                 "chartsUrl": (contract.get("chartsUrls") or [""])[0],
+                "assigned": {
+                    "userId": clean_cell_value(contract.get("assignedById")),
+                    "name": clean_cell_value(names.get(clean_cell_value(contract.get("assignedById")))),
+                } if clean_cell_value(contract.get("assignedById")) else None,
             }
             for contract in entry.get("contracts") or []
             if isinstance(contract, dict)
@@ -1257,6 +1296,11 @@ def project_object_state(dialog_id: str, bitrix: dict | None = None) -> dict:
         "legalNamePinned": clean_cell_value(bitrix.get("legalNameChoice")),
         "ciphers": ciphers,
         "cipher": _chosen(ciphers, bitrix.get("cipherChoice")),
+        # «Руководители» from the responsible fields (admin panel).
+        "responsibles": [
+            {"userId": user_id, "name": clean_cell_value(names.get(user_id))}
+            for user_id in _responsible_ids(objects)
+        ],
         "cipherPinned": clean_cell_value(bitrix.get("cipherChoice")),
         "portalOrigin": portal_origin(),
     }
@@ -1311,15 +1355,42 @@ def checklist_object_view(dialog_id: str, checklist_key: str, *, bitrix: dict | 
         "objectUrl": (origin + path) if (origin and path) else "",
         # «Графики»: the first contract of the main object with a link.
         "charts": charts_link(objects, main_id) if main_id else {"url": "", "title": "", "contractId": 0, "hint": ""},
+        # «Перейти к Договору» (leaders only).
+        "contract": _with_url(contract_card(objects, main_id) if main_id else {"id": 0, "title": "", "path": "", "hint": ""}, origin),
         "peopleLabel": PEOPLE_FIELD_LABELS.get(key, DEFAULT_PEOPLE_FIELD_LABEL),
         "people": checklist_people(objects, main_id, key, names) if main_id else [],
     }
+
+
+def responsible_user_ids(dialog_id: str) -> list[str]:
+    """Everyone in the responsible fields of the project objects (they also
+    fill the ГИП fields of the checklists) and the Ответственный of their
+    contracts."""
+    return _responsible_ids(_cached_objects(_load_bitrix(_base(dialog_id))))
+
+
+def _responsible_ids(objects: list[dict]) -> list[str]:
+    result: list[str] = []
+    for entry in objects:
+        if clean_cell_value(entry.get("error")):
+            continue
+        for user_id in (
+            [entry.get("assignedById")]
+            + list(entry.get("workGroupLeaderIds") or [])
+            + list(entry.get("conceptResponsibleIds") or [])
+            + [contract.get("assignedById") for contract in entry.get("contracts") or [] if isinstance(contract, dict)]
+        ):
+            user_id = clean_cell_value(user_id)
+            if user_id and user_id not in result:
+                result.append(user_id)
+    return result
 
 
 def checklist_object_views(dialog_id: str) -> dict:
     """Header data of every checklist (the popup switches checklists in
     place) and the users who may pin the legal name and the cipher."""
     from app.checklists.config import list_checklist_configs
+    from app.checklists.project_leaders import project_leader_ids
     from app.checklists.project_phases import manager_user_ids
 
     base = _base(dialog_id)
@@ -1331,6 +1402,8 @@ def checklist_object_views(dialog_id: str) -> dict:
             for config in list_checklist_configs()
         },
         "managerUserIds": manager_user_ids(base),
+        # «Руководители»: who sees «Перейти к Договору» and «Графики».
+        "leaderUserIds": project_leader_ids(base),
     }
 
 
