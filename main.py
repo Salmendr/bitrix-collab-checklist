@@ -93,6 +93,8 @@ from app.checklists.yandex_structure_queue import (
 from app.logging_utils import write_debug_log
 
 from app.checklists.id_reminder_routes import router as id_reminder_router
+from app.auth.middleware import AuthMiddleware
+from app.auth.routes import router as auth_router
 from app.checklists.id_reminders import start_worker as start_id_reminders, stop_worker as stop_id_reminders
 
 app = FastAPI()
@@ -143,6 +145,9 @@ async def upload_request_debug_middleware(request: Request, call_next):
 
     return await call_next(request)
 
+# Added last, so it runs first: a request without a valid key goes no further.
+app.add_middleware(AuthMiddleware)
+
 ensure_runtime_directories()
 
 app.mount("/uploads", StaticFiles(directory=str(UPLOAD_ROOT)), name="uploads")
@@ -150,6 +155,7 @@ app.mount("/ui-static", StaticFiles(directory=str(UI_STATIC_ROOT)), name="ui-sta
 
 # Новая админ-панель должна подключаться до ui_router,
 # потому что старая /admin могла быть внутри ui_router.
+app.include_router(auth_router)
 app.include_router(admin_router)
 app.include_router(ui_router)
 app.include_router(popup_router)

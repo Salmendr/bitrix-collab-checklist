@@ -146,6 +146,19 @@ def _absolute_version_url(
     if not all((dialog_id, checklist_key, item_id, version_id)):
         return ""
 
+    from app.checklists.messages import build_file_message_link
+
+    # Links of the chat go through Bitrix24: the server opens only to a
+    # checked employee, so a direct address of the server would be closed.
+    bitrix_link = build_file_message_link(
+        dialog_id,
+        checklist_key,
+        item_id,
+        version_id,
+    )
+    if bitrix_link:
+        return bitrix_link
+
     url = build_configured_version_file_url(
         dialog_id,
         checklist_key,

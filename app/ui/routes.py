@@ -4,6 +4,7 @@ import html
 import requests
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
+from starlette.concurrency import run_in_threadpool
 
 from app.settings import (
     APP_PORTAL_PATH,
@@ -27,9 +28,74 @@ from app.ui.shell import (
     textarea_html,
 )
 from app.ui.request_diagnostics import write_ui_request_diagnostic
+from app.auth.bitrix import BitrixAuthError, verify_bitrix_auth
+from app.auth.config import auth_mode, bitrix_portal_domains
+from app.auth.identity import establish
+from app.auth.pages import closed_html
+from app.logging_utils import write_debug_log
 
 
 router = APIRouter()
+
+# Keys Bitrix24 posts with the window; they are never printed or put into a
+# page. REFRESH_ID lives for weeks.
+SECRET_FORM_KEYS = frozenset({
+    "AUTH_ID",
+    "REFRESH_ID",
+    "APPLICATION_TOKEN",
+    "access_token",
+    "refresh_token",
+    "auth",
+})
+
+
+def safe_form_context(form: dict) -> str:
+    return json.dumps(
+        {
+            key: ("<hidden>" if key in SECRET_FORM_KEYS else value)
+            for key, value in form.items()
+        },
+        ensure_ascii=False,
+        indent=2,
+    )
+
+
+async def authorize_bitrix_entry(request: Request, form: dict) -> HTMLResponse | None:
+    """Check the AUTH_ID Bitrix24 opened the window with.
+
+    Returns the closed page when the window must not open; otherwise the
+    request carries the checked employee (the page gets its keys).
+    """
+    mode = auth_mode()
+    if mode == "off":
+        return None
+    auth_id = str(form.get("AUTH_ID") or form.get("auth") or "").strip()
+    domain = str(
+        request.query_params.get("DOMAIN")
+        or form.get("DOMAIN")
+        or ""
+    ).strip()
+    try:
+        identity = await run_in_threadpool(verify_bitrix_auth, auth_id, domain)
+    except BitrixAuthError as exc:
+        write_debug_log("auth_bitrix_entry_rejected", {
+            "path": request.url.path,
+            "reason": exc.reason,
+            "detail": exc.detail,
+            "domain": domain,
+            "memberId": str(form.get("member_id") or ""),
+            "mode": mode,
+        })
+        if mode == "on":
+            return HTMLResponse(closed_html(exc.reason).decode("utf-8"), status_code=401)
+        return None
+    establish(request, identity)
+    write_debug_log("auth_bitrix_entry_accepted", {
+        "path": request.url.path,
+        "userId": identity["userId"],
+        "domain": identity.get("domain", ""),
+    })
+    return None
 
 
 def extract_dialog_id_from_form(form_data: dict) -> str:
@@ -164,6 +230,40 @@ def extract_checklist_key_from_form(form_data: dict) -> str:
     return "id"
 
 
+def extract_option_from_form(form_data: dict, key: str) -> str:
+    """A value the link of a message put into the application window."""
+    direct = str(form_data.get(key) or "").strip()
+    if direct:
+        return direct
+
+    def walk(obj) -> str:
+        if isinstance(obj, dict):
+            value = str(obj.get(key) or "").strip()
+            if value and not isinstance(obj.get(key), (dict, list)):
+                return value
+            for nested in obj.values():
+                found = walk(nested)
+                if found:
+                    return found
+        elif isinstance(obj, list):
+            for nested in obj:
+                found = walk(nested)
+                if found:
+                    return found
+        return ""
+
+    for raw in (form_data.get("PLACEMENT_OPTIONS"), form_data.get("placementOptions"), form_data.get("options")):
+        if not raw:
+            continue
+        try:
+            found = walk(json.loads(raw) if isinstance(raw, str) else raw)
+        except Exception:
+            continue
+        if found:
+            return found
+    return ""
+
+
 @router.get("/health")
 def health(request: Request):
     return {
@@ -206,10 +306,13 @@ def home_get(
 @router.post("/", response_class=HTMLResponse)
 async def home_post(request: Request):
     form = dict(await request.form())
+    closed = await authorize_bitrix_entry(request, form)
+    if closed is not None:
+        return closed
 
     dialog_id = extract_dialog_id_from_form(form)
     checklist_key = extract_checklist_key_from_form(form)
-    raw_context = json.dumps(form, ensure_ascii=False, indent=2)
+    raw_context = safe_form_context(form)
 
     print("HOME POST FORM:", raw_context)
     print("HOME EXTRACTED DIALOG ID:", dialog_id)
@@ -225,7 +328,13 @@ async def home_post(request: Request):
         },
     )
 
-    return app_home_html(dialog_id, checklist_key, raw_context)
+    return app_home_html(
+        dialog_id,
+        checklist_key,
+        raw_context,
+        initial_file_item_id=extract_option_from_form(form, "fileItemId"),
+        initial_file_version_id=extract_option_from_form(form, "fileVersionId"),
+    )
 
 
 @router.get("/launch", response_class=HTMLResponse)
@@ -251,6 +360,11 @@ async def launch_post(request: Request):
         "popup_diag_http_launch_post",
         request,
     )
+    # An application handler set to /launch is checked like the main one.
+    form = dict(await request.form())
+    closed = await authorize_bitrix_entry(request, form)
+    if closed is not None:
+        return closed
     return app_home_html()
 
 
@@ -283,6 +397,13 @@ async def install_post(request: Request):
     base_url = get_public_app_base_url(request)
 
     app_sid = params.get("APP_SID") or ""
+
+    # The page is open to everybody (Bitrix24 calls it while installing), so
+    # it talks only to the portal of the settings, never to an address from
+    # the request.
+    if auth_mode() != "off" and domain not in bitrix_portal_domains():
+        write_debug_log("auth_install_domain_refused", {"domain": domain})
+        domain = ""
 
     if app_sid and domain and not access_token:
         try:
@@ -366,8 +487,11 @@ def textarea_get(request: Request, dialogId: str = ""):
 @router.post("/textarea", response_class=HTMLResponse)
 async def textarea_post(request: Request):
     form = dict(await request.form())
+    closed = await authorize_bitrix_entry(request, form)
+    if closed is not None:
+        return closed
     dialog_id = extract_dialog_id_from_form(form)
-    raw_context = json.dumps(form, ensure_ascii=False, indent=2)
+    raw_context = safe_form_context(form)
 
     print("TEXTAREA POST FORM:", raw_context)
     print("TEXTAREA EXTRACTED DIALOG ID:", dialog_id)

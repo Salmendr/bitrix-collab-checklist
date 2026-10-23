@@ -1354,7 +1354,7 @@ function closePopupWindow() {
                 'popup_diag_close_reload_fallback',
                 { hasUsableOpener }
             );
-            window.location.reload();
+            (window.ChecklistAuth ? window.ChecklistAuth.reload() : window.location.reload());
         }
     }, hasUsableOpener ? 180 : 60);
 }

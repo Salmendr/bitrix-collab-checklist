@@ -1,5 +1,5 @@
 {
-  "stage": "8.24-yandex-sync",
+  "stage": "8.25-auth",
   "hashMode": "utf8-lf",
   "modules": {
     "checklist-window-channel.js": {
@@ -11,8 +11,8 @@
       "bytes": 5819
     },
     "folder-core.js": {
-      "sha256": "956c39c5c5eab40f3b229209c29e7a9ea2f0286f16a50f4d03eda9e507e99925",
-      "bytes": 20317
+      "sha256": "6c6410f30fd0d5a78d3fef72a9a4bb99f61f1fabeab03b7a7a80331403c0c24a",
+      "bytes": 20594
     },
     "public-folder-share.js": {
       "sha256": "0a76ada593bbad042556d0cf528f0f167681694c523f8a652cac9b7737325338",
@@ -47,28 +47,28 @@
       "bytes": 26381
     },
     "folder-uploads.js": {
-      "sha256": "e8233aed0ff5cdcedca1ef4bfee4e64b8093c3bd418fdddf0e253acdd5955942",
-      "bytes": 34639
+      "sha256": "8b0d1cbc00ce5e01c6c0620b30c810c65b5c9612d2a155dd2d344a084548eca4",
+      "bytes": 34753
     },
     "folder-replacement.js": {
-      "sha256": "f268582ac9d4455855215d1bbed8f9b865717da3048b21f440bde02ab526c352",
-      "bytes": 18821
+      "sha256": "2dfaa1dca49a9ec671d5841defb33a2f5a0c8e5710a4eeed9ef00afc9dd407ef",
+      "bytes": 18878
     },
     "folder-archive-ui.js": {
-      "sha256": "d222b142237700fc9f230fc99d796d258c72b4261f929b2a9f906c68d96361ef",
-      "bytes": 10282
+      "sha256": "9bc37cc2956840e9036f7932961ea29e08dd06ab2e3f37a30e993ce9cebe836c",
+      "bytes": 10339
     },
     "folder-upload-planner.js": {
       "sha256": "c4eb5210b37145959f2733c815defba63c15f11bd5b8617476b5f719df930cfb",
       "bytes": 6389
     },
     "folder-tree-actions.js": {
-      "sha256": "92edd4a02052940c7c5dc4b408741682fbcfb0818ba98e9b311a1dbef38bc11f",
-      "bytes": 24207
+      "sha256": "9d2adeacdd3d14a81245ee64cae773b0a21a3d3c1a172c67af79b6ca78f7b97c",
+      "bytes": 24764
     },
     "folder-replace.js": {
-      "sha256": "39848dff392fa366e2950280611f2a4eb17395c100392804502e7f6669f774ed",
-      "bytes": 13194
+      "sha256": "ff00013a62a43ca1e482be0cc21f264b4a21f8abbc77ee6e9b1ccf5363c1312a",
+      "bytes": 13308
     },
     "checklist-link-menu.js": {
       "sha256": "4d4f9a736e171ae4ad528428cd7e56f4c252b5f133855f6595dfb64d99ec816c",
@@ -134,7 +134,8 @@
     "Stage 8.17.1 resolves the item Yandex folder like the popup (structure state first), publishes nested folders on the first click and hides folder deletion from users without file-delete rights.",
     "Stage 8.19 adds «Заменить папку»: the old contents go to the archive, the dropped folder takes their place.",
     "Stage 8.22: menu «Перейти по ссылке / Скопировать ссылку» for Yandex links.",
-    "Stage 8.23: a folder window opened in the view mode stays read only with every folder opened from it."
+    "Stage 8.23: a folder window opened in the view mode stays read only with every folder opened from it.",
+    "Stage 8.25: only employees checked by Bitrix24 open the application; every page gets the keys of its window from the server (checklist-auth.js, put into the page, not a module), reloads and new windows carry a link key."
   ],
   "generatedAt": "2026-10-15T00:00:00+00:00"
 }

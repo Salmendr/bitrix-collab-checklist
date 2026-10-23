@@ -25,6 +25,8 @@ from pathlib import Path
 from urllib.parse import quote
 
 from fastapi import APIRouter, Request, UploadFile, File, Form
+
+from app.auth.identity import verified_actor
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 
 from app.settings import (
@@ -330,6 +332,7 @@ def format_document_uploaded_at(value: str) -> str:
 @router.post("/api/checklist/upload-document")
 @serialize_legacy_file_mutation
 async def api_checklist_upload_document(
+    request: Request,
     dialogId: str = Form(...),
     itemId: str = Form(...),
     file: UploadFile = File(...),
@@ -356,6 +359,7 @@ async def api_checklist_upload_document(
     item_id = str(itemId or "").strip()
     uploaded_name = safe_file_name(file.filename)
     uploaded_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    actingUserId, actingUserName = verified_actor(request, actingUserId, actingUserName)
     acting_user_id = clean_cell_value(actingUserId)
     acting_user_name = clean_cell_value(actingUserName) or "Пользователь"
 
@@ -660,6 +664,7 @@ async def api_checklist_upload_document(
 @router.post("/api/checklist/replace-document")
 @serialize_legacy_file_mutation
 async def api_checklist_replace_document(
+    request: Request,
     dialogId: str = Form(...),
     itemId: str = Form(...),
     documentId: str = Form(...),
@@ -679,6 +684,7 @@ async def api_checklist_replace_document(
     item_id = clean_cell_value(itemId)
     document_id = clean_cell_value(documentId)
 
+    actingUserId, actingUserName = verified_actor(request, actingUserId, actingUserName)
     acting_user_id = clean_cell_value(actingUserId)
     acting_user_name = (
         clean_cell_value(actingUserName)
@@ -2357,7 +2363,7 @@ def api_checklist_folder(
     ui_static_base_url = (
         f"{app_base_path}/ui-static"
     )
-    ui_asset_version = "8.24-yandex-sync"
+    ui_asset_version = "8.25-auth"
     popup_url = (
         f"{app_base_path}/popup"
         f"?dialogId={quote(dialog_id, safe='')}"

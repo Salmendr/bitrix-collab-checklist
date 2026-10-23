@@ -95,9 +95,9 @@
         if (!folderPopupUrl) return false;
 
         try {
-            global.location.replace(folderPopupUrl);
+            (global.ChecklistAuth ? global.ChecklistAuth.go(folderPopupUrl, true) : global.location.replace(folderPopupUrl));
         } catch (error) {
-            global.location.assign(folderPopupUrl);
+            (global.ChecklistAuth ? global.ChecklistAuth.go(folderPopupUrl, false) : global.location.assign(folderPopupUrl));
         }
 
         return true;
@@ -129,7 +129,7 @@
             // One level up: folder → parent folder → subitem → item.
             // The same window keeps its opener (the checklist popup).
             folderReturnInProgress = true;
-            global.location.assign(folderBackUrl);
+            (global.ChecklistAuth ? global.ChecklistAuth.go(folderBackUrl, false) : global.location.assign(folderBackUrl));
             return;
         }
 
@@ -571,7 +571,7 @@
                     return;
                 }
 
-                global.location.reload();
+                (global.ChecklistAuth ? global.ChecklistAuth.reload() : global.location.reload());
             }
         );
 

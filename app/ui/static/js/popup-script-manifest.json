@@ -1,5 +1,5 @@
 {
-  "stage": "8.24-yandex-sync",
+  "stage": "8.25-auth",
   "generatedAt": "2026-10-15T00:00:00+00:00",
   "loadOrder": [
     "checklist-host-diagnostics.js",
@@ -307,7 +307,8 @@
     "Stage 8.21.1: the legal name is the title of the linked element; object data kept in its own table.",
     "Stage 8.22: header of fixed cells, «Графики», menu «Перейти по ссылке / Скопировать ссылку» for Yandex buttons.",
     "Stage 8.23: «Руководители» see «Перейти к Договору» and «Графики»; folders open read only in the view mode.",
-    "Stage 8.24: the item Yandex button stays clickable and the server repairs stuck folder jobs; its menu opens next to the button after a redraw."
+    "Stage 8.24: the item Yandex button stays clickable and the server repairs stuck folder jobs; its menu opens next to the button after a redraw.",
+    "Stage 8.25: only employees checked by Bitrix24 open the application; every page gets the keys of its window from the server (checklist-auth.js, put into the page, not a module), reloads and new windows carry a link key."
   ],
   "hashMode": "utf8-lf",
   "lineEndingNote": "Hashes are calculated from bytes written to disk. This is stable for Windows CRLF and Unix LF.",
@@ -345,8 +346,8 @@
       "bytes": 10475
     },
     "popup-core.js": {
-      "sha256": "901b65d36ee19753a6bc2069e900347fd8a925b962fa322fcce5ee285bce6599",
-      "bytes": 106705
+      "sha256": "c448188ca04e5deb69ed99afc2a38af5fc99ab49996fe342cb6ff2d77997c222",
+      "bytes": 107401
     },
     "popup-document-list.js": {
       "sha256": "090e04eea9d27f2431e71e23fc089a5573bee8f65dccd2779df225a3b22fea73",
@@ -381,8 +382,8 @@
       "bytes": 25202
     },
     "popup-session-enhancements.js": {
-      "sha256": "8c7743cf212490ed4096581c560f1bee2a7c5de67c46d6db51300a27d3fcc6e8",
-      "bytes": 51039
+      "sha256": "35a6e6cf9ebc15d7e46d5614ae3b864de5313e7562518b2f182124bef712f51b",
+      "bytes": 51096
     },
     "popup-edit-session.js": {
       "sha256": "8cd402644dc0c9724b46b22c725e19a572232fa81d7105a8d3c094de9d6c7c42",
@@ -497,8 +498,8 @@
       "bytes": 6389
     },
     "popup-project-phases.js": {
-      "sha256": "a62ed10df113c4771ccd7da2ce5b0977d9a59857b2575c7e83599f8b99c7977b",
-      "bytes": 17496
+      "sha256": "a3e9ccb99554435e501df577b5a38289eb54fd0609b909595511ceaa21a2c54d",
+      "bytes": 17721
     },
     "popup-project-object.js": {
       "sha256": "e62487ba59db8bda518e03a509e84fadf37cd5eb3ba0431be77b88943d70aa06",

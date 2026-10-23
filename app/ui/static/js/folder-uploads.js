@@ -649,7 +649,7 @@
                 notifyParentChecklistDocumentChanged('checklist-document-removed', {
                     documentName: documentName
                 });
-                window.location.reload();
+                (window.ChecklistAuth ? window.ChecklistAuth.reload() : window.location.reload());
             } catch (e) {
                 console.log('folder remove error:', e);
                 alert(e && e.message ? e.message : 'Ошибка удаления файла');
@@ -951,7 +951,7 @@
 
             if ((successful.length || planned.structureChanged) && !failed.length) {
                 stagingController.clear({ collapse: true });
-                window.location.reload();
+                (window.ChecklistAuth ? window.ChecklistAuth.reload() : window.location.reload());
             }
 
             return { keepState: true };

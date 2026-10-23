@@ -194,6 +194,25 @@ def build_checklist_message_link(dialog_id: str, checklist_key: str) -> str:
     return f"{base_url}{app_path}?{query}#{query}"
 
 
+def build_file_message_link(
+    dialog_id: str,
+    checklist_key: str,
+    item_id: str,
+    version_id: str,
+) -> str:
+    """A file of a message opens through Bitrix24, like the checklist link:
+    the application checks the employee first, then shows the file."""
+    checklist_link = build_checklist_message_link(dialog_id, checklist_key)
+    item_id = clean_cell_value(item_id)
+    version_id = clean_cell_value(version_id)
+    if not checklist_link or not item_id or not version_id:
+        return ""
+    base, _, query = checklist_link.partition("?")
+    query = query.split("#", 1)[0]
+    query += f"&fileItemId={quote(item_id)}&fileVersionId={quote(version_id)}"
+    return f"{base}?{query}#{query}"
+
+
 def build_editor_text(editor: dict) -> str:
     editor_name = str(editor.get("name") or "").strip()
     editor_id = str(editor.get("id") or "").strip()

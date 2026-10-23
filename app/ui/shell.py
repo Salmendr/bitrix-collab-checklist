@@ -83,7 +83,10 @@ def install_finish_block():
 def app_home_html(
     initial_dialog_id: str = "",
     initial_checklist_key: str = "id",
-    initial_context_text: str = ""
+    initial_context_text: str = "",
+    *,
+    initial_file_item_id: str = "",
+    initial_file_version_id: str = "",
 ):
     initial_dialog_id_json = json.dumps(
         normalize_dialog_id(initial_dialog_id or ""),
@@ -94,6 +97,13 @@ def app_home_html(
         ensure_ascii=False
     )
     initial_context_text_json = json.dumps(initial_context_text or "", ensure_ascii=False)
+    initial_file_json = json.dumps(
+        {
+            "itemId": str(initial_file_item_id or "").strip(),
+            "versionId": str(initial_file_version_id or "").strip(),
+        },
+        ensure_ascii=False,
+    )
 
     return f"""
     <html>
@@ -114,6 +124,7 @@ def app_home_html(
                 const initialDialogId = {initial_dialog_id_json};
                 const initialChecklistKey = {initial_checklist_key_json};
                 const initialContextText = {initial_context_text_json};
+                const initialFile = {initial_file_json};
                 const hostDiagnostics = window.ChecklistHostDiagnostics;
 
                 function recordHostDiagnostic(event, payload, useBeacon) {{
@@ -287,6 +298,53 @@ def app_home_html(
                     }}
                 }}
 
+                // A file link of a chat message: the file opens in this
+                // window; a file the browser cannot show is downloaded and
+                // the window offers the checklist.
+                function openFileOfMessage(dialogId, checklistKey, file) {{
+                    const fileUrl =
+                        appPath('api/checklist/version-file') +
+                        '?dialogId=' + encodeURIComponent(dialogId) +
+                        '&checklistKey=' + encodeURIComponent(checklistKey || 'id') +
+                        '&itemId=' + encodeURIComponent(file.itemId) +
+                        '&versionId=' + encodeURIComponent(file.versionId);
+                    const box = document.getElementById('appHomeMessage');
+                    if (box) {{
+                        box.innerHTML = '';
+                        const text = document.createElement('div');
+                        text.textContent = 'Открываем файл…';
+                        const actions = document.createElement('div');
+                        actions.style.cssText = 'display:flex;gap:10px;margin-top:12px;';
+                        const again = document.createElement('a');
+                        again.href = fileUrl;
+                        again.textContent = 'Открыть файл ещё раз';
+                        const checklist = document.createElement('a');
+                        checklist.href = 'javascript:void(0)';
+                        checklist.textContent = 'Открыть чек-лист';
+                        checklist.addEventListener('click', function () {{
+                            rememberAndRedirect(dialogId, checklistKey);
+                        }});
+                        actions.appendChild(again);
+                        actions.appendChild(checklist);
+                        box.appendChild(text);
+                        box.appendChild(actions);
+                    }}
+                    resizeCurrentPopupFrame();
+                    window.location.assign(
+                        window.ChecklistAuth
+                            ? window.ChecklistAuth.link(fileUrl)
+                            : fileUrl
+                    );
+                }}
+
+                function openTarget(dialogId, checklistKey, file) {{
+                    if (file && file.itemId && file.versionId) {{
+                        openFileOfMessage(dialogId, checklistKey, file);
+                        return;
+                    }}
+                    rememberAndRedirect(dialogId, checklistKey);
+                }}
+
                 function rememberAndRedirect(dialogId, checklistKey) {{
                     if (!dialogId) return;
 
@@ -337,7 +395,13 @@ def app_home_html(
                             }},
                             true
                         );
-                        window.location.replace(popupUrl);
+                        // The window of the checklist opens with the link
+                        // key of the employee checked by the server.
+                        window.location.replace(
+                            window.ChecklistAuth
+                                ? window.ChecklistAuth.link(popupUrl)
+                                : popupUrl
+                        );
                     }}, 120);
                 }}
 
@@ -350,7 +414,14 @@ def app_home_html(
                     const hashRaw = String(window.location.hash || '').replace(/^#/, '');
                     const hashParams = new URLSearchParams(hashRaw);
 
-                    const raw = localStorage.getItem('checklist_pending_dialog');
+                    // A browser that blocks storage of frames (Safari, blocked
+                    // third-party cookies) throws here; the window still opens.
+                    let raw = null;
+                    try {{
+                        raw = localStorage.getItem('checklist_pending_dialog');
+                    }} catch (e) {{
+                        console.log('pending dialog read skipped:', e);
+                    }}
                     let localPayload = null;
 
                     if (raw) {{
@@ -376,6 +447,11 @@ def app_home_html(
                             initialChecklistKey || (localPayload && localPayload.checklistKey)
                         ) || 'id'
                     );
+
+                    const file = {{
+                        itemId: pickValue(searchParams, hashParams, 'fileItemId', initialFile.itemId),
+                        versionId: pickValue(searchParams, hashParams, 'fileVersionId', initialFile.versionId)
+                    }};
 
                     const ts = Number((localPayload && localPayload.ts) || 0);
                     const age = ts ? (Date.now() - ts) : 0;
@@ -413,9 +489,10 @@ def app_home_html(
                                     'popup_diag_application_bx24_init_completed',
                                     {{ source: 'resolved_server_context' }}
                                 );
-                                rememberAndRedirect(
+                                openTarget(
                                     dialogId,
-                                    checklistKey
+                                    checklistKey,
+                                    file
                                 );
                             }});
                             return;
@@ -425,7 +502,7 @@ def app_home_html(
                             'popup_diag_application_bx24_unavailable',
                             {{ source: 'resolved_server_context' }}
                         );
-                        rememberAndRedirect(dialogId, checklistKey);
+                        openTarget(dialogId, checklistKey, file);
                         return;
                     }}
 
@@ -481,7 +558,7 @@ def app_home_html(
         </script>
     </head>
     <body style="margin:0;font-family:Arial,sans-serif;background:#f8fafc;color:#344054;display:flex;align-items:center;justify-content:center;min-height:100vh;">
-        <div style="padding:24px 28px;border:1px solid #e5e7eb;border-radius:14px;background:#fff;box-shadow:0 12px 30px rgba(15,23,42,0.08);font-size:14px;">
+        <div id="appHomeMessage" style="padding:24px 28px;border:1px solid #e5e7eb;border-radius:14px;background:#fff;box-shadow:0 12px 30px rgba(15,23,42,0.08);font-size:14px;">
             Открываем нужный чек-лист...
         </div>
     </body>

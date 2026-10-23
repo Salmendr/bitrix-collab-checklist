@@ -526,7 +526,7 @@
             }
 
             global.setTimeout(function () {
-                global.location.reload();
+                (global.ChecklistAuth ? global.ChecklistAuth.reload() : global.location.reload());
             }, 120);
         } catch (error) {
             console.log(

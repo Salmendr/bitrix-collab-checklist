@@ -1,3 +1,5 @@
+import hmac
+
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 
@@ -25,9 +27,10 @@ router = APIRouter()
 def verify_n8n_token(request: Request):
     expected_token = str(N8N_SHARED_TOKEN or "").strip()
 
-    # Если токен не задан в окружении — не блокируем локальную разработку.
+    # Без ключа в окружении интеграция закрыта: иначе любой мог бы менять
+    # контекст проекта. Задайте N8N_SHARED_TOKEN и тот же ключ в n8n.
     if not expected_token:
-        return
+        raise HTTPException(status_code=401, detail="N8N_SHARED_TOKEN is not set on the server")
 
     auth_header = str(request.headers.get("authorization") or "").strip()
     bearer_token = ""
@@ -41,7 +44,7 @@ def verify_n8n_token(request: Request):
         or str(request.query_params.get("token") or "").strip()
     )
 
-    if provided_token != expected_token:
+    if not hmac.compare_digest(provided_token.encode("utf-8"), expected_token.encode("utf-8")):
         raise HTTPException(status_code=401, detail="Invalid n8n token")
 
 

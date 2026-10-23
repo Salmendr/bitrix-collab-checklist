@@ -333,6 +333,19 @@
                 }
 
                 currentEditorReadyPromise = (async function () {
+                    // The employee checked by the server when the window
+                    // opened; Bitrix24 is asked only without the check.
+                    const checked = window.ChecklistAuth && window.ChecklistAuth.user;
+                    if (checked && checked.id) {
+                        currentEditor = {
+                            id: String(checked.id),
+                            name: String(checked.name || '')
+                        };
+                        window.currentEditor = currentEditor;
+                        currentEditorReady = true;
+                        updateDebugPanelAccess();
+                        return currentEditor;
+                    }
                     try {
                         const data = await popupBitrix.getCurrentUser();
 

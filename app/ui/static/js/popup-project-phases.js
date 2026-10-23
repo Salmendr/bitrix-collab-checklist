@@ -140,7 +140,7 @@
         try {
             const finished = await saveThen('phase_switch', async function () {
                 showOverlay('Открываем ' + text(phase.name) + '…');
-                global.location.assign(target);
+                (global.ChecklistAuth ? global.ChecklistAuth.go(target, false) : global.location.assign(target));
             });
             if (!finished) {
                 state.busy = false;
@@ -195,11 +195,11 @@
                         (error && error.message ? error.message : 'Не удалось добавить этап')
                     );
                     // The edit session was saved: start a fresh one here.
-                    global.location.reload();
+                    (global.ChecklistAuth ? global.ChecklistAuth.reload() : global.location.reload());
                     return;
                 }
                 const phase = result.phase || {};
-                global.location.assign(phaseUrl(text(phase.dialogId) || dialogId));
+                (global.ChecklistAuth ? global.ChecklistAuth.go(phaseUrl(text(phase.dialogId) || dialogId), false) : global.location.assign(phaseUrl(text(phase.dialogId) || dialogId)));
             });
             if (!finished) {
                 state.busy = false;

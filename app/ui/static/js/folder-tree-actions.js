@@ -285,7 +285,7 @@
                     });
                 }
                 notifyChecklist('', name);
-                global.location.reload();
+                (global.ChecklistAuth ? global.ChecklistAuth.reload() : global.location.reload());
             }
         });
     }
@@ -305,7 +305,7 @@
                         name
                     });
                     notifyChecklist(itemName, name);
-                    global.location.reload();
+                    (global.ChecklistAuth ? global.ChecklistAuth.reload() : global.location.reload());
                 }
             });
             return;
@@ -324,7 +324,7 @@
                     name
                 });
                 notifyChecklist(currentName, name);
-                global.location.replace(folderPageUrl(String(result.relativeFolder || '')));
+                (global.ChecklistAuth ? global.ChecklistAuth.go(folderPageUrl(String(result.relativeFolder || '')), true) : global.location.replace(folderPageUrl(String(result.relativeFolder || ''))));
             }
         });
     }
@@ -356,7 +356,7 @@
                     targetFolder
                 });
                 notifyChecklist(relativeFolder, String(result.relativeFolder || ''));
-                global.location.replace(folderPageUrl(String(result.relativeFolder || '')));
+                (global.ChecklistAuth ? global.ChecklistAuth.go(folderPageUrl(String(result.relativeFolder || '')), true) : global.location.replace(folderPageUrl(String(result.relativeFolder || ''))));
             }
         });
     }
@@ -405,7 +405,7 @@
                 }
                 await postJson(String(bootstrap.reorderItemApiUrl || ''), body);
                 notifyChecklist('', itemName, itemId, true);
-                global.location.reload();
+                (global.ChecklistAuth ? global.ChecklistAuth.reload() : global.location.reload());
             }
         });
     }
@@ -435,7 +435,7 @@
             const backUrl = String(bootstrap.backUrl || '').trim();
             if (backUrl) {
                 // A subitem: back to its parent item.
-                global.location.replace(backUrl);
+                (global.ChecklistAuth ? global.ChecklistAuth.go(backUrl, true) : global.location.replace(backUrl));
             } else {
                 core.returnToPopup({ forcePopup: true, preventDefault() {} });
             }
@@ -472,7 +472,7 @@
                 folder: relativeFolder
             });
             notifyChecklist(name, 'Удалена');
-            global.location.replace(folderPageUrl(parentFolder(relativeFolder)));
+            (global.ChecklistAuth ? global.ChecklistAuth.go(folderPageUrl(parentFolder(relativeFolder)), true) : global.location.replace(folderPageUrl(parentFolder(relativeFolder))));
         } catch (error) {
             alert(error && error.message ? error.message : 'Не удалось удалить папку');
             button.disabled = false;

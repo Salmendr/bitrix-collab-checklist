@@ -126,7 +126,7 @@
             if (state.busy) return;
             if (state.replaceId) {
                 // The old contents are already archived: show the result.
-                global.location.reload();
+                (global.ChecklistAuth ? global.ChecklistAuth.reload() : global.location.reload());
                 return;
             }
             overlay.remove();
@@ -222,7 +222,7 @@
                 }
             });
             if (!failed.length) {
-                global.location.reload();
+                (global.ChecklistAuth ? global.ChecklistAuth.reload() : global.location.reload());
                 return;
             }
             showError(

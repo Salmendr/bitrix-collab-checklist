@@ -299,7 +299,7 @@
                 archiveVersionName
             });
 
-            global.location.reload();
+            (global.ChecklistAuth ? global.ChecklistAuth.reload() : global.location.reload());
         } catch (error) {
             console.log(
                 'archive version delete error:',
