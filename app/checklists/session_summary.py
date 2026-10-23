@@ -857,7 +857,9 @@ def normalize_session_operations(
             old_value = initial_name or "Файл"
             new_value = "Удалён"
         else:
-            if initial_name == final_name:
+            # A new version under the same name is a replacement too; only a
+            # file nobody replaced is left out.
+            if initial_name == final_name and not _safe_int(state.get("replacementCount")):
                 continue
             field = "document-replacement"
             old_value = initial_name or "Файл"
