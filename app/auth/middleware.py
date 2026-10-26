@@ -12,6 +12,9 @@ key), static scripts and /health. The key comes:
 A request that changes something never takes the cookie, so another site
 cannot make the browser of an employee send such a request.
 
+A key of a window opened for viewing only (the platform portal) opens pages
+and reads data; every change and the service pages are refused with 403.
+
 The user of a request is the one of the key: userId/userName (or
 actingUserId/actingUserName when a request names both an actor and another
 person) in links, JSON bodies and forms are replaced by the checked ones.
@@ -46,6 +49,11 @@ PUBLIC_PREFIXES = ("/ui-static/",)
 ENTRY_POST_PATHS = frozenset({"/", "/textarea", "/launch"})
 # n8n is checked by its own key (N8N_SHARED_TOKEN).
 OWN_KEY_PREFIXES = ("/api/integrations/n8n/",)
+
+# What a view-only window may send besides GET: renewal of its keys and
+# diagnostics. Service pages stay closed to it.
+READ_ONLY_POST_PATHS = frozenset({"/api/auth/refresh", "/api/debug/event"})
+READ_ONLY_CLOSED_PREFIXES = ("/admin", "/api/admin/", "/debug/")
 
 MAX_REWRITTEN_BODY = 5 * 1024 * 1024
 MAX_INJECTED_PAGE = 8 * 1024 * 1024
@@ -137,6 +145,12 @@ def authenticate(scope) -> tuple[dict | None, str, str]:
     if not first_reason and method not in SAFE_METHODS and _cookie(scope):
         first_reason = "header_required"
     return None, "", first_reason or "missing"
+
+
+def read_only_allows(method: str, path: str) -> bool:
+    if path.startswith(READ_ONLY_CLOSED_PREFIXES):
+        return False
+    return method in SAFE_METHODS or path in READ_ONLY_POST_PATHS
 
 
 # ---------------------------------------------------------------- identity
@@ -337,6 +351,9 @@ class AuthMiddleware:
                 _report(scope, reason, path)
             else:
                 scope[SCOPE_KEY] = identity
+                if identity.get("readOnly") and not read_only_allows(method, path):
+                    await self._close(scope, send, "read_only", status=403)
+                    return
         _rewrite_query(scope, identity)
 
         if identity and method not in SAFE_METHODS:
@@ -345,7 +362,7 @@ class AuthMiddleware:
         set_cookie = bool(identity) and how in {"link", "beacon"} and method in SAFE_METHODS
         await self.app(scope, receive, self._wrap_send(scope, send, mode, set_cookie))
 
-    async def _close(self, scope, send, reason: str) -> None:
+    async def _close(self, scope, send, reason: str, status: int = 401) -> None:
         as_html = _wants_html(scope)
         body = closed_html(reason) if as_html else closed_json(reason)
         headers = [
@@ -356,7 +373,7 @@ class AuthMiddleware:
         csp = _csp_header("on")
         if csp:
             headers.append(csp)
-        await send({"type": "http.response.start", "status": 401, "headers": headers})
+        await send({"type": "http.response.start", "status": status, "headers": headers})
         await send({"type": "http.response.body", "body": body if scope.get("method") != "HEAD" else b""})
 
     async def _rewritten_receive(self, scope, receive, identity: dict):

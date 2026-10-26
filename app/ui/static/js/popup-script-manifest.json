@@ -1,5 +1,5 @@
 {
-  "stage": "8.26-portal",
+  "stage": "8.27-item-folders",
   "generatedAt": "2026-10-15T00:00:00+00:00",
   "loadOrder": [
     "checklist-host-diagnostics.js",
@@ -309,7 +309,8 @@
     "Stage 8.23: «Руководители» see «Перейти к Договору» and «Графики»; folders open read only in the view mode.",
     "Stage 8.24: the item Yandex button stays clickable and the server repairs stuck folder jobs; its menu opens next to the button after a redraw.",
     "Stage 8.25: only employees checked by Bitrix24 open the application; every page gets the keys of its window from the server (checklist-auth.js, put into the page, not a module), reloads and new windows carry a link key.",
-    "Stage 8.26: windows opened from the platform portal do not wait for Bitrix24 (popup-bitrix-bridge.js); closing such a window tells the portal page by a message."
+    "Stage 8.26: windows opened from the platform portal do not wait for Bitrix24 (popup-bitrix-bridge.js); closing such a window tells the portal page by a message.",
+    "Stage 8.27: a window of the platform portal is open for viewing only (no session, no lock, no inactivity close); an item dropped into the middle of another item row becomes its subitem (its subitems become folders), into the middle of a subitem row — its folder."
   ],
   "hashMode": "utf8-lf",
   "lineEndingNote": "Hashes are calculated from bytes written to disk. This is stable for Windows CRLF and Unix LF.",
@@ -383,16 +384,16 @@
       "bytes": 25202
     },
     "popup-session-enhancements.js": {
-      "sha256": "3514d0f29db6eb85b7ecd39a5ca17b703a934f2cc5c7a5b6f36c70ee2860345a",
-      "bytes": 51703
+      "sha256": "6c0e4e87ea276b7eeb56cca691cd7f24ca6bc27e5bc772af520c52193cc22eb9",
+      "bytes": 52844
     },
     "popup-edit-session.js": {
       "sha256": "8cd402644dc0c9724b46b22c725e19a572232fa81d7105a8d3c094de9d6c7c42",
       "bytes": 15502
     },
     "popup-inactivity.js": {
-      "sha256": "33cde6a8c908ac04b78a1bbdca5f97d8ac2dbacb7ba5d09f09662bd947fbe9c6",
-      "bytes": 6427
+      "sha256": "0a1428d3e4157d07c7295aee1701cac53f88b5cb859828ffa7f77e7ce9305230",
+      "bytes": 6629
     },
     "bitrix-user-picker.js": {
       "sha256": "e69ee7af0913383cda4f02ba83279c64fe4650715532eee91176c47cfe57b1c9",
@@ -411,8 +412,8 @@
       "bytes": 2436
     },
     "popup-item-ordering.js": {
-      "sha256": "2d4b9dd750467ffa114c0e7a9ebddbbd3b7f2bb01df31d679c93e3146fa40962",
-      "bytes": 35012
+      "sha256": "6baf8eb7d3686a25ff2aeba77f490da122e17ceca37bb0f0b0b4ba157a0e3349",
+      "bytes": 46057
     },
     "popup-item-status.js": {
       "sha256": "ff5b2d2952ba490254e7a8aa2882bcf9d81396df3c6282f806382db11f9e4d3a",
@@ -427,8 +428,8 @@
       "bytes": 10559
     },
     "popup-event-session.js": {
-      "sha256": "f157ba9da7f7a60478796aebefa61b025226f00d97f239f333f2a423c416d4ae",
-      "bytes": 5620
+      "sha256": "204349eb6c8be6e3373e81345e763eefc3adc8a4c8d8489d40418b4495b35e4e",
+      "bytes": 6296
     },
     "popup-renderer-common.js": {
       "sha256": "23de63d24a18c3d9204c230579af1f1027017a40192436e7f2f218ca16c00d9a",

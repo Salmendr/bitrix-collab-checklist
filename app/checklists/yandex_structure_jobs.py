@@ -26,6 +26,8 @@ SUPPORTED_STRUCTURE_ACTIONS = frozenset({
     "move_item_subfolder",
     "delete_item_subfolder",
     "replace_item_subfolder",
+    # An item that became a folder of another one (see item_folders.py).
+    "adopt_item_folder",
 })
 SUBFOLDER_JOB_SUFFIX = "::subfolders"
 SUBFOLDER_ACTIONS = frozenset({
@@ -34,6 +36,7 @@ SUBFOLDER_ACTIONS = frozenset({
     "delete_item_subfolder",
     # Folder replacement: old contents go to the Yandex trash first.
     "replace_item_subfolder",
+    "adopt_item_folder",
 })
 
 

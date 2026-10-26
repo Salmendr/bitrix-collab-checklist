@@ -1,6 +1,12 @@
 (function (global) {
     'use strict';
 
+    // A view-only window (the platform portal) has no session to save and
+    // is never closed for inactivity.
+    if (global.ChecklistAuth && global.ChecklistAuth.readOnly) {
+        return;
+    }
+
     const bootstrap = global.CHECKLIST_POPUP_BOOTSTRAP || {};
     const timeoutMs = Math.max(60000, Number(
         bootstrap.inactivityTimeoutSeconds || 1500

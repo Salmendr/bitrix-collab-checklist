@@ -361,21 +361,30 @@
         });
     }
 
-    // The item (or subitem) of this window: to another section or into
-    // another item. Same edit session; Yandex Disk follows after Save.
+    // The item (or subitem) of this window: to another section, into
+    // another item (becomes its subitem, its own subitems become folders)
+    // or into a subitem (becomes its folder). Same edit session; Yandex Disk
+    // follows after Save.
     async function moveItem() {
         const raw = Array.isArray(bootstrap.itemMoveTargets) ? bootstrap.itemMoveTargets : [];
         const isSubitem = bootstrap.isSubitem === true;
+        const hasSubitems = bootstrap.itemHasSubitems === true;
         const targets = raw.map(target => {
-            const isSection = target.kind === 'section';
+            const kind = String(target.kind || '');
+            const here = target.current ? ' — сейчас здесь' : '';
+            let label = 'Раздел «' + String(target.label || '') + '»' + here;
+            let depth = 0;
+            if (kind === 'item') {
+                label = 'внутрь пункта «' + String(target.label || '') + '»' + here;
+                depth = 1;
+            } else if (kind === 'subitem') {
+                label = 'внутрь подпункта «' + String(target.label || '') + '» — станет папкой';
+                depth = 2;
+            }
             return {
-                value: (isSection ? 'section:' : 'item:') + String(target.groupId) + ':' + String(target.itemId || ''),
-                label: isSection
-                    ? 'Раздел «' + String(target.label || '') + '»'
-                        + (target.current ? ' — сейчас здесь' : '')
-                    : 'внутрь пункта «' + String(target.label || '') + '»'
-                        + (target.current ? ' — сейчас здесь' : ''),
-                depth: isSection ? 0 : 1,
+                value: kind + ':' + String(target.groupId) + ':' + String(target.itemId || ''),
+                label,
+                depth,
                 disabled: !!target.current
             };
         });
@@ -387,15 +396,30 @@
             kind: 'targets',
             title: 'Переместить «' + itemName + '» в…',
             submitLabel: 'Переместить',
-            note: bootstrap.itemHasSubitems === true
-                ? 'Пункт с подпунктами можно перенести только в другой раздел.'
-                : 'Раздел — пункт станет обычным пунктом раздела; пункт — станет его подпунктом.',
+            note: hasSubitems
+                ? 'В пункт — станет его подпунктом, а подпункты станут папками (их статусы, план и факт будут удалены). В подпункт — станет папкой вместе с ними.'
+                : 'Раздел — станет обычным пунктом раздела; пункт — станет его подпунктом; подпункт — станет его папкой (статус, план и факт будут удалены).',
             targets,
             async onSubmit(value) {
                 const parts = String(value || '').split(':');
                 const kind = parts[0];
                 const groupId = Number(parts[1] || 0);
                 const hostId = parts.slice(2).join(':');
+                if (kind === 'subitem') {
+                    const result = await postJson(String(bootstrap.itemToFolderApiUrl || ''), {
+                        itemId,
+                        hostItemId: hostId
+                    });
+                    // The subitem got the files: the checklist refreshes it
+                    // (this item is gone).
+                    notifyChecklist('', itemName, hostId, true);
+                    // This item is a folder of the subitem now: open it there.
+                    const page = String(bootstrap.subitemPageUrlTemplate || '')
+                        .replace('__ITEM__', encodeURIComponent(hostId))
+                        + '&folder=' + encodeURIComponent(String(result.relativeFolder || ''));
+                    (global.ChecklistAuth ? global.ChecklistAuth.go(page, true) : global.location.replace(page));
+                    return;
+                }
                 const body = { itemId, targetGroupId: groupId };
                 if (kind === 'item') {
                     body.targetParentId = hostId;

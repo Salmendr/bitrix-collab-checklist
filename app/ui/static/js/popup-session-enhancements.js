@@ -158,6 +158,20 @@ if (contentEl && !document.getElementById('footerActions')) {
 const saveCloseBtn = document.getElementById('saveCloseBtn');
 const cancelBtn = document.getElementById('cancelBtn');
 
+// A window of the platform portal is open for viewing only: no edit session
+// and no lock; the server refuses changes from it anyway.
+function isReadOnlyWindow() {
+    return !!(window.ChecklistAuth && window.ChecklistAuth.readOnly);
+}
+
+if (isReadOnlyWindow()) {
+    if (saveCloseBtn) saveCloseBtn.style.display = 'none';
+    if (cancelBtn) {
+        cancelBtn.textContent = 'Закрыть';
+        cancelBtn.style.background = '#475467';
+    }
+}
+
 function normalizeFrontendChecklistKey(key) {
     return String(key || '').trim() || 'id';
 }
@@ -355,6 +369,10 @@ function isEditingAllowed() {
 }
 
 function getEditingBlockedReason() {
+    if (isReadOnlyWindow()) {
+        return 'Чек-лист открыт в режиме просмотра';
+    }
+
     if (popupFinalizationInProgress) {
         return 'Сессия уже завершается';
     }
@@ -401,6 +419,10 @@ async function requireEditingSession(
     const requireCurrentLock = (
         options.requireCurrentLock !== false
     );
+
+    if (isReadOnlyWindow()) {
+        throw new Error('Чек-лист открыт в режиме просмотра');
+    }
 
     if (popupFinalizationInProgress) {
         throw new Error('Сессия уже завершается');
@@ -533,6 +555,11 @@ function updateSaveStateBySession() {
         return;
     }
 
+    if (isReadOnlyWindow()) {
+        setSaveState('error', 'Только просмотр');
+        return;
+    }
+
     if (sessionState.status === 'failed') {
         setSaveState(
             'error',
@@ -592,7 +619,10 @@ function updateLockNotice() {
     const sessionState = getEditSessionRuntimeState();
 
     if (lockNoticeEl) {
-        if (popupFinalizationInProgress) {
+        if (isReadOnlyWindow()) {
+            lockNoticeEl.textContent = 'Режим просмотра';
+            lockNoticeEl.style.display = '';
+        } else if (popupFinalizationInProgress) {
             lockNoticeEl.textContent = 'Завершаем сессию...';
             lockNoticeEl.style.display = '';
         } else if (sessionState.status === 'failed') {
@@ -932,6 +962,9 @@ function stopLockHeartbeat() {
 }
 
 async function acquireChecklistLock(checklistKey = currentChecklistKey, silent = false) {
+    if (isReadOnlyWindow()) {
+        return null;
+    }
     const targetKey = String(checklistKey || '').trim() || 'id';
     const editorIdentity = getCurrentEditorIdentity();
     const payload = {
@@ -1143,6 +1176,9 @@ async function recoverPopupSessionAndCurrentLock() {
 
 function startLockHeartbeat() {
     stopLockHeartbeat();
+    if (isReadOnlyWindow()) {
+        return;
+    }
     lockHeartbeatTimer = setInterval(async function () {
         if (
             !currentEditorReady
@@ -1199,6 +1235,9 @@ function startLockHeartbeat() {
 }
 
 async function releaseChecklistLock(checklistKey = currentChecklistKey, useBeacon = false) {
+    if (isReadOnlyWindow()) {
+        return null;
+    }
     const targetKey = String(checklistKey || '').trim() || 'id';
     const isOwner = currentChecklistLock.checklistKey === targetKey && currentChecklistLock.owned;
     const lockId = isOwner ? currentChecklistLock.lockId : '';

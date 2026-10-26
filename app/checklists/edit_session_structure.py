@@ -57,6 +57,8 @@ SUBFOLDER_OPERATION_ACTIONS = {
     "checklist_folder_move": "move_item_subfolder",
     "checklist_folder_delete": "delete_item_subfolder",
     "checklist_folder_replace": "replace_item_subfolder",
+    # An item that became a folder of this item (item_folders.py).
+    "checklist_item_to_folder": "adopt_item_folder",
 }
 
 
@@ -79,7 +81,8 @@ def _prepare_subfolder_jobs_in_transaction(conn, *, session_id: str, now: str) -
               'checklist_folder_create',
               'checklist_folder_move',
               'checklist_folder_delete',
-              'checklist_folder_replace'
+              'checklist_folder_replace',
+              'checklist_item_to_folder'
           )
         ORDER BY sequence_no ASC
         """,
@@ -117,6 +120,8 @@ def _prepare_subfolder_jobs_in_transaction(conn, *, session_id: str, now: str) -
                 "relativeFolder": clean_cell_value(payload.get("relativeFolder")),
                 "sourceFolder": clean_cell_value(payload.get("sourceFolder")),
                 "targetFolder": clean_cell_value(payload.get("targetFolder")),
+                "sourcePath": clean_cell_value(payload.get("sourcePath")),
+                "innerMoves": payload.get("innerMoves") or [],
             },
             now=now,
         )

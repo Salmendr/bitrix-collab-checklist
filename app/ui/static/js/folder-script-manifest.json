@@ -1,5 +1,5 @@
 {
-  "stage": "8.25-auth",
+  "stage": "8.27-item-folders",
   "hashMode": "utf8-lf",
   "modules": {
     "checklist-window-channel.js": {
@@ -63,8 +63,8 @@
       "bytes": 6389
     },
     "folder-tree-actions.js": {
-      "sha256": "9d2adeacdd3d14a81245ee64cae773b0a21a3d3c1a172c67af79b6ca78f7b97c",
-      "bytes": 24764
+      "sha256": "9bbe501c0e0d36c1be276cf5cc661747e9e9aa4a4535f0ca3e51e72d7031d48e",
+      "bytes": 26258
     },
     "folder-replace.js": {
       "sha256": "ff00013a62a43ca1e482be0cc21f264b4a21f8abbc77ee6e9b1ccf5363c1312a",
@@ -135,7 +135,8 @@
     "Stage 8.19 adds «Заменить папку»: the old contents go to the archive, the dropped folder takes their place.",
     "Stage 8.22: menu «Перейти по ссылке / Скопировать ссылку» for Yandex links.",
     "Stage 8.23: a folder window opened in the view mode stays read only with every folder opened from it.",
-    "Stage 8.25: only employees checked by Bitrix24 open the application; every page gets the keys of its window from the server (checklist-auth.js, put into the page, not a module), reloads and new windows carry a link key."
+    "Stage 8.25: only employees checked by Bitrix24 open the application; every page gets the keys of its window from the server (checklist-auth.js, put into the page, not a module), reloads and new windows carry a link key.",
+    "Stage 8.27: «Переместить» offers subitems: the item becomes their folder; an item with subitems may go into another item (they become its folders)."
   ],
   "generatedAt": "2026-10-15T00:00:00+00:00"
 }

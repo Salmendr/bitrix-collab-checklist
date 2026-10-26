@@ -9,8 +9,10 @@ request. The portal answers with the employee and their ID in Bitrix24:
                   "BITRIX_USER_ID": "138"}}
   401 {"error": "invalid_token" | "expired_token", "error_description": "..."}
 
-The employee gets the rights of BITRIX_USER_ID, as if the window was opened
-from Bitrix24.
+A window of the portal is open for viewing only, whoever opened it: the
+server does not need the employee and acts for one viewer (PORTAL_VIEWER),
+the key of the window refuses every change. The data of the employee in the
+answer is only written to the log.
 """
 from __future__ import annotations
 
@@ -31,6 +33,9 @@ from app.logging_utils import write_debug_log
 
 
 REQUEST_TIMEOUT_SECONDS = 10
+# Until the users of the portal and Bitrix24 are matched, every window of the
+# portal acts for this viewer.
+PORTAL_VIEWER = {"userId": "1", "userName": "Компания ТОЛК"}
 # The portal gives a token for one opening; a reload of the window (F5 sends
 # the form again) is served by the check already made.
 CACHE_SECONDS = 300
@@ -115,21 +120,13 @@ def verify_portal_auth(auth_id: str, domain: str) -> dict:
         _plain_http_logged.add(domain)
         write_debug_log("auth_portal_plain_http", {"domain": domain})
     user = _ask(url, auth_id)
-    portal_user_id = str(user.get("ID") or "").strip()
-    user_id = str(user.get("BITRIX_USER_ID") or "").strip()
-    if not user_id.isdigit() or int(user_id) <= 0:
-        raise PortalAuthError("portal_no_bitrix_user", f"portal user {portal_user_id or '?'}")
-
-    name = " ".join(
-        part for part in (str(user.get("NAME") or "").strip(), str(user.get("LAST_NAME") or "").strip()) if part
-    )
     identity = {
-        "userId": user_id,
-        "userName": name or f"ID {user_id}",
+        **PORTAL_VIEWER,
         "source": "portal",
+        "readOnly": True,
         "authAt": int(now),
         "domain": domain,
-        "portalUserId": portal_user_id,
+        "portalUserId": str(user.get("ID") or "").strip(),
     }
     with _cache_lock:
         for stale in [k for k, (expires, _) in _cache.items() if expires <= now]:

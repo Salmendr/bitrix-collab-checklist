@@ -1401,20 +1401,47 @@ async def api_checklist_reorder_items(request: Request):
 
             source_parent_id = parent_id_of(target_item)
             target_parent_id = ""
+            children_conversion = {}
             if "targetParentId" in payload:
                 target_parent_id = clean_cell_value(payload.get("targetParentId"))
                 if target_parent_id:
-                    if children_of(items, item_id):
-                        return JSONResponse(
-                            {"ok": False, "error": "Пункт с подпунктами нельзя сделать подпунктом"},
-                            status_code=400,
-                        )
                     target_parent = valid_parent(target_parent_id)
                     if not target_parent:
                         return JSONResponse(
                             {"ok": False, "error": "Пункт для переноса подпункта недоступен"},
                             status_code=400,
                         )
+                    if children_of(items, item_id):
+                        # Items are two levels deep: the subitems of the
+                        # moved item become its folders (item_folders.py).
+                        from app.checklists.item_folders import (
+                            ItemFolderError,
+                            convert_children_into_folders,
+                            is_not_required,
+                        )
+                        if not transaction:
+                            return JSONResponse(
+                                {"ok": False, "error": "Активная сессия редактирования не готова", "editSessionError": True},
+                                status_code=409,
+                            )
+                        if is_not_required(target_item, not_required_group_id):
+                            return JSONResponse(
+                                {"ok": False, "error": "Сначала верните пункт из «Не требуется»"},
+                                status_code=400,
+                            )
+                        try:
+                            children_conversion = convert_children_into_folders(
+                                items,
+                                target_item,
+                                dialog_id=dialog_id,
+                                checklist_key=config.key,
+                                session_id=transaction["sessionId"],
+                            )
+                        except ItemFolderError as exc:
+                            return JSONResponse(
+                                {"ok": False, "error": str(exc)},
+                                status_code=400,
+                            )
                     target_group_id = int(target_parent.get("group") or 0)
             elif (
                 source_group_id == not_required_group_id
@@ -1812,6 +1839,19 @@ async def api_checklist_reorder_items(request: Request):
                 },
                 operation_id=session_document_operation_id,
             )
+            if children_conversion:
+                record_or_restore_checklist_change(
+                    transaction=transaction,
+                    dialog_id=dialog_id,
+                    checklist_key=config.key,
+                    operation_type="checklist_item_to_folder",
+                    before={"item": before_item},
+                    after={"item": updated_item},
+                    before_checklist=before_checklist,
+                    final_checklist=saved,
+                    item_id=item_id,
+                    payload=children_conversion,
+                )
 
         structure_job = None
         structure_warning = ""
@@ -1913,6 +1953,7 @@ async def api_checklist_reorder_items(request: Request):
             "previousName": name_before_move,
             "finalName": clean_cell_value(response_item.get("name")),
             "nameAdjusted": name_adjusted,
+            "convertedItems": children_conversion.get("convertedItems") or [],
             "yandexStructureJob": structure_job or {},
             "documentsDeleted": bool(
                 delete_documents_on_restore

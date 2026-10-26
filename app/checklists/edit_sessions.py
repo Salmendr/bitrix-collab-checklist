@@ -1083,6 +1083,15 @@ def complete_edit_session_commit(
             )
         )
 
+        # Items that became folders: the history of their files follows.
+        from app.checklists.item_folders import (
+            retarget_converted_records_in_transaction,
+        )
+        retarget_converted_records_in_transaction(
+            conn,
+            session_id=record["session_id"],
+        )
+
         cur = conn.execute("""
             UPDATE edit_sessions
             SET status = 'committed',

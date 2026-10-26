@@ -216,6 +216,26 @@ body.item-order-dragging .subitem-add-trigger {
     outline-color: rgba(34, 197, 94, 0.6);
 }
 
+/* Drop an item onto a subitem: it becomes a folder of that subitem. */
+.row.item-order-drop-folder {
+    outline: 2px dashed rgba(217, 119, 6, 0.8);
+    outline-offset: -3px;
+    background: rgba(245, 158, 11, 0.08);
+}
+
+/* What the drop will do, under the name of the dragged item. */
+.item-order-drag-ghost-hint {
+    display: block;
+    margin-top: 3px;
+    color: #b54708;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.item-order-drag-ghost-hint[hidden] {
+    display: none;
+}
+
 /* Folders of a subitem: one row per top-level folder. */
 .doc-folders {
     display: flex;

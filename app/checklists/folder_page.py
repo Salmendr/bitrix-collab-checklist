@@ -433,9 +433,10 @@ def item_move_targets(checklist_key: str, items: list[dict], item: dict) -> list
     """Where an item or a subitem can be moved inside its checklist.
 
     A section makes it an item of that section; an item of a section makes
-    it a subitem of that item. An item with its own subitems moves only
-    between sections (items are two levels deep at most). «Не требуется»
-    is reached through the status, not from here.
+    it a subitem of that item (its own subitems become its folders); a
+    subitem makes it a folder of that subitem (with the folders of its
+    subitems), see item_folders.py. «Не требуется» is reached through the
+    status, not from here.
     """
     from app.checklists.utils import normalize_status
 
@@ -443,7 +444,21 @@ def item_move_targets(checklist_key: str, items: list[dict], item: dict) -> list
     item_id = clean_cell_value(item.get("id"))
     current_group = int(item.get("group") or 0)
     current_parent = parent_id_of(item)
-    can_become_subitem = not children_of(items, item_id)
+    # A standard item of the template is never removed, so never a folder.
+    can_become_folder = bool(current_parent or item.get("isCustom", False))
+
+    def active(candidate: dict) -> bool:
+        return normalize_status(candidate.get("status")) != "Не требуется"
+
+    def by_order(candidates):
+        return sorted(
+            candidates,
+            key=lambda candidate: (
+                int(candidate.get("order") or 100000),
+                clean_cell_value(candidate.get("id")),
+            ),
+        )
+
     targets: list[dict] = []
     for group in config.groups:
         if config.is_not_required_group(group.id):
@@ -455,20 +470,12 @@ def item_move_targets(checklist_key: str, items: list[dict], item: dict) -> list
             "label": clean_cell_value(config.get_group_title(group.id)) or f"Раздел {group.id}",
             "current": not current_parent and group.id == current_group,
         })
-        if not can_become_subitem:
-            continue
-        hosts = sorted(
-            (
-                candidate for candidate in items
-                if int(candidate.get("group") or 0) == group.id
-                and not parent_id_of(candidate)
-                and clean_cell_value(candidate.get("id")) != item_id
-                and normalize_status(candidate.get("status")) != "Не требуется"
-            ),
-            key=lambda candidate: (
-                int(candidate.get("order") or 100000),
-                clean_cell_value(candidate.get("id")),
-            ),
+        hosts = by_order(
+            candidate for candidate in items
+            if int(candidate.get("group") or 0) == group.id
+            and not parent_id_of(candidate)
+            and clean_cell_value(candidate.get("id")) != item_id
+            and active(candidate)
         )
         for host in hosts:
             host_id = clean_cell_value(host.get("id"))
@@ -479,4 +486,19 @@ def item_move_targets(checklist_key: str, items: list[dict], item: dict) -> list
                 "label": clean_cell_value(host.get("name")) or "Пункт",
                 "current": host_id == current_parent,
             })
+            if not can_become_folder:
+                continue
+            for sub in by_order(
+                child for child in children_of(items, host_id)
+                if clean_cell_value(child.get("id")) != item_id
+                and active(child)
+            ):
+                targets.append({
+                    "kind": "subitem",
+                    "groupId": group.id,
+                    "itemId": clean_cell_value(sub.get("id")),
+                    "parentLabel": clean_cell_value(host.get("name")) or "Пункт",
+                    "label": clean_cell_value(sub.get("name")) or "Подпункт",
+                    "current": False,
+                })
     return targets

@@ -1,4 +1,5 @@
-"""Yandex Disk side of folders inside an item (create / move / delete).
+"""Yandex Disk side of folders inside an item (create / move / delete, and
+the folder of an item that became a folder of this one).
 
 Jobs are recorded when an edit session is committed and executed by the
 structure worker in order, before the item's pending file uploads (uploads
@@ -106,6 +107,32 @@ def _rebase_item_documents(
         conn.close()
 
 
+def _move_folder(dialog_id: str, source: str, target: str, label: str) -> bool:
+    """Move a folder unless it is already there. A folder that never reached
+    Yandex Disk (e.g. empty) is created at its new place instead."""
+    from app.checklists.yandex_upload_preflight import ensure_upload_folder
+    from app.yandex_disk.client import (
+        yandex_disk_move_path,
+        yandex_disk_try_get_resource_meta,
+    )
+
+    source_meta = yandex_disk_try_get_resource_meta(source) if source else None
+    target_meta = yandex_disk_try_get_resource_meta(target)
+    if source_meta and target_meta:
+        raise RuntimeError(
+            "На Яндекс.Диске уже есть папка «"
+            + label
+            + "». Перенос остановлен, чтобы не смешать файлы."
+        )
+    if source_meta:
+        ensure_upload_folder(dialog_id, target.rsplit("/", 1)[0])
+        yandex_disk_move_path(source, target, overwrite=False)
+        return True
+    if not target_meta:
+        ensure_upload_folder(dialog_id, target)
+    return False
+
+
 def execute_subfolder_job(job: dict) -> dict:
     from app.checklists.yandex_upload_preflight import ensure_upload_folder
     from app.checklists.yandex_subfolders import find_item
@@ -202,5 +229,45 @@ def execute_subfolder_job(job: dict) -> dict:
             "trashed": trashed,
         })
         return {"ok": True, "folderPath": path, "trashed": trashed}
+
+    if action == "adopt_item_folder":
+        # The folder of the converted item comes under its new name (main
+        # move), then the folders of its subitems lose their numbers
+        # (inner moves, relative to the folder of this item). Repeating the
+        # job after a failure finds the done steps in place.
+        steps = []
+        source_path = clean_cell_value(result.get("sourcePath")).rstrip("/")
+        target_relative = normalize_relative_folder(result.get("targetFolder"), strict=False)
+        if target_relative:
+            steps.append((source_path, join_yandex_folder(base, target_relative), target_relative))
+        for move in result.get("innerMoves") or []:
+            if not isinstance(move, dict):
+                continue
+            to_relative = normalize_relative_folder(move.get("to"), strict=False)
+            if not to_relative:
+                continue
+            from_relative = normalize_relative_folder(move.get("from"), strict=False)
+            source = (
+                join_yandex_folder(base, from_relative)
+                if from_relative
+                else clean_cell_value(move.get("fromPath")).rstrip("/")
+            )
+            steps.append((source, join_yandex_folder(base, to_relative), to_relative))
+        moved = rebased = 0
+        for source, target, label in steps:
+            if source == target:
+                continue
+            if _move_folder(dialog_id, source, target, label):
+                moved += 1
+            if source:
+                rebased += _rebase_item_documents(dialog_id, checklist_key, item_id, source, target)
+        write_debug_log("yandex_item_folder_adopted", {
+            "jobId": clean_cell_value(job.get("job_id")),
+            "itemId": item_id,
+            "steps": [[source, target] for source, target, _ in steps],
+            "moved": moved,
+            "rebasedPaths": rebased,
+        })
+        return {"ok": True, "folderPath": base, "moved": moved, "rebasedPaths": rebased}
 
     raise RuntimeError(f"Unsupported subfolder action: {action}")

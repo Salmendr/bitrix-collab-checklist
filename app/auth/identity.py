@@ -15,6 +15,12 @@ def establish(request, identity: dict) -> None:
     request.scope[SCOPE_KEY] = dict(identity)
 
 
+def is_read_only(request) -> bool:
+    """A window opened for viewing only (the platform portal)."""
+    identity = current_identity(request)
+    return bool(identity and identity.get("readOnly"))
+
+
 def verified_actor(request, user_id: str = "", user_name: str = "") -> tuple[str, str]:
     """The checked employee instead of the one a form names.
 

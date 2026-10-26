@@ -77,15 +77,18 @@
             '.item-order-drop-before,'
             + '.item-order-drop-after,'
             + '.item-order-drop-group,'
-            + '.item-order-drop-into'
+            + '.item-order-drop-into,'
+            + '.item-order-drop-folder'
         ).forEach(element => {
             element.classList.remove(
                 'item-order-drop-before',
                 'item-order-drop-after',
                 'item-order-drop-group',
-                'item-order-drop-into'
+                'item-order-drop-into',
+                'item-order-drop-folder'
             );
         });
+        setGhostHint('');
         currentDropTarget = null;
         currentDropSignature = '';
         if (!options.keepPlaceholder) {
@@ -225,13 +228,35 @@
         dragGhost = document.createElement('div');
         dragGhost.className = 'item-order-drag-ghost';
         dragGhost.setAttribute('aria-hidden', 'true');
-        dragGhost.textContent = itemName;
+        const nameLine = document.createElement('span');
+        nameLine.textContent = itemName;
+        const hintLine = document.createElement('span');
+        hintLine.className = 'item-order-drag-ghost-hint';
+        hintLine.hidden = true;
+        dragGhost.append(nameLine, hintLine);
         dragGhost.style.width = `${Math.min(
             420,
             Math.max(180, sourceNameWidth)
         )}px`;
         document.body.appendChild(dragGhost);
         return dragGhost;
+    }
+
+    // A drop "into" a row keeps the gap of the placeholder, only unseen:
+    // rows that jumped back would put another target under the pointer.
+    function keepLayoutForInto() {
+        clearDropHighlights({ keepPlaceholder: true });
+        if (placeholder) {
+            placeholder.style.visibility = 'hidden';
+        }
+    }
+
+    // What the drop will do, under the name of the dragged item.
+    function setGhostHint(text) {
+        const hint = dragGhost && dragGhost.querySelector('.item-order-drag-ghost-hint');
+        if (!hint) return;
+        hint.textContent = String(text || '');
+        hint.hidden = !text;
     }
 
     function updateDragGhost(clientX, clientY) {
@@ -251,6 +276,7 @@
 
     function insertPlaceholder(groupBlock, referenceRow, after) {
         const marker = createPlaceholder();
+        marker.style.visibility = '';
         if (!groupBlock) return;
 
         if (referenceRow && referenceRow.parentNode === groupBlock) {
@@ -302,12 +328,76 @@
         )) || null;
     }
 
-    // Top-level items drop between top-level rows only; subitems drop into
-    // a list of subitems, onto another item row (becomes its last subitem)
-    // or into "Не требуется".
-    function resolveDropContext(element) {
-        const empty = { zone: null, row: null, intoParentRow: null };
+    // The middle of a row means "inside it", its edges "before / after".
+    const INTO_EDGE_SHARE = 0.25;
+
+    function inMiddleBand(row, clientY) {
+        const rect = row.getBoundingClientRect();
+        const edge = rect.height * INTO_EDGE_SHARE;
+        return clientY > rect.top + edge && clientY < rect.bottom - edge;
+    }
+
+    function isNotRequiredItem(item) {
+        return String(item && item.status || '').trim() === 'Не требуется'
+            || Number(item && item.group || 0) === currentNotRequiredGroupId();
+    }
+
+    function activeChildrenOf(itemId) {
+        return (Array.isArray(items) ? items : []).filter(entry => (
+            parentIdOf(entry) === String(itemId || '')
+            && String(entry && entry.status || '').trim() !== 'Не требуется'
+        ));
+    }
+
+    // Another item row the dragged item may become a subitem of.
+    function canHostSubitem(row) {
+        const dragged = getItem(pointerState && pointerState.itemId);
+        const host = getItem(row && row.dataset.itemId);
+        return !!(
+            dragged
+            && host
+            && String(host.id) !== String(dragged.id)
+            && !parentIdOf(host)
+            && !row.classList.contains('not-required')
+            && !isNotRequiredItem(host)
+            && !isNotRequiredItem(dragged)
+        );
+    }
+
+    // A subitem row the dragged item may become a folder of (items are two
+    // levels deep: deeper they are folders, see item_folders.py).
+    function folderHostRow(element, clientY) {
+        const row = element.closest('.row.subitem-row[data-item-id]');
+        if (!row || !pointerState) return null;
+        const dragged = getItem(pointerState.itemId);
+        const host = getItem(row.dataset.itemId);
+        if (
+            !dragged
+            || !host
+            || String(host.id) === String(dragged.id)
+            || parentIdOf(host) === String(dragged.id)
+            || isNotRequiredItem(dragged)
+            || isNotRequiredItem(host)
+            // A standard item of the template never becomes a folder.
+            || (!parentIdOf(dragged) && !dragged.isCustom)
+        ) {
+            return null;
+        }
+        return inMiddleBand(row, clientY) ? row : null;
+    }
+
+    // Top-level items drop between top-level rows or into the middle of
+    // another item row (becomes its subitem); subitems drop into a list of
+    // subitems, onto another item row (becomes its last subitem) or into
+    // "Не требуется". The middle of a subitem row makes either a folder of
+    // that subitem.
+    function resolveDropContext(element, clientY) {
+        const empty = { zone: null, row: null, intoParentRow: null, intoSubitemRow: null };
         if (!element || !element.closest || !pointerState) return empty;
+        const folderHost = folderHostRow(element, clientY);
+        if (folderHost) {
+            return { zone: null, row: null, intoParentRow: null, intoSubitemRow: folderHost };
+        }
         let zone = resolveGroupBlock(element);
         let row = element.closest('.row[data-item-id]');
 
@@ -327,7 +417,16 @@
             if (row && zone && row.parentNode !== zone) {
                 row = null;
             }
-            return { zone, row, intoParentRow: null };
+            if (
+                row
+                && zone
+                && element.closest('.row[data-item-id]') === row
+                && inMiddleBand(row, clientY)
+                && canHostSubitem(row)
+            ) {
+                return { zone: null, row: null, intoParentRow: row, intoSubitemRow: null };
+            }
+            return { zone, row, intoParentRow: null, intoSubitemRow: null };
         }
 
         if (zone && zone.dataset.orderParentId) {
@@ -371,9 +470,30 @@
         if (!pointerState || !pointerState.started) return;
 
         const element = document.elementFromPoint(clientX, clientY);
-        const resolved = resolveDropContext(element);
+        const resolved = resolveDropContext(element, clientY);
         const row = resolved.row;
         const groupBlock = resolved.zone;
+
+        if (resolved.intoSubitemRow) {
+            const hostRow = resolved.intoSubitemRow;
+            const signature = `folder:${hostRow.dataset.itemId || ''}`;
+            if (signature === currentDropSignature) {
+                return;
+            }
+            keepLayoutForInto();
+            hostRow.classList.add('item-order-drop-folder');
+            const host = getItem(hostRow.dataset.itemId);
+            setGhostHint('станет папкой в «' + String(host && host.name || '') + '»');
+            currentDropTarget = {
+                groupBlock: null,
+                row: null,
+                after: true,
+                intoParentRow: null,
+                intoSubitemRow: hostRow,
+            };
+            currentDropSignature = signature;
+            return;
+        }
 
         if (resolved.intoParentRow) {
             const parentRow = resolved.intoParentRow;
@@ -381,8 +501,10 @@
             if (signature === currentDropSignature) {
                 return;
             }
-            clearDropHighlights();
+            keepLayoutForInto();
             parentRow.classList.add('item-order-drop-into');
+            const parent = getItem(parentRow.dataset.itemId);
+            setGhostHint('внутрь «' + String(parent && parent.name || '') + '»');
             currentDropTarget = {
                 groupBlock: null,
                 row: null,
@@ -768,6 +890,15 @@
                 `${getGroupTitle(oldGroupId)} / ${oldPosition}`,
                 `${getGroupTitle(newGroupId)} / ${newPosition}`
             );
+            (Array.isArray(result.convertedItems) ? result.convertedItems : []).forEach(converted => {
+                pushSessionChange(
+                    itemId,
+                    updatedItem.name || item.name || '',
+                    'item-to-folder',
+                    String(converted && converted.name || ''),
+                    'папка «' + String(converted && converted.folder || '') + '»'
+                );
+            });
             debugLog('checklist_item_reordered', {
                 itemId,
                 sourceGroupId: oldGroupId,
@@ -782,6 +913,98 @@
         setSaveState('', result.nameAdjusted && result.finalName
             ? `Сохранено как «${result.finalName}»`
             : 'Сохранено');
+        renderAll();
+        return result;
+    }
+
+    function quoteNames(list) {
+        return list.map(entry => '«' + String(entry && entry.name || '') + '»').join(', ');
+    }
+
+    // An item with subitems dropped into another item: its subitems become
+    // its folders and lose their status, plan and fact.
+    function confirmSubitemsBecomeFolders(item, parent, children) {
+        return global.confirm(
+            '«' + String(item.name || '') + '» станет подпунктом «'
+            + String(parent && parent.name || '') + '».\n\n'
+            + 'Его подпункты ' + quoteNames(children)
+            + ' станут папками внутри «' + String(item.name || '') + '»: '
+            + 'их статусы, план и факт будут удалены, файлы и их версии сохранятся.\n\n'
+            + 'До сохранения перенос можно отменить кнопкой «Отмена».'
+        );
+    }
+
+    async function submitItemToFolder(itemId, host) {
+        const item = getItem(itemId);
+        if (!item || !host) return null;
+        const children = activeChildrenOf(itemId);
+        const confirmed = global.confirm(
+            '«' + String(item.name || '') + '» станет папкой внутри подпункта «'
+            + String(host.name || '') + '».\n\n'
+            + (children.length
+                ? 'Его подпункты ' + quoteNames(children) + ' станут вложенными папками.\n\n'
+                : '')
+            + 'Статус, план и факт будут удалены, файлы и их версии сохранятся.\n\n'
+            + 'До сохранения перенос можно отменить кнопкой «Отмена».'
+        );
+        if (!confirmed) {
+            renderAll();
+            return null;
+        }
+
+        setSaveState('saving', 'Переносим...');
+        const editSessionId = await requireEditingSession('перенос пункта');
+        const identity = (
+            typeof getCurrentEditorIdentity === 'function'
+                ? getCurrentEditorIdentity()
+                : { userId: '', userName: 'Пользователь' }
+        );
+        const response = await fetch(appUrl('api/checklist/item-to-folder'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                dialogId,
+                checklistKey: currentChecklistKey,
+                itemId,
+                hostItemId: String(host.id || ''),
+                orderVersion: Number(currentOrderVersion || 0),
+                sessionId: editSessionId,
+                requireEditSession: true,
+                actingUserId: identity.userId || '',
+                actingUserName: identity.userName || 'Пользователь',
+            }),
+        });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok || !result.ok) {
+            if (result && result.orderConflict) {
+                await reloadCurrentChecklistFromServer();
+                renderAll();
+            }
+            throw new Error(result.error || 'Не удалось перенести пункт');
+        }
+
+        if (Array.isArray(result.items)) {
+            items = result.items;
+            rawItems = result.items;
+        }
+        currentOrderVersion = Number(result.orderVersion || currentOrderVersion || 0);
+        (Array.isArray(result.convertedItems) ? result.convertedItems : []).forEach(converted => {
+            pushSessionChange(
+                String(host.id || ''),
+                String(host.name || ''),
+                'item-to-folder',
+                String(converted && converted.name || ''),
+                'папка «' + String(converted && converted.folder || '') + '»'
+            );
+        });
+        debugLog('checklist_item_to_folder', {
+            itemId,
+            hostItemId: String(host.id || ''),
+            relativeFolder: String(result.relativeFolder || ''),
+            convertedCount: Array.isArray(result.convertedItems) ? result.convertedItems.length : 0,
+            orderVersion: currentOrderVersion,
+        });
+        setSaveState('', 'Сохранено');
         renderAll();
         return result;
     }
@@ -879,6 +1102,27 @@
         let targetPosition = 0;
         let targetParentId;
 
+        if (wasStarted && dropTarget && dropTarget.intoSubitemRow) {
+            const host = getItem(dropTarget.intoSubitemRow.dataset.itemId);
+            cleanupPointerState();
+            if (!host) return;
+            try {
+                await submitItemToFolder(state.itemId, host);
+            } catch (error) {
+                console.error('item to folder failed:', error);
+                if (typeof renderAll === 'function') {
+                    renderAll();
+                }
+                setSaveState(
+                    'error',
+                    error && error.message
+                        ? error.message
+                        : 'Не удалось перенести пункт'
+                );
+            }
+            return;
+        }
+
         if (wasStarted && dropTarget && dropTarget.intoParentRow) {
             const parentItem = getItem(dropTarget.intoParentRow.dataset.itemId);
             if (parentItem) {
@@ -922,6 +1166,21 @@
             return;
         }
 
+        if (targetParentId && sourceItem && !parentIdOf(sourceItem)) {
+            const children = activeChildrenOf(sourceItem.id);
+            if (
+                children.length
+                && !confirmSubitemsBecomeFolders(sourceItem, getItem(targetParentId), children)
+            ) {
+                cleanupPointerState();
+                return;
+            }
+        }
+
+        if (dropTarget && dropTarget.intoParentRow) {
+            // Its unseen gap is not where the item goes.
+            removePlaceholder();
+        }
         const visuallyPlaced = placeSourceAtPlaceholder(state);
         clearDropHighlights();
         document.body.classList.remove('item-order-dragging');

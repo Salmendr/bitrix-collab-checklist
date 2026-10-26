@@ -11,7 +11,7 @@ REASON_TEXT = {
     "portal_not_configured": "Вход не настроен на сервере: не задан домен портала Битрикс24.",
     "portal_unreachable": "Не удалось проверить вход: портал не ответил. Попробуйте открыть чек-лист ещё раз.",
     "portal_rejected": "Портал не подтвердил вход. Откройте чек-лист с портала ещё раз.",
-    "portal_no_bitrix_user": "Ваша учётная запись на портале не связана с Битрикс24. Обратитесь к администратору портала.",
+    "read_only": "Чек-лист открыт в режиме просмотра: изменения и служебные страницы недоступны.",
 }
 DEFAULT_TEXT = "Откройте чек-лист из Битрикс24."
 
@@ -21,6 +21,13 @@ def reason_text(reason: str) -> str:
 
 
 def closed_json(reason: str) -> bytes:
+    if reason == "read_only":
+        # The window stays open: only this action is refused.
+        return json.dumps({
+            "ok": False,
+            "error": reason_text(reason),
+            "readOnly": True,
+        }, ensure_ascii=False).encode("utf-8")
     return json.dumps({
         "ok": False,
         "error": "Доступ закрыт. " + reason_text(reason),

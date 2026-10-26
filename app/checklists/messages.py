@@ -58,6 +58,7 @@ MESSAGE_SECTION_LABELS = {
     "folder-create": "Созданы папки",
     "folder-move": "Изменены папки",
     "folder-delete": "Удалены папки",
+    "item-to-folder": "Пункты стали папками",
 }
 
 
@@ -104,6 +105,7 @@ def split_changes(changes: list) -> dict:
         "folder-create": [],
         "folder-move": [],
         "folder-delete": [],
+        "item-to-folder": [],
     }
 
     for change in changes or []:
@@ -136,7 +138,7 @@ def split_changes(changes: list) -> dict:
             groups["add-item"].append(change)
         elif field == "delete-item":
             groups["delete-item"].append(change)
-        elif field in {"folder-upload", "folder-replace", "folder-create", "folder-move", "folder-delete"}:
+        elif field in {"folder-upload", "folder-replace", "folder-create", "folder-move", "folder-delete", "item-to-folder"}:
             groups[field].append(change)
 
     return groups
@@ -258,7 +260,7 @@ def build_change_left_label(field: str, checklist_key: str) -> str:
         return "Файл"
     if field == "archive-delete":
         return "Архив"
-    if field in {"add-item", "delete-item"}:
+    if field in {"add-item", "delete-item", "item-to-folder"}:
         return "Пункт"
     if field in {"folder-upload", "folder-replace", "folder-create", "folder-move", "folder-delete"}:
         return "Папка"
@@ -293,7 +295,7 @@ def build_change_emoji(field: str, new_value: str, checklist_key: str) -> str:
         return "➕"
     if field == "delete-item":
         return "🗑️"
-    if field in {"folder-upload", "folder-replace", "folder-create", "folder-move"}:
+    if field in {"folder-upload", "folder-replace", "folder-create", "folder-move", "item-to-folder"}:
         return "📁"
     if field == "folder-delete":
         return "🗑️"
@@ -495,6 +497,7 @@ def build_recent_changes_sections(changes: list, checklist_key: str) -> list[dic
         "folder-create",
         "folder-move",
         "folder-delete",
+        "item-to-folder",
         "archive-delete",
         "document",
         "add-item",

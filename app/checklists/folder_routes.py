@@ -250,6 +250,104 @@ def _move_change(payload: dict, item: dict, *, rename: bool) -> dict:
     }
 
 
+@router.post("/api/checklist/item-to-folder")
+async def api_item_to_folder(request: Request):
+    """An item or a subitem moved inside a subitem becomes its folder (with
+    the folders of its own subitems), see item_folders.py."""
+    from app.checklists.item_folders import (
+        CONVERSION_OPERATION,
+        ItemFolderError,
+        convert_item_into_folder,
+    )
+
+    payload = await request.json()
+    dialog_id = normalize_dialog_id(payload.get("dialogId"))
+    config = get_checklist_config(normalize_checklist_key(payload.get("checklistKey")))
+    item_id = clean_cell_value(payload.get("itemId"))
+    host_id = clean_cell_value(payload.get("hostItemId"))
+    if not dialog_id or not item_id or not host_id:
+        return JSONResponse({"ok": False, "error": "dialogId, itemId and hostItemId are required"}, status_code=400)
+    payload = {**payload, "requireEditSession": True}
+    try:
+        transaction = begin_optional_edit_session_change(
+            payload,
+            dialog_id=dialog_id,
+            checklist_key=config.key,
+        )
+        async with checklist_mutation_guard(dialog_id, config.key):
+            data = get_checklist(dialog_id, config.key)
+            before_checklist = copy.deepcopy(data)
+            expected_version = int(payload.get("orderVersion") or 0)
+            current_version = int(data.get("orderVersion") or 0)
+            if expected_version and current_version and expected_version != current_version:
+                return JSONResponse({
+                    "ok": False,
+                    "error": "Порядок пунктов уже изменён в другом окне. Обновите чек-лист и повторите перенос.",
+                    "orderConflict": True,
+                }, status_code=409)
+            items = [dict(entry) for entry in data.get("items") or [] if isinstance(entry, dict)]
+            item = _find_item(items, item_id)
+            host = _find_item(items, host_id)
+            if item is None or host is None:
+                return JSONResponse({"ok": False, "error": "item not found"}, status_code=404)
+            before_host = copy.deepcopy(host)
+            conversion = convert_item_into_folder(
+                items,
+                item,
+                host,
+                dialog_id=dialog_id,
+                checklist_key=config.key,
+                session_id=transaction["sessionId"],
+                not_required_group_id=int(config.not_required_group_id),
+            )
+            ensure_checklist_snapshot(
+                session_id=transaction["sessionId"],
+                dialog_id=dialog_id,
+                checklist_key=config.key,
+                data=before_checklist,
+            )
+            data["items"] = items
+            saved = save_checklist(
+                dialog_id,
+                normalize_checklist_data(data, config.key),
+                config.key,
+            )
+            saved_host = _find_item(saved.get("items") or [], host_id) or host
+            operation = record_or_restore_checklist_change(
+                transaction=transaction,
+                dialog_id=dialog_id,
+                checklist_key=config.key,
+                operation_type=CONVERSION_OPERATION,
+                before={"item": before_host},
+                after={"item": saved_host},
+                before_checklist=before_checklist,
+                final_checklist=saved,
+                item_id=host_id,
+                payload=conversion,
+            )
+        return JSONResponse({
+            "ok": True,
+            "dialogId": dialog_id,
+            "checklistKey": config.key,
+            "item": saved_host,
+            "items": saved.get("items") or [],
+            "orderVersion": int(saved.get("orderVersion") or 0),
+            "relativeFolder": conversion["targetFolder"],
+            "convertedItems": conversion["convertedItems"],
+            "operation": operation,
+        })
+    except ItemFolderError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+    except Exception as exc:
+        write_debug_log("checklist_item_to_folder_failed", {
+            "dialogId": dialog_id,
+            "itemId": item_id,
+            "hostItemId": host_id,
+            "error": str(exc),
+        })
+        return checklist_edit_session_error_response(exc)
+
+
 @router.post("/api/checklist/folders/rename")
 async def api_folder_rename(request: Request):
     return await _run_folder_change(

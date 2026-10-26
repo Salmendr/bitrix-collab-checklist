@@ -40,6 +40,7 @@ def api_auth_me(request: Request):
             "name": (identity or {}).get("userName", ""),
         },
         "source": (identity or {}).get("source", ""),
+        "readOnly": bool((identity or {}).get("readOnly")),
         "expiresAt": (identity or {}).get("expiresAt", 0),
     })
 

@@ -26,7 +26,7 @@ from urllib.parse import quote
 
 from fastapi import APIRouter, Request, UploadFile, File, Form
 
-from app.auth.identity import verified_actor
+from app.auth.identity import is_read_only, verified_actor
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 
 from app.settings import (
@@ -2148,7 +2148,7 @@ def _build_folder_manage_html(
             button("folder-delete", "Удалить папку", "Удалить папку со всеми файлами", danger=True)
         else:
             button("folder-rename", "Переименовать", "Переименовать подпункт")
-            button("item-move", "Переместить", "Перенести подпункт в другой пункт или в раздел")
+            button("item-move", "Переместить", "Перенести подпункт в другой пункт, в подпункт (станет папкой) или в раздел")
             if item_deletable:
                 button("item-delete", "Удалить подпункт", "Удалить подпункт со всеми папками и файлами", danger=True)
     buttons.append(
@@ -2179,6 +2179,7 @@ def _safe_json_for_inline_script(value) -> str:
     response_class=HTMLResponse,
 )
 def api_checklist_folder(
+    request: Request,
     dialogId: str = "",
     itemId: str = "",
     checklistKey: str = "id",
@@ -2192,7 +2193,11 @@ def api_checklist_folder(
 
     # Opened from a checklist in the view mode: no changes in this window
     # and in the folders opened from it, whatever happens to the session.
-    read_only = clean_cell_value(readOnly).lower() in {"1", "true", "yes"}
+    # A window of the platform portal is always in the view mode.
+    read_only = (
+        clean_cell_value(readOnly).lower() in {"1", "true", "yes"}
+        or is_read_only(request)
+    )
     if read_only:
         sessionId = ""
 
@@ -2363,7 +2368,7 @@ def api_checklist_folder(
     ui_static_base_url = (
         f"{app_base_path}/ui-static"
     )
-    ui_asset_version = "8.25-auth"
+    ui_asset_version = "8.27-item-folders"
     popup_url = (
         f"{app_base_path}/popup"
         f"?dialogId={quote(dialog_id, safe='')}"
@@ -2459,6 +2464,7 @@ def api_checklist_folder(
         "addItemApiUrl": f"{app_base_path}/api/checklist/add-item",
         "renameItemApiUrl": f"{app_base_path}/api/checklist/rename-item",
         "reorderItemApiUrl": f"{app_base_path}/api/checklist/reorder-items",
+        "itemToFolderApiUrl": f"{app_base_path}/api/checklist/item-to-folder",
         "deleteItemApiUrl": f"{app_base_path}/api/checklist/delete-item",
         "itemDeletable": item_deletable,
         "itemHasSubitems": bool(children_of(items, item_id)),

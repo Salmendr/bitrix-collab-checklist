@@ -237,6 +237,8 @@
             name: String(data.user && data.user.name || '')
         }),
         source: String(data.source || ''),
+        // A window of the platform portal: viewing only.
+        readOnly: data.readOnly === true,
         link: link,
         token: function () { return token; }
     });

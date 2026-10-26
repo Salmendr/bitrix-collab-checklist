@@ -18,6 +18,12 @@
 
         if (cancelBtn) {
             cancelBtn.addEventListener('click', async function () {
+                if (isReadOnlyWindow()) {
+                    // Nothing to cancel in the view mode: the button closes.
+                    closePopupWindow();
+                    return;
+                }
+
                 debugLog('popup_cancel_clicked', {
                     dialogId,
                     checklistKey: currentChecklistKey,
@@ -64,10 +70,15 @@
             throw new Error('popup-edit-session.js is not initialized');
         }
 
-        await editSessionApi.start();
-        await acquireChecklistLock(currentChecklistKey, true);
-        startLockHeartbeat();
-        updateLockNotice();
+        if (isReadOnlyWindow()) {
+            // The view mode: the window reads the checklist only.
+            updateLockNotice();
+        } else {
+            await editSessionApi.start();
+            await acquireChecklistLock(currentChecklistKey, true);
+            startLockHeartbeat();
+            updateLockNotice();
+        }
 
         if (
             String(projectRootYandexPath || '').trim()
@@ -135,7 +146,17 @@
         return sessionActive && lockOwned;
     }
 
+    let readOnlyStartup = null;
+
     function ensureStarted() {
+        if (isReadOnlyWindow()) {
+            // One startup without a session; later calls change nothing.
+            if (!readOnlyStartup) {
+                readOnlyStartup = startPopupSession();
+            }
+            return readOnlyStartup;
+        }
+
         if (isPopupSessionReady()) {
             return Promise.resolve(getActiveEditSessionId());
         }

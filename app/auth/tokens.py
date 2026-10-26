@@ -11,6 +11,9 @@ Three kinds of keys:
   "b" - a beacon key, 10 minutes; added to the address of the request a
         closing window sends (sendBeacon cannot set headers). Addresses end
         up in server logs, so they never carry the 12 hour key.
+
+A key of a window opened for viewing only (the platform portal) carries
+"ro": the server refuses every change made with it.
 """
 from __future__ import annotations
 
@@ -92,6 +95,8 @@ def issue(identity: dict, *, kind: str = "s", seconds: int | None = None, sid: s
         "iat": now,
         "exp": expires,
     }
+    if identity.get("readOnly"):
+        payload["ro"] = 1
     body = "v1." + _b64(json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
     return body + "." + _sign(body)
 
@@ -126,6 +131,7 @@ def verify(token: str, *, kinds: tuple[str, ...] = ("s",)) -> dict:
         "kind": payload.get("k"),
         "authAt": int(payload.get("at") or payload.get("iat") or 0),
         "expiresAt": int(payload.get("exp") or 0),
+        "readOnly": bool(payload.get("ro")),
     }
 
 
@@ -142,5 +148,6 @@ def client_bundle(identity: dict) -> dict:
         "linkExpiresAt": verify(link_token, kinds=("l",))["expiresAt"],
         "user": {"id": str(identity.get("userId") or ""), "name": str(identity.get("userName") or "")},
         "source": str(identity.get("source") or "bitrix"),
+        "readOnly": bool(identity.get("readOnly")),
         "expiresAt": verify(session_token)["expiresAt"],
     }

@@ -441,6 +441,22 @@ def normalize_session_operations(
         before_item = _item_from(operation, "before")
         after_item = _item_from(operation, "after")
 
+        if operation_type == "checklist_item_to_folder":
+            # Items that became folders of this item: one line each; their
+            # files are not reported as added to it.
+            for converted in payload.get("convertedItems") or []:
+                converted = _dict(converted)
+                added_items.pop(clean_cell_value(converted.get("id")), None)
+                folder_changes.append({
+                    "sequenceNo": sequence_no,
+                    "field": "item-to-folder",
+                    "itemId": item_id,
+                    "itemName": item_name or clean_cell_value(payload.get("hostItemName")),
+                    "oldValue": clean_cell_value(converted.get("name")),
+                    "newValue": "папка «" + clean_cell_value(converted.get("folder")) + "»",
+                })
+            continue
+
         if operation_type == "checklist_item_delete":
             removed_ids = {
                 clean_cell_value(value)
