@@ -1270,7 +1270,11 @@ function isEmbeddedBitrixPopup() {
 }
 
 function closePopupWindow() {
-    const embeddedInBitrix = isEmbeddedBitrixPopup();
+    const fromPortal = Boolean(
+        window.ChecklistAuth
+        && window.ChecklistAuth.source === 'portal'
+    );
+    const embeddedInBitrix = !fromPortal && isEmbeddedBitrixPopup();
     const hostDiagnostics = window.ChecklistHostDiagnostics;
 
     function recordPopupCloseDiagnostic(event, payload) {
@@ -1317,6 +1321,17 @@ function closePopupWindow() {
                 'popup_diag_close_application_error',
                 { error: String(error) }
             );
+        }
+    }
+
+    // The page of the platform portal decides itself how to close the frame
+    // it shows the checklist in; it is told so by a message.
+    if (fromPortal && isEmbeddedBitrixPopup()) {
+        try {
+            window.parent.postMessage({ source: 'checklist', event: 'close' }, '*');
+            recordPopupCloseDiagnostic('popup_diag_close_portal_message', {});
+        } catch (error) {
+            console.log('portal close message error:', error);
         }
     }
 

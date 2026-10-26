@@ -1,5 +1,5 @@
 {
-  "stage": "8.25-auth",
+  "stage": "8.26-portal",
   "generatedAt": "2026-10-15T00:00:00+00:00",
   "loadOrder": [
     "checklist-host-diagnostics.js",
@@ -308,7 +308,8 @@
     "Stage 8.22: header of fixed cells, «Графики», menu «Перейти по ссылке / Скопировать ссылку» for Yandex buttons.",
     "Stage 8.23: «Руководители» see «Перейти к Договору» and «Графики»; folders open read only in the view mode.",
     "Stage 8.24: the item Yandex button stays clickable and the server repairs stuck folder jobs; its menu opens next to the button after a redraw.",
-    "Stage 8.25: only employees checked by Bitrix24 open the application; every page gets the keys of its window from the server (checklist-auth.js, put into the page, not a module), reloads and new windows carry a link key."
+    "Stage 8.25: only employees checked by Bitrix24 open the application; every page gets the keys of its window from the server (checklist-auth.js, put into the page, not a module), reloads and new windows carry a link key.",
+    "Stage 8.26: windows opened from the platform portal do not wait for Bitrix24 (popup-bitrix-bridge.js); closing such a window tells the portal page by a message."
   ],
   "hashMode": "utf8-lf",
   "lineEndingNote": "Hashes are calculated from bytes written to disk. This is stable for Windows CRLF and Unix LF.",
@@ -330,8 +331,8 @@
       "bytes": 1717
     },
     "popup-bitrix-bridge.js": {
-      "sha256": "4520f60cca1342a15731a433e4b6dca3330421c20fdb0fcf6a59b42ba6b4d2d6",
-      "bytes": 7342
+      "sha256": "c8d74a2772b8eb867e8759e30c468c221b944d11cb33cc02f1e4cc1f9929162b",
+      "bytes": 7585
     },
     "checklist-window-channel.js": {
       "sha256": "d45014ff74333e2be74c591b6b965fd17c520cd9077bc0b27057ded071dab625",
@@ -382,8 +383,8 @@
       "bytes": 25202
     },
     "popup-session-enhancements.js": {
-      "sha256": "35a6e6cf9ebc15d7e46d5614ae3b864de5313e7562518b2f182124bef712f51b",
-      "bytes": 51096
+      "sha256": "3514d0f29db6eb85b7ecd39a5ca17b703a934f2cc5c7a5b6f36c70ee2860345a",
+      "bytes": 51703
     },
     "popup-edit-session.js": {
       "sha256": "8cd402644dc0c9724b46b22c725e19a572232fa81d7105a8d3c094de9d6c7c42",

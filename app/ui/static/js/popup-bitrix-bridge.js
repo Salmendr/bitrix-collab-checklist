@@ -19,6 +19,11 @@
     }
 
     function isAvailable() {
+        // A window of the platform portal is not inside Bitrix24: BX24.init
+        // would only wait for its timeout there.
+        if (global.ChecklistAuth && global.ChecklistAuth.source === 'portal') {
+            return false;
+        }
         return Boolean(
             global.BX24
             && typeof global.BX24.init === 'function'

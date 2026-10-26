@@ -61,9 +61,9 @@
             bar.style.cssText = 'position:fixed;left:0;right:0;top:0;z-index:100000;'
                 + 'padding:10px 16px;background:#b42318;color:#fff;font:14px Arial,sans-serif;'
                 + 'text-align:center;box-shadow:0 4px 12px rgba(0,0,0,.2);';
-            bar.textContent = reason === 'expired'
-                ? 'Время входа истекло. Закройте окно и откройте чек-лист заново из Битрикс24.'
-                : 'Доступ закрыт. Закройте окно и откройте чек-лист заново из Битрикс24.';
+            const place = String(data.source || '') === 'portal' ? 'с портала' : 'из Битрикс24';
+            bar.textContent = (reason === 'expired' ? 'Время входа истекло.' : 'Доступ закрыт.')
+                + ' Закройте окно и откройте чек-лист заново ' + place + '.';
             global.document.body.appendChild(bar);
         };
         if (global.document.body) show();

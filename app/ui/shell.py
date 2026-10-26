@@ -87,7 +87,16 @@ def app_home_html(
     *,
     initial_file_item_id: str = "",
     initial_file_version_id: str = "",
+    bitrix_host: bool = True,
 ):
+    # A window of the platform portal is not inside Bitrix24: without the
+    # library the page opens the checklist at once instead of waiting for
+    # BX24.init, which would never answer there.
+    bx24_script = (
+        '<script src="https://api.bitrix24.com/api/v1/"></script>'
+        if bitrix_host
+        else ""
+    )
     initial_dialog_id_json = json.dumps(
         normalize_dialog_id(initial_dialog_id or ""),
         ensure_ascii=False
@@ -110,7 +119,7 @@ def app_home_html(
     <head>
         <meta charset="utf-8">
         <title>Чек-листы проекта</title>
-        <script src="https://api.bitrix24.com/api/v1/"></script>
+        {bx24_script}
         <script>
             window.CHECKLIST_HOST_DIAGNOSTICS_CONFIG = Object.freeze({{
                 surface: 'application_frame',

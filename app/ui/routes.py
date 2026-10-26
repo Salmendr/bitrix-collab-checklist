@@ -29,7 +29,8 @@ from app.ui.shell import (
 )
 from app.ui.request_diagnostics import write_ui_request_diagnostic
 from app.auth.bitrix import BitrixAuthError, verify_bitrix_auth
-from app.auth.config import auth_mode, bitrix_portal_domains
+from app.auth.config import auth_mode, bitrix_portal_domains, is_portal_domain
+from app.auth.portal import PortalAuthError, verify_portal_auth
 from app.auth.identity import establish
 from app.auth.pages import closed_html
 from app.logging_utils import write_debug_log
@@ -60,8 +61,17 @@ def safe_form_context(form: dict) -> str:
     )
 
 
-async def authorize_bitrix_entry(request: Request, form: dict) -> HTMLResponse | None:
-    """Check the AUTH_ID Bitrix24 opened the window with.
+def entry_domain(request: Request, form: dict) -> str:
+    return str(
+        request.query_params.get("DOMAIN")
+        or form.get("DOMAIN")
+        or ""
+    ).strip()
+
+
+async def authorize_entry(request: Request, form: dict) -> HTMLResponse | None:
+    """Check the key the window was opened with: the AUTH_ID of Bitrix24 or
+    the token of the platform portal, told apart by DOMAIN.
 
     Returns the closed page when the window must not open; otherwise the
     request carries the checked employee (the page gets its keys).
@@ -70,15 +80,14 @@ async def authorize_bitrix_entry(request: Request, form: dict) -> HTMLResponse |
     if mode == "off":
         return None
     auth_id = str(form.get("AUTH_ID") or form.get("auth") or "").strip()
-    domain = str(
-        request.query_params.get("DOMAIN")
-        or form.get("DOMAIN")
-        or ""
-    ).strip()
+    domain = entry_domain(request, form)
+    from_portal = is_portal_domain(domain)
+    event = "auth_portal_entry" if from_portal else "auth_bitrix_entry"
+    verify = verify_portal_auth if from_portal else verify_bitrix_auth
     try:
-        identity = await run_in_threadpool(verify_bitrix_auth, auth_id, domain)
-    except BitrixAuthError as exc:
-        write_debug_log("auth_bitrix_entry_rejected", {
+        identity = await run_in_threadpool(verify, auth_id, domain)
+    except (BitrixAuthError, PortalAuthError) as exc:
+        write_debug_log(event + "_rejected", {
             "path": request.url.path,
             "reason": exc.reason,
             "detail": exc.detail,
@@ -90,10 +99,11 @@ async def authorize_bitrix_entry(request: Request, form: dict) -> HTMLResponse |
             return HTMLResponse(closed_html(exc.reason).decode("utf-8"), status_code=401)
         return None
     establish(request, identity)
-    write_debug_log("auth_bitrix_entry_accepted", {
+    write_debug_log(event + "_accepted", {
         "path": request.url.path,
         "userId": identity["userId"],
         "domain": identity.get("domain", ""),
+        "portalUserId": identity.get("portalUserId", ""),
     })
     return None
 
@@ -306,7 +316,7 @@ def home_get(
 @router.post("/", response_class=HTMLResponse)
 async def home_post(request: Request):
     form = dict(await request.form())
-    closed = await authorize_bitrix_entry(request, form)
+    closed = await authorize_entry(request, form)
     if closed is not None:
         return closed
 
@@ -334,6 +344,8 @@ async def home_post(request: Request):
         raw_context,
         initial_file_item_id=extract_option_from_form(form, "fileItemId"),
         initial_file_version_id=extract_option_from_form(form, "fileVersionId"),
+        # Outside Bitrix24 the page must not wait for it.
+        bitrix_host=not is_portal_domain(entry_domain(request, form)),
     )
 
 
@@ -362,7 +374,7 @@ async def launch_post(request: Request):
     )
     # An application handler set to /launch is checked like the main one.
     form = dict(await request.form())
-    closed = await authorize_bitrix_entry(request, form)
+    closed = await authorize_entry(request, form)
     if closed is not None:
         return closed
     return app_home_html()
@@ -487,7 +499,7 @@ def textarea_get(request: Request, dialogId: str = ""):
 @router.post("/textarea", response_class=HTMLResponse)
 async def textarea_post(request: Request):
     form = dict(await request.form())
-    closed = await authorize_bitrix_entry(request, form)
+    closed = await authorize_entry(request, form)
     if closed is not None:
         return closed
     dialog_id = extract_dialog_id_from_form(form)

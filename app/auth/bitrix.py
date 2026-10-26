@@ -46,7 +46,9 @@ def _call(domain: str, method: str, auth_id: str) -> dict:
             timeout=REQUEST_TIMEOUT_SECONDS,
         )
     except requests.RequestException as exc:
-        raise BitrixAuthError("bitrix_unreachable", str(exc)) from exc
+        # The error names the address, with the key in it.
+        detail = str(exc).replace(auth_id, "<hidden>") if auth_id else str(exc)
+        raise BitrixAuthError("bitrix_unreachable", detail) from exc
     try:
         data = response.json()
     except ValueError:

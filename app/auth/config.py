@@ -18,6 +18,20 @@ APP_AUTH_SECRET         secret of the keys of the application; by default
 APP_AUTH_SESSION_HOURS  life of the key of the application, 12 by default.
 AUTH_FRAME_ANCESTORS    pages allowed to show the application inside them,
                         by default the portal domains; "*" - any page.
+
+The platform portal (our own, not Bitrix24) opens the application the same
+way with its own token:
+PORTAL_DOMAIN           addresses of the platform portal whose tokens are
+                        accepted, comma separated: "portal.example.ru" (https)
+                        or "http://192.168.90.68" (a test address of the local
+                        network may go over http). The portal sends this
+                        address without the scheme in DOMAIN; only these
+                        pages may show the application inside them too.
+PORTAL_AUTH_URL         where the token is checked; by default
+                        <address of the portal>/rest/user.current.json.
+PORTAL_AUTH_METHOD      GET (default, ?auth=<token>) or POST (auth=<token> in
+                        a form body).
+PORTAL_AUTH_KEY         sent to the portal in the header X-App-Key, if set.
 """
 from __future__ import annotations
 
@@ -87,4 +101,38 @@ def frame_ancestors() -> str:
     if configured:
         return configured
     sources = ["'self'"] + [f"https://{domain}" for domain in bitrix_portal_domains()]
+    sources += [origin for origin in portal_origins().values() if origin not in sources]
     return " ".join(sources)
+
+
+def portal_origins() -> dict[str, str]:
+    """Domain of the platform portal -> its origin with the scheme."""
+    origins: dict[str, str] = {}
+    for part in (os.getenv("PORTAL_DOMAIN", "") or "").split(","):
+        raw = part.strip()
+        domain = normalize_domain(raw)
+        if domain:
+            scheme = "http" if raw.lower().startswith("http://") else "https"
+            origins.setdefault(domain, f"{scheme}://{domain}")
+    return origins
+
+
+def is_portal_domain(domain: str) -> bool:
+    found = normalize_domain(domain)
+    return bool(found) and found in portal_origins()
+
+
+def portal_auth_url(domain: str) -> str:
+    configured = (os.getenv("PORTAL_AUTH_URL", "") or "").strip()
+    if configured:
+        return configured
+    origin = portal_origins().get(normalize_domain(domain), "")
+    return f"{origin}/rest/user.current.json" if origin else ""
+
+
+def portal_auth_method() -> str:
+    return "POST" if (os.getenv("PORTAL_AUTH_METHOD", "") or "").strip().upper() == "POST" else "GET"
+
+
+def portal_auth_key() -> str:
+    return (os.getenv("PORTAL_AUTH_KEY", "") or "").strip()
