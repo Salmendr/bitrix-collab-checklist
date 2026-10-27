@@ -12,7 +12,7 @@
             });
         </script>
         <script src="ui-static/js/checklist-host-diagnostics.js?v=8.19-folder-replace"></script>
-        <link rel="stylesheet" href="ui-static/css/popup-bootstrap.css?v=8.27-item-folders">
+        <link rel="stylesheet" href="ui-static/css/popup-bootstrap.css?v=8.28-object-analysis">
         <!-- Stage 6.2: popup styles are loaded through popup-bootstrap.css. -->
     </head>
     <body>
@@ -52,6 +52,8 @@
                         <div id="saveState" class="save-state">Сохранено</div>
                     </div>
                 </div>
+                <!-- «Анализ состояния объекта»: leaders, administrators and GIPs. -->
+                <div id="objectAnalysisPanel" class="oa-panel" hidden></div>
                 <div class="content">
                     <div id="debugPanel" style="
                         display:none;
@@ -206,4 +208,6 @@
         <script src="ui-static/js/popup-render-orchestrator.js?v=8.21-project-object"></script>
         <script src="ui-static/js/popup-project-phases.js?v=8.25-auth"></script>
         <script src="ui-static/js/popup-project-object.js?v=8.23-leaders"></script>
+        <script src="ui-static/js/object-analysis-ui.js?v=8.28-object-analysis"></script>
+        <script src="ui-static/js/popup-object-analysis.js?v=8.28-object-analysis"></script>
         <script src="ui-static/js/popup-init.js?v=8.15.5-id-yandex-folder-return"></script>

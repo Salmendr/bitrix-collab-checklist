@@ -693,6 +693,21 @@ def contract_card(objects: list[dict], main_id: int) -> dict:
     }
 
 
+def contract_state(dialog_id: str) -> dict:
+    """«Договор» of the object analysis: the main object of the project has
+    a contract with the customer (cached cards, no call to Bitrix)."""
+    bitrix = _load_bitrix(_base(dialog_id))
+    objects = _cached_objects(bitrix)
+    main_id = _main_object_id(bitrix, objects)
+    if not main_id:
+        return {"hasContract": False, "hint": "У проекта нет объекта Битрикс24"}
+    card = contract_card(objects, main_id)
+    if not card["id"]:
+        return {"hasContract": False, "hint": card["hint"]}
+    title = f"Договор #{card['id']}" + (f" — {card['title']}" if card["title"] else "")
+    return {"hasContract": True, "hint": title}
+
+
 def _with_url(card: dict, origin: str) -> dict:
     path = clean_cell_value(card.get("path"))
     return {**card, "url": (origin + path) if (origin and path) else ""}

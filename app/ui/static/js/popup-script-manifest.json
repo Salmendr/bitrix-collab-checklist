@@ -1,6 +1,6 @@
 {
-  "stage": "8.27-item-folders",
-  "generatedAt": "2026-10-15T00:00:00+00:00",
+  "stage": "8.28-object-analysis",
+  "generatedAt": "2026-10-27T00:00:00+00:00",
   "loadOrder": [
     "checklist-host-diagnostics.js",
     "popup-bootstrap.js",
@@ -51,6 +51,8 @@
     "popup-render-orchestrator.js",
     "popup-project-phases.js",
     "popup-project-object.js",
+    "object-analysis-ui.js",
+    "popup-object-analysis.js",
     "popup-init.js"
   ],
   "extractedModules": {
@@ -506,6 +508,14 @@
     "popup-project-object.js": {
       "sha256": "e62487ba59db8bda518e03a509e84fadf37cd5eb3ba0431be77b88943d70aa06",
       "bytes": 18245
+    },
+    "object-analysis-ui.js": {
+      "sha256": "e421a0b5ecc2254148acdb1b15ed1f749e793a072f02cbfa945269e65205b443",
+      "bytes": 35987
+    },
+    "popup-object-analysis.js": {
+      "sha256": "b762e317598e6c5c123bc43e8266394d47fbd51c0c4f7545ef1fbabb97376813",
+      "bytes": 5316
     },
     "checklist-link-menu.js": {
       "sha256": "4d4f9a736e171ae4ad528428cd7e56f4c252b5f133855f6595dfb64d99ec816c",

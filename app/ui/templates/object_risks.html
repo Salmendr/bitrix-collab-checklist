@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>[[PAGE_TITLE]]</title>
+    <link rel="stylesheet" href="[[OBJECT_ANALYSIS_CSS_URL]]">
+</head>
+<body class="oa-page">
+    <main class="oa-page-shell">
+        <header class="oa-page-header">
+            <h1 class="oa-page-title">Оценка рисков по объектам</h1>
+            <span class="oa-page-note" id="oaPageNote">Итоговая оценка — среднее трёх худших оценок; самая низкая вероятность реализации считается ещё одной оценкой</span>
+        </header>
+        <section class="oa-page-content">
+            <div id="oaRisks" class="oa-risk-list" aria-busy="true">
+                <div class="oa-loading">Загружаем таблицы…</div>
+            </div>
+        </section>
+    </main>
+    <script>
+        window.OBJECT_ANALYSIS_BOOTSTRAP = Object.freeze([[PAGE_BOOTSTRAP_JSON]]);
+    </script>
+    <script src="[[OBJECT_ANALYSIS_UI_JS_URL]]"></script>
+    <script src="[[PAGE_JS_URL]]"></script>
+</body>
+</html>

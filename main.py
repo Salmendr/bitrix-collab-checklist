@@ -23,6 +23,7 @@ from app.checklists.checklist_routes import router as checklist_router
 from app.checklists.folder_routes import router as folder_router
 from app.checklists.phase_routes import router as phase_router
 from app.checklists.project_object_routes import router as project_object_router
+from app.checklists.object_analysis_routes import router as object_analysis_router
 from app.checklists.document_routes import router as document_router
 from app.checklists.archive_routes import router as archive_router
 from app.checklists.version_link_routes import (
@@ -181,6 +182,7 @@ app.include_router(yandex_structure_router)
 app.include_router(folder_router)
 app.include_router(phase_router)
 app.include_router(project_object_router)
+app.include_router(object_analysis_router)
 # Страховочный вызов при импорте модуля
 init_db()
 ensure_notification_delivery_schema()
