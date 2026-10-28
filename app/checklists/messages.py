@@ -81,7 +81,16 @@ def build_progress_text(data: dict) -> str:
         if display_status_text(item.get("status")) == "Есть"
     ]
 
-    percent = round((len(completed_items) / len(active_items)) * 100) if active_items else 0
+    done, total = len(completed_items), len(active_items)
+    if normalize_checklist_key(data.get("checklistKey") or "id") == "opr":
+        # The OPR progress counts the items of Граданализ too.
+        from app.checklists.grad_analysis import progress_counts
+
+        dialog_id = normalize_dialog_id(data.get("resolvedDialogId") or data.get("dialogId") or "")
+        if dialog_id:
+            ga = progress_counts(dialog_id)
+            done, total = done + ga["done"], total + ga["total"]
+    percent = round((done / total) * 100) if total else 0
     return f"📊Прогресс: {percent}%"
 
 

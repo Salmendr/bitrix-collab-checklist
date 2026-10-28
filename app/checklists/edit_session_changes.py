@@ -778,6 +778,8 @@ def refresh_edit_session_expected_state(
             FROM edit_session_checklists
             WHERE session_id = ?
               AND status IN ('active', 'locked')
+              -- Граданализ keeps its own draft, it is not a checklist.
+              AND checklist_key <> 'ga'
             ORDER BY checklist_key ASC
         """, (normalized_session_id,)).fetchall()
     finally:

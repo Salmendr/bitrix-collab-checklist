@@ -18,7 +18,7 @@ from app.ui.template_engine import render_ui_template
 
 router = APIRouter()
 
-ASSET_VERSION = "8.28-object-analysis"
+ASSET_VERSION = "8.30-grad-analysis"
 
 
 def _actor(payload: dict) -> dict:

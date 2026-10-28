@@ -1133,6 +1133,8 @@ def complete_edit_session_commit(
 
         from app.checklists.id_reminders import finalize_drafts
         finalize_drafts(conn, record["session_id"], commit=True, now=now)
+        from app.checklists.grad_analysis import finalize_drafts as finalize_ga_drafts
+        finalize_ga_drafts(conn, record["session_id"], commit=True, now=now)
 
         release_edit_session_locks_in_transaction(
             conn,
@@ -1425,6 +1427,8 @@ def complete_edit_session_rollback(
 
         from app.checklists.id_reminders import finalize_drafts
         finalize_drafts(conn, record["session_id"], commit=False, now=now)
+        from app.checklists.grad_analysis import finalize_drafts as finalize_ga_drafts
+        finalize_ga_drafts(conn, record["session_id"], commit=False, now=now)
 
         release_edit_session_locks_in_transaction(
             conn,

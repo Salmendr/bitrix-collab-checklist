@@ -743,8 +743,13 @@
                     : items;
                 const activeItems = progressSource.filter(x => normalizeStatus(x.status) !== 'Не требуется');
                 const completedItems = activeItems.filter(x => normalizeStatus(x.status) === 'Есть');
-                const activeCount = activeItems.length;
-                const completedCount = completedItems.length;
+                let activeCount = activeItems.length;
+                let completedCount = completedItems.length;
+                if (currentChecklistKey === 'opr' && window.ChecklistGa) {
+                    const gradAnalysis = window.ChecklistGa.progressCounts();
+                    activeCount += Number(gradAnalysis.total || 0);
+                    completedCount += Number(gradAnalysis.done || 0);
+                }
                 const percent = activeCount ? Math.round((completedCount / activeCount) * 100) : 0;
 
                 progressValueEl.textContent = percent + '%';

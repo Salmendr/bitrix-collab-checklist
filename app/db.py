@@ -1043,3 +1043,6 @@ def init_db():
 
     from app.checklists.id_reminders import ensure_schema
     ensure_schema()
+
+    from app.checklists.grad_analysis import ensure_schema as ensure_grad_analysis_schema
+    ensure_grad_analysis_schema()

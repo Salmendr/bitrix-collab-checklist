@@ -349,6 +349,21 @@ function getEditSessionRuntimeState() {
     };
 }
 
+// Граданализ: an architect who only checks ГА takes the OPR lock with the
+// first change of OPR, so the GIP works on OPR meanwhile.
+function defersCurrentChecklistLock() {
+    return !!(
+        currentChecklistKey === 'opr'
+        && window.ChecklistGa
+        && window.ChecklistGa.defersOprLock()
+    );
+}
+
+// The window can save Граданализ while another employee holds OPR.
+function gradAnalysisEditable() {
+    return !!(window.ChecklistGa && window.ChecklistGa.canEditNow());
+}
+
 function ownsCurrentChecklistLock() {
     return !!(
         currentChecklistLock.owned
@@ -364,7 +379,13 @@ function isEditingAllowed() {
     return !!(
         !popupFinalizationInProgress
         && sessionState.active
-        && ownsCurrentChecklistLock()
+        && (
+            ownsCurrentChecklistLock()
+            || (
+                defersCurrentChecklistLock()
+                && !isChecklistLockedByOther()
+            )
+        )
     );
 }
 
@@ -405,7 +426,7 @@ function getEditingBlockedReason() {
         );
     }
 
-    if (!ownsCurrentChecklistLock()) {
+    if (!ownsCurrentChecklistLock() && !defersCurrentChecklistLock()) {
         return 'Не получена блокировка текущего чек-листа';
     }
 
@@ -490,7 +511,7 @@ function setActionButtonState() {
     const editingAllowed = isEditingAllowed();
 
     if (saveCloseBtn) {
-        saveCloseBtn.disabled = !editingAllowed;
+        saveCloseBtn.disabled = !(editingAllowed || gradAnalysisEditable());
         saveCloseBtn.style.opacity = saveCloseBtn.disabled ? '0.55' : '1';
         saveCloseBtn.style.cursor = saveCloseBtn.disabled ? 'not-allowed' : 'pointer';
     }
@@ -576,7 +597,11 @@ function updateSaveStateBySession() {
         return;
     }
 
-    if (!ownsCurrentChecklistLock()) {
+    if (
+        !ownsCurrentChecklistLock()
+        && !defersCurrentChecklistLock()
+        && !gradAnalysisEditable()
+    ) {
         setSaveState(
             isChecklistLockedByOther()
                 ? 'error'
@@ -588,7 +613,10 @@ function updateSaveStateBySession() {
         return;
     }
 
-    if (sessionDirty) {
+    if (
+        sessionDirty
+        || (window.ChecklistGa && window.ChecklistGa.hasDraft())
+    ) {
         setSaveState('saving', 'Есть несохраненные изменения');
         return;
     }
@@ -642,7 +670,7 @@ function updateLockNotice() {
             const ownerName = currentChecklistLock.userName || 'другой сотрудник';
             lockNoticeEl.textContent = 'Сейчас с этим чек-листом работает ' + ownerName + ', дождитесь завершения сессии';
             lockNoticeEl.style.display = '';
-        } else if (!ownsCurrentChecklistLock()) {
+        } else if (!ownsCurrentChecklistLock() && !defersCurrentChecklistLock()) {
             lockNoticeEl.textContent = 'Получаем доступ к чек-листу...';
             lockNoticeEl.style.display = '';
         } else {
@@ -1145,7 +1173,10 @@ async function recoverPopupSessionAndCurrentLock() {
 
     sessionRecoveryPromise = sessionEvents.ensureStarted()
         .then(function () {
-            if (!ownsCurrentChecklistLock()) {
+            if (
+                !ownsCurrentChecklistLock()
+                && !defersCurrentChecklistLock()
+            ) {
                 return acquireChecklistLock(
                     currentChecklistKey,
                     true
@@ -1222,7 +1253,7 @@ function startLockHeartbeat() {
                 heartbeatResult
             );
 
-            if (!hasCurrentLock) {
+            if (!hasCurrentLock && !defersCurrentChecklistLock()) {
                 await acquireChecklistLock(
                     currentChecklistKey,
                     true
@@ -1522,6 +1553,28 @@ async function finalizePopupSession(saveChanges, options = {}) {
 
     if (saveCloseBtn) saveCloseBtn.disabled = true;
     if (cancelBtn) cancelBtn.disabled = true;
+
+    // Граданализ: «Нет» needs a note; Save stops until it is filled. The
+    // autosave of an idle window is not stopped.
+    if (
+        saveChanges
+        && finalizeReason !== 'inactivity_timeout'
+        && window.ChecklistGa
+    ) {
+        let gradAnalysisReady = true;
+        try {
+            gradAnalysisReady = await window.ChecklistGa.checkBeforeSave();
+        } catch (gradAnalysisError) {
+            console.log('Граданализ check skipped:', gradAnalysisError);
+        }
+        if (!gradAnalysisReady) {
+            // The message of the check stays in the save state.
+            popupFinalizeRequestInProgress = false;
+            if (saveCloseBtn) saveCloseBtn.disabled = false;
+            if (cancelBtn) cancelBtn.disabled = false;
+            return false;
+        }
+    }
 
     try {
         if (typeof settleInlineItemRename === 'function') {

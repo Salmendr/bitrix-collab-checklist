@@ -38,6 +38,24 @@
                 }
 
                 if (placement === 'right') {
+                    const gradAnalysis = window.ChecklistGa;
+                    if (gradAnalysis && gradAnalysis.showsPanel()) {
+                        // Граданализ takes the right column at full height.
+                        resetTablePanelsForGeneric(2);
+                        tablesGridEl.style.gridTemplateColumns = 'minmax(380px, 0.72fr) minmax(0, 1.55fr)';
+
+                        const leftGroups = (
+                            activeGroups.length
+                                ? activeGroups
+                                : (Array.isArray(groups) ? groups.slice(0, 1) : [])
+                        ).concat([bimGroup]);
+
+                        leftTableEl.innerHTML = renderGenericPanel(leftGroups, true);
+                        middleTableEl.innerHTML = gradAnalysis.panelHtml();
+                        gradAnalysis.afterRender(middleTableEl);
+                        return;
+                    }
+
                     resetTablePanelsForGeneric(3);
 
                     if (tablePanels[2]) {

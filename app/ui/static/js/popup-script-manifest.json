@@ -1,6 +1,6 @@
 {
-  "stage": "8.29-surveys",
-  "generatedAt": "2026-10-27T00:00:00+00:00",
+  "stage": "8.30-grad-analysis",
+  "generatedAt": "2026-10-28T00:00:00+00:00",
   "loadOrder": [
     "checklist-host-diagnostics.js",
     "popup-bootstrap.js",
@@ -26,6 +26,7 @@
     "popup-session-enhancements.js",
     "popup-edit-session.js",
     "popup-inactivity.js",
+    "popup-grad-analysis.js",
     "bitrix-user-picker.js",
     "id-reminders.js",
     "bitrix-company-picker.js",
@@ -312,7 +313,8 @@
     "Stage 8.24: the item Yandex button stays clickable and the server repairs stuck folder jobs; its menu opens next to the button after a redraw.",
     "Stage 8.25: only employees checked by Bitrix24 open the application; every page gets the keys of its window from the server (checklist-auth.js, put into the page, not a module), reloads and new windows carry a link key.",
     "Stage 8.26: windows opened from the platform portal do not wait for Bitrix24 (popup-bitrix-bridge.js); closing such a window tells the portal page by a message.",
-    "Stage 8.27: a window of the platform portal is open for viewing only (no session, no lock, no inactivity close); an item dropped into the middle of another item row becomes its subitem (its subitems become folders), into the middle of a subitem row — its folder."
+    "Stage 8.27: a window of the platform portal is open for viewing only (no session, no lock, no inactivity close); an item dropped into the middle of another item row becomes its subitem (its subitems become folders), into the middle of a subitem row — its folder.",
+    "Stage 8.30: Граданализ in the right column of the OPR window (КОПР Генплан and КОПР АР, ПБ, ОДИ) for leaders, administrators, architects and GIPs (read only); its own lock and a draft of the edit session saved by Save and dropped by Cancel; «Не требуется» items in the common block on the left; the OPR progress counts ГА; an architect who only checks ГА takes the OPR lock with the first OPR change."
   ],
   "hashMode": "utf8-lf",
   "lineEndingNote": "Hashes are calculated from bytes written to disk. This is stable for Windows CRLF and Unix LF.",
@@ -350,8 +352,8 @@
       "bytes": 10475
     },
     "popup-core.js": {
-      "sha256": "44f7372e3204e5d6ee59847d12a9c8f60e3546b83c7a92c35d133e15b472a575",
-      "bytes": 107501
+      "sha256": "f1f5020364ba6ee39ee90c90fdebb609e27e24ea3f3f84ac5824f0caba0ae47f",
+      "bytes": 107806
     },
     "popup-document-list.js": {
       "sha256": "090e04eea9d27f2431e71e23fc089a5573bee8f65dccd2779df225a3b22fea73",
@@ -386,8 +388,8 @@
       "bytes": 25202
     },
     "popup-session-enhancements.js": {
-      "sha256": "6c0e4e87ea276b7eeb56cca691cd7f24ca6bc27e5bc772af520c52193cc22eb9",
-      "bytes": 52844
+      "sha256": "fa52a1d442b4a4e153e9140c8ad5cb1f570ceb22c75acfd0d2e4601baf54a693",
+      "bytes": 54702
     },
     "popup-edit-session.js": {
       "sha256": "8cd402644dc0c9724b46b22c725e19a572232fa81d7105a8d3c094de9d6c7c42",
@@ -396,6 +398,10 @@
     "popup-inactivity.js": {
       "sha256": "0a1428d3e4157d07c7295aee1701cac53f88b5cb859828ffa7f77e7ce9305230",
       "bytes": 6629
+    },
+    "popup-grad-analysis.js": {
+      "sha256": "c60b56c6725ebd87c23db1d63213006c934390b16f2385e163c6167966772f27",
+      "bytes": 56626
     },
     "bitrix-user-picker.js": {
       "sha256": "e69ee7af0913383cda4f02ba83279c64fe4650715532eee91176c47cfe57b1c9",
@@ -430,8 +436,8 @@
       "bytes": 10559
     },
     "popup-event-session.js": {
-      "sha256": "204349eb6c8be6e3373e81345e763eefc3adc8a4c8d8489d40418b4495b35e4e",
-      "bytes": 6296
+      "sha256": "6538ad93f05f83866b6ed142953c5a459a5f96640945faaa0b2c10d2447943a4",
+      "bytes": 6619
     },
     "popup-renderer-common.js": {
       "sha256": "23de63d24a18c3d9204c230579af1f1027017a40192436e7f2f218ca16c00d9a",
@@ -450,12 +456,12 @@
       "bytes": 4636
     },
     "popup-renderer-generic.js": {
-      "sha256": "8a26371b55b0ab35fdf6b045c2946eead6003a97061d039e278d62961f6b5678",
-      "bytes": 8212
+      "sha256": "29de1ed10b36ccb0a5eaac1bfdfa305b0d762e731dd23dde77ab2d58dfac3354",
+      "bytes": 8578
     },
     "popup-renderer-configured-bim.js": {
-      "sha256": "b266fb19a1f1f46e34a5c84b9b646c79563983b77f6bb5799889776a6f605194",
-      "bytes": 3227
+      "sha256": "3a5f61df63e6d84aec370c364aa6b20f0fbded75d8227681d9a88264cdd57e38",
+      "bytes": 4161
     },
     "popup-event-common.js": {
       "sha256": "a9dc97e525101ed4cfcbb04828c33ee75a975cd954343e6f870e0406196668ff",
@@ -482,8 +488,8 @@
       "bytes": 2244
     },
     "popup-render-orchestrator.js": {
-      "sha256": "80af00d76b021d48d8170299ddb6d7d64f90f6bd2f99504f01e8a50f04885eac",
-      "bytes": 11569
+      "sha256": "818d56799e264d7f14b3113276b491449a048dc3c226ff152b0fd7f539e10c30",
+      "bytes": 11695
     },
     "popup-init.js": {
       "sha256": "4596fcfe86614d66f79a923ff65a5b0c8e579dabf2fb7c45b4b99646a9f42b47",
@@ -510,8 +516,8 @@
       "bytes": 18245
     },
     "object-analysis-ui.js": {
-      "sha256": "e421a0b5ecc2254148acdb1b15ed1f749e793a072f02cbfa945269e65205b443",
-      "bytes": 35987
+      "sha256": "26b9ecc3a33e2469a055b8b095be04ad9e950f5a12667850276b7e576896fe62",
+      "bytes": 36596
     },
     "popup-object-analysis.js": {
       "sha256": "b762e317598e6c5c123bc43e8266394d47fbd51c0c4f7545ef1fbabb97376813",

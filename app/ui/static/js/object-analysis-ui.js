@@ -152,13 +152,18 @@
             title = missing
                 ? 'В чек-листе ИД нет пункта «Изыскания»'
                 : (share.total ? 'Готово подпунктов «Изыскания»: ' + share.done + ' из ' + share.total : 'В пункте «Изыскания» нет подпунктов');
+        } else if (kind === 'ga') {
+            title = share && share.total ? 'Выполнено пунктов Граданализа: ' + share.done + ' из ' + share.total : 'В Граданализе нет пунктов в работе';
         } else {
             title = share && share.total ? 'Готово пунктов раздела ТУ: ' + share.done + ' из ' + share.total : 'В разделе ТУ нет пунктов';
         }
         const value = percent == null ? '—' : percent + '%';
-        const link = text(project.idChecklistUrl);
+        // Граданализ lives in the OPR checklist.
+        const target = kind === 'ga' ? 'opr' : 'id';
+        const link = text(kind === 'ga' ? project.oprChecklistUrl : project.idChecklistUrl);
+        const hint = kind === 'ga' ? '. Нажмите, чтобы открыть чек-лист ОПР' : '. Нажмите, чтобы открыть чек-лист ИД';
         return '<span class="oa-share' + (percent == null ? ' is-empty' : '') + (link ? ' is-link' : '') + '"'
-            + (link ? ' data-oa-open="id"' : '') + ' title="' + esc(title + (link ? '. Нажмите, чтобы открыть чек-лист ИД' : '')) + '">'
+            + (link ? ' data-oa-open="' + target + '"' : '') + ' title="' + esc(title + (link ? hint : '')) + '">'
             + esc(value) + '</span>';
     }
 
@@ -207,7 +212,7 @@
             case 'tu':
                 return shareCell(project.id && project.id.tu, 'tu', project);
             case 'ga':
-                return '<span class="oa-share is-empty" title="Появится вместе с чек-листом Граданализа">—</span>';
+                return shareCell(project.ga, 'ga', project);
             case 'oprSections': {
                 const map = optionMap(options.oprSections);
                 const sections = project.oprSections || { ready: [], notReady: [] };
@@ -652,6 +657,8 @@
                 if (open.dataset.oaOpen === 'risks') ctx.openRisks(project);
                 else if (open.dataset.oaOpen === 'id' && text(project.idChecklistUrl)) {
                     global.open(project.idChecklistUrl, '_blank', 'noopener');
+                } else if (open.dataset.oaOpen === 'opr' && text(project.oprChecklistUrl)) {
+                    global.open(project.oprChecklistUrl, '_blank', 'noopener');
                 }
                 return;
             }

@@ -183,7 +183,9 @@ async function loadChecklistByKey(checklistKey) {
         if (cachedData) {
             applyChecklistData(deepClone(cachedData));
             renderAll();
-            await acquireChecklistLock(targetKey, true);
+            if (!defersCurrentChecklistLock()) {
+                await acquireChecklistLock(targetKey, true);
+            }
             startLockHeartbeat();
             return;
         }
@@ -201,7 +203,9 @@ async function loadChecklistByKey(checklistKey) {
 
         applyChecklistData(result);
         renderAll();
-        await acquireChecklistLock(targetKey, true);
+        if (!defersCurrentChecklistLock()) {
+            await acquireChecklistLock(targetKey, true);
+        }
         startLockHeartbeat();
     } catch (error) {
         console.log('loadChecklistByKey orchestrator error:', error);

@@ -109,7 +109,18 @@ function renderGenericPanel(panelGroups, appendNotRequired = false) {
         `;
     }).join('');
 
-    const notRequiredBlock = appendNotRequired && notRequiredGroup && hasItemsInGroup(notRequiredGroupId)
+    const gradAnalysisNotRequired = (
+        appendNotRequired
+        && currentChecklistKey === 'opr'
+        && window.ChecklistGa
+        && window.ChecklistGa.showsPanel()
+    )
+        ? window.ChecklistGa.notRequiredRowsHtml(getGenericGridClass(false))
+        : '';
+
+    const notRequiredBlock = appendNotRequired && notRequiredGroup && (
+        hasItemsInGroup(notRequiredGroupId) || gradAnalysisNotRequired
+    )
         ? `
             <div class="generic-subtable">
                 <div class="thead">
@@ -117,6 +128,7 @@ function renderGenericPanel(panelGroups, appendNotRequired = false) {
                 </div>
                 <div>
                     ${renderGenericGroup(notRequiredGroup, false)}
+                    ${gradAnalysisNotRequired}
                 </div>
             </div>
         `

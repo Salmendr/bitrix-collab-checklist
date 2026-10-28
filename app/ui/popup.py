@@ -64,6 +64,24 @@ def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
     if phases["label"]:
         full_title += " · " + html.escape(phases["label"])
     progress_percent = int(data.get("progressPercent", 0) or 0)
+    try:
+        from app.checklists.grad_analysis import progress_counts
+
+        ga_progress = progress_counts(dialog_id)
+    except Exception as exc:
+        from app.logging_utils import write_debug_log
+
+        write_debug_log("popup_ga_progress_failed", {"dialogId": dialog_id, "error": str(exc)})
+        ga_progress = {"done": 0, "total": 0, "percent": None}
+    if checklist_key == "opr":
+        # The OPR progress counts the items of Граданализ too.
+        from app.checklists.normalization import calculate_progress
+        from app.checklists.subitems import progress_items
+
+        own = calculate_progress(progress_items(data.get("items") or []))
+        done = own["completedCount"] + ga_progress["done"]
+        total = own["activeCount"] + ga_progress["total"]
+        progress_percent = round(done * 100 / total) if total else 0
 
     project_root_folder_info = get_project_root_yandex_folder_info(dialog_id)
 
@@ -213,5 +231,6 @@ def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
             "POPUP_FILE_DELETE_ALLOWED_USER_IDS_JSON": file_delete_allowed_user_ids_json,
             "POPUP_INACTIVITY_SECONDS_JSON": inactivity_seconds_json,
             "POPUP_INACTIVITY_WARNING_SECONDS_JSON": inactivity_warning_seconds_json,
+            "POPUP_GA_PROGRESS_JSON": json.dumps(ga_progress),
         },
     )

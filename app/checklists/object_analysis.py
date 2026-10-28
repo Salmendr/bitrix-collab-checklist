@@ -797,6 +797,17 @@ def project_id_figures(base: str) -> dict:
     return id_figures(data.get("items") or [], data.get("groups") or [])
 
 
+def project_ga_figure(base: str) -> dict:
+    """«Чек-лист ГА»: the Граданализ of the OPR checklist of the first stage."""
+    from app.checklists.grad_analysis import progress_counts
+
+    try:
+        return progress_counts(base)
+    except Exception as exc:
+        write_debug_log("object_analysis_ga_failed", {"base": base, "error": str(exc)})
+        return _share(0, 0)
+
+
 # ---------------------------------------------------------------------------
 # Views
 # ---------------------------------------------------------------------------
@@ -869,6 +880,7 @@ def project_view(base: str, record: dict, *, name: str = "", user_id: str = "",
         "general": record["general"],
         "risk": risk_total(record["risks"]),
         "id": project_id_figures(base),
+        "ga": project_ga_figure(base),
         "oprSections": record["oprSections"],
         "oprCustomerDate": record["oprCustomerDate"],
         "oprPdDate": record["oprPdDate"],
@@ -876,6 +888,7 @@ def project_view(base: str, record: dict, *, name: str = "", user_id: str = "",
         "vks": record["vks"],
         "customerResponsible": record["customerResponsible"],
         "idChecklistUrl": checklist_link(base, "id"),
+        "oprChecklistUrl": checklist_link(base, "opr"),
     }
 
 
