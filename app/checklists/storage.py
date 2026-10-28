@@ -144,6 +144,12 @@ def get_checklist(dialog_id: str, checklist_key: str = "id"):
         data,
         checklist_key,
     )
+    if checklist_key == "id":
+        # A new ИД checklist: «Изыскания» gets its folders if the root is known.
+        from app.checklists.id_surveys import bind_survey_folders_quietly
+
+        if bind_survey_folders_quietly(normalized_id):
+            return get_checklist(normalized_id, checklist_key)
     data = apply_checklist_item_order(
         normalized_id,
         checklist_key,

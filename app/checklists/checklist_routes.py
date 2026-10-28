@@ -72,6 +72,12 @@ from app.yandex_disk.client import is_yandex_disk_enabled
 
 from app.checklists.checklist_mutation_guard import checklist_mutation_guard
 from app.checklists.item_names import choose_available_item_name
+from app.checklists.id_surveys import (
+    LOCKED_ITEM_DELETE_ERROR,
+    LOCKED_ITEM_MOVE_ERROR,
+    LOCKED_ITEM_RENAME_ERROR,
+    is_locked_item,
+)
 from app.checklists.subitems import children_of, parent_id_of
 from app.checklists.yandex_subfolders import (
     build_subitem_target_path,
@@ -799,6 +805,11 @@ async def api_checklist_rename_item(request: Request):
             if not target_item:
                 return JSONResponse({"ok": False, "error": "item not found"}, status_code=404)
 
+            if is_locked_item(target_item):
+                return JSONResponse(
+                    {"ok": False, "error": LOCKED_ITEM_RENAME_ERROR},
+                    status_code=400,
+                )
             before_item = copy.deepcopy(target_item)
             if transaction:
                 ensure_checklist_snapshot(
@@ -1062,6 +1073,11 @@ async def api_checklist_delete_item(request: Request):
                 return JSONResponse({"ok": False, "error": "item not found"}, status_code=404)
 
             parent_id = parent_id_of(target_item)
+            if is_locked_item(target_item):
+                return JSONResponse(
+                    {"ok": False, "error": LOCKED_ITEM_DELETE_ERROR},
+                    status_code=400,
+                )
             if not parent_id and not bool(target_item.get("isCustom", False)):
                 return JSONResponse(
                     {
@@ -1400,6 +1416,14 @@ async def api_checklist_reorder_items(request: Request):
                 return candidate
 
             source_parent_id = parent_id_of(target_item)
+            if is_locked_item(target_item) and (
+                clean_cell_value(payload.get("targetParentId"))
+                or target_group_id not in {source_group_id, not_required_group_id}
+            ):
+                return JSONResponse(
+                    {"ok": False, "error": LOCKED_ITEM_MOVE_ERROR},
+                    status_code=400,
+                )
             target_parent_id = ""
             children_conversion = {}
             if "targetParentId" in payload:

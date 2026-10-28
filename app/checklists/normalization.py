@@ -18,6 +18,7 @@ from app.checklists.subitems import (
     build_hierarchy_fields,
     progress_items,
 )
+from app.checklists.id_surveys import skipped_standard_names, system_item_fields
 
 from app.checklists.documents import (
     migrate_legacy_document_fields,
@@ -366,7 +367,7 @@ def build_normalized_checklist_payload(
     normalized_items: list,
     progress: dict,
 ) -> dict:
-    return {
+    payload = {
         "title": data.get("title") or config.title,
         "checklistKey": config.key,
         "collabTitle": clean_cell_value(data.get("collabTitle")),
@@ -380,6 +381,12 @@ def build_normalized_checklist_payload(
         "completedCount": progress["completedCount"],
         "progressPercent": progress["progressPercent"],
     }
+    if config.key == "id":
+        from app.checklists.id_surveys import layout_of
+
+        if layout_of(data) > 1:
+            payload["idLayout"] = layout_of(data)
+    return payload
 
 def derive_indicator_from_status(status: str) -> str:
     status = normalize_status(status)
@@ -453,6 +460,14 @@ def build_default_checklist_template(dialog_id: str = "", checklist_key: str = "
         build_default_item_record(config, group_id, order, name)
         for group_id, order, name in iter_default_config_items(config)
     ]
+    extra = {}
+    if config.key == "id":
+        from app.checklists.definitions.id import ID_LAYOUT_SURVEYS
+        from app.checklists.id_surveys import apply_layout
+
+        # A new ИД checklist: «Изыскания» with its subitems.
+        items = apply_layout(items)
+        extra["idLayout"] = ID_LAYOUT_SURVEYS
 
     return normalize_checklist_data({
         "title": config.title,
@@ -463,6 +478,7 @@ def build_default_checklist_template(dialog_id: str = "", checklist_key: str = "
         "groups": build_default_groups(config.key),
         "items": items,
         "notice": "",
+        **extra,
     }, config.key)
 
 
@@ -799,6 +815,7 @@ def normalize_checklist_data(data: dict, checklist_key: str = "id") -> dict:
             "documentName": legacy_document_name,
             "isCustom": is_custom,
             **identity_fields,
+            **system_item_fields(item),
         })
 
     deduped_items = []
@@ -824,12 +841,16 @@ def normalize_checklist_data(data: dict, checklist_key: str = "id") -> dict:
         if not item.get("isCustom") and clean_cell_value(item.get("definitionName"))
     }
 
+    # A new checklist has the surveys as subitems of «Изыскания».
+    skipped_names = skipped_standard_names(data)
     for definition in iter_standard_definition_items(config):
         identity = (
             int(definition["groupId"]),
             clean_cell_value(definition["name"]).casefold(),
         )
         if identity in existing_default_identities:
+            continue
+        if identity[1] in skipped_names:
             continue
         migrated_item_id = (
             f'{definition["itemId"]}_migrated_'

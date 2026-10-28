@@ -1,5 +1,5 @@
 {
-  "stage": "8.28-object-analysis",
+  "stage": "8.29-surveys",
   "generatedAt": "2026-10-27T00:00:00+00:00",
   "loadOrder": [
     "checklist-host-diagnostics.js",
@@ -350,8 +350,8 @@
       "bytes": 10475
     },
     "popup-core.js": {
-      "sha256": "c448188ca04e5deb69ed99afc2a38af5fc99ab49996fe342cb6ff2d77997c222",
-      "bytes": 107401
+      "sha256": "44f7372e3204e5d6ee59847d12a9c8f60e3546b83c7a92c35d133e15b472a575",
+      "bytes": 107501
     },
     "popup-document-list.js": {
       "sha256": "090e04eea9d27f2431e71e23fc089a5573bee8f65dccd2779df225a3b22fea73",
@@ -414,8 +414,8 @@
       "bytes": 2436
     },
     "popup-item-ordering.js": {
-      "sha256": "6baf8eb7d3686a25ff2aeba77f490da122e17ceca37bb0f0b0b4ba157a0e3349",
-      "bytes": 46057
+      "sha256": "7e2702dc38311dd53b3aaf24a8571487eb7503916ab3808ce7f8a70f83075798",
+      "bytes": 46218
     },
     "popup-item-status.js": {
       "sha256": "ff5b2d2952ba490254e7a8aa2882bcf9d81396df3c6282f806382db11f9e4d3a",
@@ -458,8 +458,8 @@
       "bytes": 3227
     },
     "popup-event-common.js": {
-      "sha256": "c4f76064b07dafcb2cb139cd774c5571f20faac1635edceb3a417f254730e125",
-      "bytes": 7051
+      "sha256": "a9dc97e525101ed4cfcbb04828c33ee75a975cd954343e6f870e0406196668ff",
+      "bytes": 7152
     },
     "popup-event-id.js": {
       "sha256": "90a9847aa0f64d81b60141734a713c88c5cbd6d5c6959ab9037b77b191af569c",

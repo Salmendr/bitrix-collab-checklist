@@ -171,7 +171,8 @@
             trigger.dataset.inlineRenameBound = '1';
             trigger.addEventListener('click', function () {
                 const item = findItemByElement(this);
-                if (!item) return;
+                // «Изыскания» of a new ИД checklist keeps its name.
+                if (!item || item.systemItem) return;
                 startInlineItemRename(item, this);
             });
         });

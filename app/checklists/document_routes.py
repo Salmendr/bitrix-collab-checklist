@@ -12,6 +12,7 @@ from app.checklists.document_folders import (
     names_in_folder,
     normalize_relative_folder,
 )
+from app.checklists.id_surveys import is_locked_item
 from app.checklists.item_mutation_guard import serialize_legacy_file_mutation
 import html
 import json
@@ -2123,6 +2124,7 @@ def _build_folder_manage_html(
     relative_folder: str,
     zip_url: str,
     item_deletable: bool = False,
+    item_locked: bool = False,
 ) -> str:
     """Folder operations of the current level (edit session required)."""
     buttons: list[str] = []
@@ -2137,8 +2139,9 @@ def _build_folder_manage_html(
 
     if is_top_level:
         button("folder-create", "Новая папка", "Создать подпункт — папку этого пункта")
-        button("item-move", "Переместить", "Перенести пункт в другой раздел или внутрь другого пункта")
-        if item_deletable:
+        if not item_locked:
+            button("item-move", "Переместить", "Перенести пункт в другой раздел или внутрь другого пункта")
+        if item_deletable and not item_locked:
             button("item-delete", "Удалить пункт", "Удалить пункт со всеми подпунктами и файлами", danger=True)
     else:
         button("folder-create", "Новая папка", "Создать папку внутри текущей")
@@ -2358,12 +2361,13 @@ def api_checklist_folder(
     item_deletable = bool(
         clean_cell_value(target_item.get("parentItemId"))
         or target_item.get("isCustom", False)
-    )
+    ) and not is_locked_item(target_item)
     folder_manage_html = _build_folder_manage_html(
         is_top_level=is_top_level,
         relative_folder=relative_folder,
         zip_url=zip_url,
         item_deletable=item_deletable,
+        item_locked=is_locked_item(target_item),
     )
     ui_static_base_url = (
         f"{app_base_path}/ui-static"

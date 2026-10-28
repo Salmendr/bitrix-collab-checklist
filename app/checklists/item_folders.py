@@ -30,6 +30,7 @@ from app.checklists.document_folders import (
     normalize_relative_folder,
     sanitize_folder_segment,
 )
+from app.checklists.id_surveys import LOCKED_ITEM_MOVE_ERROR, is_locked_item
 from app.checklists.subitems import NOT_REQUIRED_STATUS, children_of, parent_id_of
 from app.checklists.utils import clean_cell_value, normalize_status
 
@@ -274,6 +275,8 @@ def convert_item_into_folder(
         raise ItemFolderError("Подпункт в «Не требуется» не может принять папку")
     if is_not_required(item, not_required_group_id):
         raise ItemFolderError(f"Сначала верните «{_name(item)}» из «Не требуется»")
+    if is_locked_item(item):
+        raise ItemFolderError(LOCKED_ITEM_MOVE_ERROR)
     if not parent_id_of(item) and not bool(item.get("isCustom", False)):
         # The template brings a standard item back; it is never removed.
         raise ItemFolderError(

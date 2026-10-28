@@ -789,7 +789,7 @@
                                 class="item-name item-name-edit-trigger"
                                 data-role="inline-rename-item"
                                 data-item-id="${esc(item && item.id || '')}"
-                                title="Нажмите на название, чтобы переименовать"
+                                title="${esc(item && item.systemItem ? 'Этот пункт нельзя переименовать' : 'Нажмите на название, чтобы переименовать')}"
                                 aria-label="Переименовать пункт ${esc(itemName)}"
                                 ${disabledAttr()}
                             >${esc(itemName)}</button>

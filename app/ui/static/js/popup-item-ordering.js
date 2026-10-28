@@ -361,6 +361,8 @@
             && !row.classList.contains('not-required')
             && !isNotRequiredItem(host)
             && !isNotRequiredItem(dragged)
+            // «Изыскания» of a new ИД checklist stays an item of its section.
+            && !dragged.systemItem
         );
     }
 
@@ -380,6 +382,7 @@
             || isNotRequiredItem(host)
             // A standard item of the template never becomes a folder.
             || (!parentIdOf(dragged) && !dragged.isCustom)
+            || dragged.systemItem
         ) {
             return null;
         }

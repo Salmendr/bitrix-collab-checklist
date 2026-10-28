@@ -125,7 +125,6 @@ FIELDS = frozenset({
     "customerResponsible", *DATE_FIELDS, *MEETING_FIELDS,
 })
 
-SURVEYS_ITEM_NAME = "изыскания"
 TU_GROUP_TITLE = "ту"
 
 _DATETIME_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$")
@@ -763,17 +762,12 @@ def id_figures(items: list[dict], groups: list[dict]) -> dict:
     """«Изыскания»: the subitems of the item «Изыскания»; «ТУ»: the section
     ТУ by the rule of the checklist progress. «Не требуется» is not
     counted."""
-    from app.checklists.subitems import NOT_REQUIRED_STATUS, children_of, parent_id_of, progress_items
+    from app.checklists.id_surveys import find_surveys_item
+    from app.checklists.subitems import NOT_REQUIRED_STATUS, children_of, progress_items
 
-    surveys = next(
-        (
-            item for item in items
-            if not parent_id_of(item)
-            and clean_cell_value(item.get("name")).lower() == SURVEYS_ITEM_NAME
-            and _status(item) != NOT_REQUIRED_STATUS
-        ),
-        None,
-    )
+    surveys = find_surveys_item(items)
+    if surveys is not None and _status(surveys) == NOT_REQUIRED_STATUS:
+        surveys = None
     if surveys is None:
         survey_share = {**_share(0, 0), "missing": True}
     else:

@@ -845,6 +845,10 @@ def ensure_project_standard_yandex_folder_structure(dialog_id: str) -> dict:
     )
     yandex_disk = persisted_warmup.get("yandexDisk") or yandex_disk
     updated_folders = persisted_warmup.get("folders") or updated_folders
+    # The root is known now: «Изыскания» of a new ИД checklist gets its folders.
+    from app.checklists.id_surveys import bind_survey_folders_quietly
+
+    bind_survey_folders_quietly(dialog_id)
     write_debug_log("yandex_warmup_finished", {
         "dialogId": dialog_id,
         "ok": failed == 0,

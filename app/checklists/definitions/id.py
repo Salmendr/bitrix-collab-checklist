@@ -196,6 +196,17 @@ STANDARD_ID_YANDEX_FOLDER_SPECS = {
     },
 }
 
+# ИД checklists made since 8.29 (layout 2): the five surveys are subitems of
+# the item «Изыскания» (folder 04_Изыскания, the parent of their standard
+# folders). Checklists made before keep them as standard items of the
+# section, so neither their items nor their folders change.
+ID_LAYOUT_SURVEYS = 2
+SURVEYS_ITEM_NAME = "Изыскания"
+SURVEYS_SYSTEM_ITEM = "surveys"
+SURVEYS_AFTER_ITEM = "Тех задание"
+SURVEYS_FOLDER = "04_Изыскания"
+SURVEY_SUBITEM_NAMES = ("ИГДИ", "ИГИ", "ИЭИ", "ИГМИ", "ИГИ СМР")
+
 CHECKLIST_CONFIG = ChecklistConfig(
     key="id",
     title="Чек-лист ИД",
