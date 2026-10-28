@@ -90,6 +90,7 @@ async def api_ga_upload(
     sessionId: str = Form(""),
     itemId: str = Form(...),
     replaceFileId: str = Form(""),
+    relativeFolder: str = Form(""),
     actingUserId: str = Form(""),
     actingUserName: str = Form(""),
     file: UploadFile = File(...),
@@ -105,6 +106,7 @@ async def api_ga_upload(
             file.filename or "",
             file.file,
             replaceFileId,
+            relativeFolder,
         )
     except Exception as exc:
         return _error(exc)

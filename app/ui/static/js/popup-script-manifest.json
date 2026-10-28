@@ -1,6 +1,6 @@
 {
-  "stage": "8.30-grad-analysis",
-  "generatedAt": "2026-10-28T00:00:00+00:00",
+  "stage": "8.31-ga-controls",
+  "generatedAt": "2026-10-28T12:00:00+00:00",
   "loadOrder": [
     "checklist-host-diagnostics.js",
     "popup-bootstrap.js",
@@ -400,8 +400,8 @@
       "bytes": 6629
     },
     "popup-grad-analysis.js": {
-      "sha256": "c60b56c6725ebd87c23db1d63213006c934390b16f2385e163c6167966772f27",
-      "bytes": 56626
+      "sha256": "45dd312846383af65e3f4d5bdccc4b8b95bf1ec773d82d1dbe04ea004c3618ac",
+      "bytes": 64556
     },
     "bitrix-user-picker.js": {
       "sha256": "e69ee7af0913383cda4f02ba83279c64fe4650715532eee91176c47cfe57b1c9",

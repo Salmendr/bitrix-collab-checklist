@@ -173,6 +173,9 @@ def _clean_file(raw) -> dict | None:
     }
     if kind == "upload":
         record["storedName"] = clean_cell_value(raw.get("storedName"))
+        # A file of a dropped folder keeps the path inside it.
+        if clean_cell_value(raw.get("folder")):
+            record["folder"] = clean_cell_value(raw.get("folder"))
     else:
         for key in ("sourceDialogId", "sourceItemId", "seriesId", "documentId"):
             record[key] = clean_cell_value(raw.get(key))
@@ -526,7 +529,7 @@ def _id_document_path(dialog_id: str, item_id: str, document_id: str) -> str:
 def _file_view(record: dict, dialog_id: str, sources: _IdSources) -> dict:
     view = {
         "id": record["id"], "kind": record["kind"], "name": record["name"], "size": record["size"],
-        "at": record["at"], "byName": record["byName"],
+        "folder": record.get("folder", ""), "at": record["at"], "byName": record["byName"],
         "archivedAt": record.get("archivedAt", ""), "archivedByName": record.get("archivedByName", ""),
         "reason": record.get("reason", ""),
     }
@@ -828,6 +831,9 @@ def _apply(data: dict, op: str, payload: dict, actor: dict, dialog_id: str, now:
             old = next((f for f in item["files"] if f["id"] == replace_id), None)
             if old is None:
                 raise GaError("Заменяемый файл не найден")
+            # A new version stays in the folder of the old one.
+            if old.get("folder"):
+                record = {**record, "folder": old["folder"]}
             item["files"] = [record if f is old else f for f in item["files"]]
             item["archive"].append({**old, "archivedAt": now, "archivedById": clean_cell_value(actor.get("userId")),
                                     "archivedByName": clean_cell_value(actor.get("userName")),
@@ -910,13 +916,15 @@ def _dialog_dir(dialog_id: str) -> Path:
 
 
 def store_upload(dialog_id: str, session_id: str, actor: dict, item_id: str,
-                 file_name: str, stream, replace_file_id: str = "") -> dict:
+                 file_name: str, stream, replace_file_id: str = "", relative_folder: str = "") -> dict:
+    from app.checklists.document_folders import normalize_relative_folder
     from app.checklists.document_names import safe_file_name
 
     dialog_id = normalize_dialog_id(dialog_id)
     _require(dialog_id, clean_cell_value(actor.get("userId")), "edit")
     try:
         name = safe_file_name(file_name)[:MAX_FILE_NAME]
+        inner_folder = "" if replace_file_id else normalize_relative_folder(relative_folder)
     except ValueError as exc:
         raise GaError(str(exc)) from exc
     file_id = uuid.uuid4().hex
@@ -935,6 +943,7 @@ def store_upload(dialog_id: str, session_id: str, actor: dict, item_id: str,
     record = _clean_file({
         "id": file_id, "kind": "upload", "name": name, "size": size, "at": _now(),
         "byId": actor.get("userId"), "byName": actor.get("userName"), "storedName": stored_name,
+        "folder": inner_folder,
     })
     try:
         return mutate(dialog_id, session_id, actor, "upload", {

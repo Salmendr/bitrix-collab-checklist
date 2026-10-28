@@ -20,17 +20,28 @@
     const STALE_MS = 10000;
     const FIRST_LOAD_WAIT_MS = 4000;
     const STATUS_TITLES = { yes: 'Да', no: 'Нет', '': 'Нет', nr: 'Не требуется' };
-    const ICONS = {
-        pencil: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4Z"/><path d="m13.5 6.5 4 4"/></svg>',
-        link: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 14a4.5 4.5 0 0 0 6.4 0l3-3a4.5 4.5 0 0 0-6.4-6.4l-1.2 1.2"/><path d="M14 10a4.5 4.5 0 0 0-6.4 0l-3 3a4.5 4.5 0 0 0 6.4 6.4l1.2-1.2"/></svg>',
-        eye: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z"/><circle cx="12" cy="12" r="3"/></svg>',
-        folder: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 7.5v9.25A2.25 2.25 0 0 0 5.75 19h12.5a2.25 2.25 0 0 0 2.25-2.25v-7A2.25 2.25 0 0 0 18.25 7.5H11l-2-2H5.75A2.25 2.25 0 0 0 3.5 7.75"/></svg>',
-        upload: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h14"/><path d="M12 20V4"/><path d="m7 9 5-5 5 5"/></svg>',
-        archive: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 5h17v4h-17z"/><path d="M5 9v10h14V9"/><path d="M10 13h4"/></svg>',
-        file: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H6.5A1.5 1.5 0 0 0 5 4.5v15A1.5 1.5 0 0 0 6.5 21h11a1.5 1.5 0 0 0 1.5-1.5V8Z"/><path d="M14 3v5h5"/></svg>',
-        remove: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10"/><path d="M17 7 7 17"/></svg>',
-        plus: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14"/><path d="M5 12h14"/></svg>'
+    // Icons of the checklist buttons (upload, folder, replace, download,
+    // remove) come from the shared set; the ones the checklists have no
+    // button for are drawn the same way.
+    const OWN_ICONS = {
+        pencil: '<path d="M4 20h4L19 9l-4-4L4 16v4Z"></path><path d="m13.5 6.5 4 4"></path>',
+        link: '<path d="M10 14a4.5 4.5 0 0 0 6.4 0l3-3a4.5 4.5 0 0 0-6.4-6.4l-1.2 1.2"></path>'
+            + '<path d="M14 10a4.5 4.5 0 0 0-6.4 0l-3 3a4.5 4.5 0 0 0 6.4 6.4l1.2-1.2"></path>',
+        eye: '<path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z"></path>'
+            + '<circle cx="12" cy="12" r="3"></circle>',
+        file: '<path d="M14 3H6.5A1.5 1.5 0 0 0 5 4.5v15A1.5 1.5 0 0 0 6.5 21h11a1.5 1.5 0 0 0 1.5-1.5V8Z"></path>'
+            + '<path d="M14 3v5h5"></path>'
     };
+
+    function icon(name) {
+        const shared = global.ChecklistActionIcons;
+        if (!OWN_ICONS[name] && shared && typeof shared.svg === 'function') {
+            return shared.svg(name);
+        }
+        return '<svg class="checklist-action-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"'
+            + ' fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">'
+            + (OWN_ICONS[name] || '') + '</svg>';
+    }
 
     const state = {
         data: null,
@@ -267,44 +278,85 @@
         }
     }
 
-    async function upload(itemId, files, replaceFileId) {
-        if (!canEditNow() || !files || !files.length) return null;
+    // Files go one by one; a file of a dropped folder keeps the path inside
+    // it. Returns the files that did not go.
+    async function uploadFiles(itemId, files, replaceFileId) {
+        const failed = [];
+        if (!canEditNow() || !files || !files.length) return Array.from(files || []);
         let sid = '';
         try {
             sid = await requireEditingSession('загрузка файла', { requireCurrentLock: false });
         } catch (error) {
             say('error', error && error.message ? error.message : 'Сессия редактирования не готова');
-            return null;
+            return Array.from(files);
         }
+        const staging = global.ChecklistUploadStaging;
         const who = identity();
         let result = null;
+        let lastError = '';
         state.busy += 1;
         try {
             for (let index = 0; index < files.length; index += 1) {
-                say('saving', 'Загружаем ' + files[index].name + '...');
+                const file = files[index];
+                say('saving', 'Загружаем ' + file.name + '...');
                 const form = new FormData();
                 form.append('dialogId', dialogId);
                 form.append('sessionId', sid);
                 form.append('itemId', itemId);
-                form.append('replaceFileId', index === 0 ? (replaceFileId || '') : '');
+                form.append('replaceFileId', replaceFileId || '');
+                form.append('relativeFolder', staging && typeof staging.fileFolderPath === 'function'
+                    ? staging.fileFolderPath(file) : '');
                 form.append('actingUserId', who.userId);
                 form.append('actingUserName', who.userName);
-                form.append('file', files[index], files[index].name);
-                const response = await global.fetch(popupApi.url('api/ga/upload'), { method: 'POST', body: form });
-                const payload = await response.json().catch(() => ({}));
-                if (!response.ok || payload.ok === false) {
-                    throw new Error(payload.error || ('HTTP ' + response.status));
+                form.append('file', file, file.name);
+                try {
+                    const response = await global.fetch(popupApi.url('api/ga/upload'), { method: 'POST', body: form });
+                    const payload = await response.json().catch(() => ({}));
+                    if (!response.ok || payload.ok === false) {
+                        throw new Error(payload.error || ('HTTP ' + response.status));
+                    }
+                    result = payload;
+                } catch (error) {
+                    failed.push(file);
+                    lastError = error && error.message ? error.message : '';
                 }
-                result = payload;
             }
-            apply(result, true);
+            if (result) apply(result, true);
             if (typeof updateLockNotice === 'function') updateLockNotice();
-        } catch (error) {
-            say('error', 'Файл не загружен: ' + (error && error.message ? error.message : ''));
+            if (failed.length) {
+                say('error', 'Не загружено файлов: ' + failed.length + (lastError ? ' — ' + lastError : ''));
+            }
         } finally {
             state.busy -= 1;
         }
-        return result;
+        return failed;
+    }
+
+    // The upload area of the checklists: a click opens it, files and
+    // folders are dropped on the button or into the area, «Загрузить» sends.
+    function attachUploadArea(trigger, input, itemId, stateKey) {
+        const staging = global.ChecklistUploadStaging;
+        const toolbar = trigger.closest('.doc-actions');
+        if (!staging || typeof staging.create !== 'function' || !toolbar || !input) return;
+        staging.create({
+            trigger,
+            input,
+            mount: toolbar,
+            prepend: true,
+            hideTriggerWhenExpanded: true,
+            stateKey,
+            canInteract() {
+                return canEditNow();
+            },
+            async onConfirm(files) {
+                const failed = await uploadFiles(itemId, files, '');
+                await refreshOpenFolder();
+                return { failedFiles: failed };
+            },
+            onError(error) {
+                say('error', error && error.message ? error.message : 'Ошибка загрузки файлов');
+            }
+        });
     }
 
     function blockedReason() {
@@ -337,12 +389,24 @@
         return base + (canEditNow() ? '. Нажмите, чтобы выбрать статус' : '');
     }
 
-    function fileHref(file) {
+    function fileHref(file, download) {
         if (file.kind === 'upload') {
             // A file of the draft opens for the session that uploaded it.
-            return url('api/ga/file', { dialogId, fileId: file.id, userId: identity().userId, sessionId: sessionId() });
+            return url('api/ga/file', {
+                dialogId, fileId: file.id, userId: identity().userId, sessionId: sessionId(),
+                download: download ? '1' : ''
+            });
         }
-        return file.url ? popupApi.url(file.url) : '';
+        if (!file.url) return '';
+        return popupApi.url(file.url) + (download ? '&download=1' : '');
+    }
+
+    function sizeText(size) {
+        return typeof formatFileSize === 'function' ? formatFileSize(size || 0) : '';
+    }
+
+    function filesWord(count) {
+        return typeof pluralFiles === 'function' ? pluralFiles(count) : count + ' файл.';
     }
 
     // ---- rendering: the panel ----
@@ -410,85 +474,136 @@
             + '</div>';
     }
 
+    function counterHtml(item) {
+        const active = childrenOf(item.id).filter(child => child.status !== 'nr');
+        if (item.parentId || !active.length) return '';
+        const done = active.filter(child => child.status === 'yes').length;
+        return '<span class="subitem-counter' + (done === active.length ? ' is-complete' : '') + '"'
+            + ' title="Выполнено подпунктов: ' + done + ' из ' + active.length + '">'
+            + '<svg class="subitem-counter-icon" viewBox="0 0 16 16" aria-hidden="true">'
+            + '<circle cx="4" cy="3.5" r="1.8"></circle><circle cx="12" cy="12.5" r="1.8"></circle>'
+            + '<path d="M4 5.3v3.2a4 4 0 0 0 4 4h2.2"></path></svg>'
+            + '<span>' + done + '/' + active.length + '</span></span>';
+    }
+
     function nameCellHtml(item, editable) {
         const isSub = !!item.parentId;
         let name;
         if (editable && item.isCustom && state.nameEditor === item.id) {
             const value = state.pending[item.id + ':name'] !== undefined ? state.pending[item.id + ':name'] : item.name;
             name = '<textarea class="ga-input ga-autogrow" rows="1" data-ga-name-input="' + esc(item.id) + '">' + esc(value) + '</textarea>';
+        } else if (editable && item.isCustom) {
+            // As in the checklists: a click on the name edits it.
+            name = '<button type="button" class="ga-name ga-name-trigger" data-ga-rename="' + esc(item.id) + '"'
+                + ' title="Нажмите на описание, чтобы изменить">' + esc(item.name) + '</button>';
         } else {
             name = '<span class="ga-name">' + esc(item.name) + '</span>';
         }
-        const tools = [];
-        if (editable && item.isCustom && state.nameEditor !== item.id) {
-            tools.push('<button type="button" class="ga-icon-btn" data-ga-rename="' + esc(item.id) + '" title="Изменить описание" aria-label="Изменить описание">' + ICONS.pencil + '</button>');
-        }
-        if (editable && item.isCustom) {
-            tools.push('<button type="button" class="ga-icon-btn ga-danger" data-ga-delete="' + esc(item.id) + '" title="Удалить пункт" aria-label="Удалить пункт">' + ICONS.remove + '</button>');
-        }
-        if (editable && !isSub && item.status !== 'nr') {
-            tools.push('<button type="button" class="ga-icon-btn" data-ga-add-sub="' + esc(item.id) + '" title="Добавить подпункт" aria-label="Добавить подпункт">' + ICONS.plus + '</button>');
-        }
-        const counter = item.childCount && !isSub
-            ? '<span class="ga-sub-counter">' + childrenOf(item.id).filter(child => child.status === 'yes').length + ' / ' + childrenOf(item.id).filter(child => child.status !== 'nr').length + '</span>'
+        const addSub = editable && !isSub && item.status !== 'nr';
+        const remove = editable && item.isCustom
+            ? '<button type="button" class="subitem-add-cancel ga-delete' + (addSub ? ' has-add-trigger' : '') + '"'
+                + ' data-ga-delete="' + esc(item.id) + '" title="Удалить пункт" aria-label="Удалить пункт ' + esc(item.name) + '">×</button>'
             : '';
-        return '<div class="ga-cell ga-cell-name">'
+        const trigger = addSub
+            ? '<button type="button" class="subitem-add-trigger" data-ga-add-sub="' + esc(item.id) + '"'
+                + ' title="Добавить подпункт" aria-label="Добавить подпункт к пункту ' + esc(item.name) + '">'
+                + '<span class="subitem-add-plus" aria-hidden="true">+</span>'
+                + '<span class="subitem-add-label">Добавить подпункт</span></button>'
+            : '';
+        return '<div class="ga-cell ga-cell-name"><div class="cell-name">'
             + (isSub ? '<span class="ga-sub-mark" aria-hidden="true">↳</span>' : '')
-            + '<div class="ga-name-wrap">' + name + counter + '</div>'
-            + (tools.length ? '<span class="ga-tools">' + tools.join('') + '</span>' : '')
-            + '</div>';
+            + '<div class="item-name-wrap">' + name + counterHtml(item) + '</div>'
+            + remove + trigger
+            + '</div></div>';
     }
 
-    function filesHtml(item) {
-        return (item.files || []).map(file => {
-            const href = fileHref(file);
-            const icon = file.kind === 'link' ? ICONS.link : ICONS.file;
-            const label = esc(file.name);
-            const name = href
-                ? '<a class="ga-file-name" href="' + esc(href) + '" target="_blank" rel="noopener" data-ga-open-file>' + label + '</a>'
-                : '<span class="ga-file-name is-gone">' + label + '</span>';
-            const mark = file.mark
-                ? '<span class="ga-file-mark' + (file.state === 'deleted' ? ' is-deleted' : '') + '">' + esc(file.mark) + '</span>'
-                : '';
-            return '<div class="ga-file" title="' + esc((file.kind === 'link' ? 'Ссылка на файл ИД' : 'Загружен') + (file.byName ? ' · ' + file.byName : '')) + '">'
-                + '<span class="ga-file-icon">' + icon + '</span>' + name + mark + '</div>';
-        }).join('');
+    // A file row of the checklists: name, size, «Заменить», «Скачать».
+    function fileRowHtml(itemId, file, editable) {
+        const href = fileHref(file, false);
+        const name = href
+            ? '<a class="doc-file-link" href="' + esc(href) + '" target="_blank" rel="noopener">' + esc(file.name) + '</a>'
+            : '<span class="doc-file-link is-gone">' + esc(file.name) + '</span>';
+        const meta = file.kind === 'link'
+            ? '<span class="doc-file-meta ga-id-link" title="Ссылка на файл чек-листа ИД' + (file.sourceItemName ? ' · ' + esc(file.sourceItemName) : '') + '">ИД</span>'
+            : '<span class="doc-file-meta">' + esc(sizeText(file.size)) + '</span>';
+        const replace = editable && file.kind === 'upload'
+            ? '<button class="doc-file-replace checklist-action-button checklist-action-button-replace" type="button"'
+                + ' data-ga-replace="' + esc(file.id) + '" data-ga-item="' + esc(itemId) + '"'
+                + ' title="Заменить файл" aria-label="Заменить файл ' + esc(file.name) + '">' + icon('replace') + '</button>'
+            : '<span></span>';
+        const download = href
+            ? '<a class="doc-file-download checklist-action-button checklist-action-button-download"'
+                + ' href="' + esc(fileHref(file, true)) + '" download title="Скачать" aria-label="Скачать ' + esc(file.name) + '">'
+                + icon('download') + '</a>'
+            : '<span></span>';
+        const mark = file.mark
+            ? '<div class="ga-file-mark' + (file.state === 'deleted' ? ' is-deleted' : '') + '">' + esc(file.mark) + '</div>'
+            : '';
+        return '<div class="doc-file-block"><div class="doc-file-row">' + name + meta + replace + download + '</div>' + mark + '</div>';
+    }
+
+    // Files of a dropped folder: one row per top folder, as in the checklists.
+    function folderRowsHtml(item) {
+        const counts = new Map();
+        (item.files || []).forEach(file => {
+            const top = text(file.folder).split('/')[0];
+            if (top) counts.set(top, (counts.get(top) || 0) + 1);
+        });
+        if (!counts.size) return '';
+        return '<div class="doc-folders">' + Array.from(counts.entries())
+            .sort((left, right) => left[0].localeCompare(right[0], 'ru'))
+            .map(([folder, count]) => (
+                '<button class="doc-folder-row" type="button" data-ga-folder="' + esc(item.id) + '" title="Открыть папку «' + esc(folder) + '»">'
+                + '<span class="doc-folder-row-icon" aria-hidden="true">📁</span>'
+                + '<span class="doc-folder-row-name">' + esc(folder) + '</span>'
+                + '<span class="doc-folder-row-meta">· ' + esc(filesWord(count)) + '</span></button>'
+            )).join('') + '</div>';
     }
 
     function linkCellHtml(item, editable) {
         const files = item.files || [];
-        const hasContent = !!(text(item.linkText) || files.length);
-        const folder = files.length || item.archiveCount
-            ? '<button type="button" class="ga-icon-btn" data-ga-folder="' + esc(item.id) + '" title="Посмотреть папку" aria-label="Посмотреть папку">' + ICONS.folder + '</button>'
-            : '';
-        if (editable && state.linkEditor[item.id]) {
+        const rootFiles = files.filter(file => !text(file.folder));
+        const editing = editable && state.linkEditor[item.id];
+        let textHtml = '';
+        if (editing) {
             const value = state.pending[item.id + ':linkText'] !== undefined ? state.pending[item.id + ':linkText'] : item.linkText;
-            return '<div class="ga-cell ga-cell-link is-editing">'
-                + '<textarea class="ga-input ga-autogrow" rows="1" placeholder="Нормативный документ, письмо, раздел" data-ga-link-text="' + esc(item.id) + '">' + esc(value) + '</textarea>'
-                + filesHtml(item)
-                + '<div class="ga-link-actions">'
-                + '<button type="button" class="ga-btn" data-ga-upload="' + esc(item.id) + '" title="Загрузить файл">' + ICONS.upload + '<span>Загрузить</span></button>'
-                + '<button type="button" class="ga-btn" data-ga-link-pick="' + esc(item.id) + '" title="Сослаться на файл ИД">' + ICONS.link + '<span>Сослаться на файл</span></button>'
-                + folder
-                + '<button type="button" class="ga-btn ga-btn-primary" data-ga-link-done="' + esc(item.id) + '">Готово</button>'
-                + '</div>'
-                + '</div>';
+            textHtml = '<textarea class="ga-input ga-autogrow" rows="1" placeholder="Нормативный документ, письмо, раздел"'
+                + ' data-ga-link-text="' + esc(item.id) + '">' + esc(value) + '</textarea>'
+                + '<div class="ga-link-edit-actions"><button type="button" class="add-item-btn" data-ga-link-done="' + esc(item.id) + '">Готово</button></div>';
+        } else if (text(item.linkText)) {
+            textHtml = '<div class="ga-link-text">' + esc(item.linkText) + '</div>';
         }
-        if (!hasContent) {
-            return '<div class="ga-cell ga-cell-link">'
-                + (editable
-                    ? '<button type="button" class="ga-btn ga-edit-empty" data-ga-link-edit="' + esc(item.id) + '" title="Редактировать пункт">' + ICONS.pencil + '<span>Редактировать пункт</span></button>'
-                    : '<span class="ga-placeholder">—</span>')
-                + folder
-                + '</div>';
+        const tools = [];
+        if (editable) {
+            tools.push('<button class="upload-btn doc-icon-btn checklist-action-button checklist-action-button-upload" type="button"'
+                + ' data-ga-upload-trigger="' + esc(item.id) + '" title="Загрузить файлы в пункт" aria-label="Загрузить файлы в пункт">'
+                + icon('upload') + '</button>');
+            tools.push('<button class="doc-icon-btn checklist-action-button checklist-action-button-folder" type="button"'
+                + ' data-ga-link-pick="' + esc(item.id) + '" title="Сослаться на файл чек-листа ИД" aria-label="Сослаться на файл чек-листа ИД">'
+                + icon('link') + '</button>');
         }
-        return '<div class="ga-cell ga-cell-link">'
-            + (text(item.linkText) ? '<div class="ga-link-text">' + esc(item.linkText) + '</div>' : '')
-            + filesHtml(item)
-            + '<div class="ga-link-tools">'
-            + folder
-            + (editable ? '<button type="button" class="ga-icon-btn" data-ga-link-edit="' + esc(item.id) + '" title="Редактировать пункт" aria-label="Редактировать пункт">' + ICONS.pencil + '</button>' : '')
-            + '</div>'
+        if (files.length || item.archiveCount) {
+            tools.push('<button class="doc-btn doc-icon-btn checklist-action-button checklist-action-button-folder" type="button"'
+                + ' data-ga-folder="' + esc(item.id) + '" title="Посмотреть папку" aria-label="Посмотреть папку">'
+                + icon('folder') + '</button>');
+        }
+        if (editable && !editing) {
+            tools.push('<button class="doc-icon-btn checklist-action-button checklist-action-button-folder" type="button"'
+                + ' data-ga-link-edit="' + esc(item.id) + '" title="Редактировать пункт" aria-label="Редактировать пункт">'
+                + icon('pencil') + '</button>');
+        }
+        const toolbar = tools.length
+            ? '<div class="doc-actions" role="toolbar" aria-label="Действия с документами пункта">' + tools.join('') + '</div>'
+            : '';
+        const filesBlock = rootFiles.length
+            ? '<div class="doc-files">' + rootFiles.map(file => fileRowHtml(item.id, file, editable)).join('') + '</div>'
+            : '';
+        const input = editable
+            ? '<input type="file" data-ga-file-input="' + esc(item.id) + '" style="display:none;" multiple>'
+            : '';
+        const empty = !textHtml && !files.length && !editable ? '<span class="ga-placeholder">—</span>' : '';
+        return '<div class="ga-cell ga-cell-link">' + textHtml + empty
+            + '<div class="doc-cell">' + toolbar + filesBlock + folderRowsHtml(item) + input + '</div>'
             + '</div>';
     }
 
@@ -498,7 +613,8 @@
             return '<div class="ga-cell ga-cell-review"><span class="ga-placeholder">—</span></div>';
         }
         const eye = item.reviewCount > 1
-            ? '<button type="button" class="ga-icon-btn" data-ga-history="' + esc(item.id) + '" title="Посмотреть все изменения" aria-label="Посмотреть все изменения">' + ICONS.eye + '</button>'
+            ? '<button type="button" class="checklist-action-button ga-history-button" data-ga-history="' + esc(item.id) + '"'
+                + ' title="Посмотреть все изменения" aria-label="Посмотреть все изменения">' + icon('eye') + '</button>'
             : '';
         return '<div class="ga-cell ga-cell-review">'
             + '<div class="ga-review-name">' + esc(review.userName || ('ID ' + review.userId)) + '</div>'
@@ -536,9 +652,10 @@
             + noteCellHtml(item, editable)
             + '</div>';
         const adding = editable && state.addingUnder === item.id
-            ? '<div class="ga-add-row ga-add-sub"><input type="text" class="ga-input" data-ga-new-sub="' + esc(item.id) + '" placeholder="Новый подпункт">'
-                + '<button type="button" class="ga-btn" data-ga-new-sub-save="' + esc(item.id) + '">Добавить</button>'
-                + '<button type="button" class="ga-btn" data-ga-new-sub-cancel>Отмена</button></div>'
+            ? '<div class="add-item-row subitem-add-row ga-add-sub">'
+                + '<input class="add-item-input subitem-add-input" type="text" maxlength="1000" placeholder="Название подпункта" data-ga-new-sub="' + esc(item.id) + '">'
+                + '<button class="add-item-btn" type="button" data-ga-new-sub-save="' + esc(item.id) + '">Добавить подпункт</button>'
+                + '<button class="subitem-add-cancel" type="button" data-ga-new-sub-cancel title="Отмена" aria-label="Отмена">×</button></div>'
             : '';
         return row + adding;
     }
@@ -547,8 +664,8 @@
         const shown = items().filter(item => item.group === group.id && item.status !== 'nr' && !item.hidden);
         const rows = shown.map(item => rowHtml(item, editable)).join('');
         const add = editable
-            ? '<div class="ga-add-row"><input type="text" class="ga-input" data-ga-new-item="' + esc(group.id) + '" placeholder="Новый пункт">'
-                + '<button type="button" class="ga-btn" data-ga-new-item-save="' + esc(group.id) + '">Добавить пункт</button></div>'
+            ? '<div class="add-item-row"><input class="add-item-input" type="text" maxlength="1000" placeholder="Новый пункт" data-ga-new-item="' + esc(group.id) + '">'
+                + '<button class="add-item-btn" type="button" data-ga-new-item-save="' + esc(group.id) + '">Добавить пункт</button></div>'
             : '';
         return '<div class="ga-group" data-ga-group="' + esc(group.id) + '">'
             + '<div class="ga-group-title">' + esc(group.title) + '</div>'
@@ -575,7 +692,7 @@
         return '<div class="ga-panel' + (editable ? ' is-editable' : '') + '">'
             + headerHtml()
             + blocks
-            + '<input type="file" multiple hidden data-ga-file-input>'
+            + '<input type="file" hidden data-ga-replace-input>'
             + '</div>';
     }
 
@@ -599,7 +716,12 @@
                 + '<button type="button" class="status-indicator gray ga-status" data-ga-status="' + esc(item.id) + '"'
                 + ' title="' + esc(editable ? 'Не требуется. Нажмите, чтобы вернуть пункт в Граданализ' : 'Не требуется') + '"' + (editable ? '' : ' disabled') + '></button>'
                 + '<div class="item-name-wrap"><span class="item-name">' + esc(item.name) + '</span>'
-                + (children.length ? '<span class="ga-sub-counter">+ ' + children.length + ' подп.</span>' : '') + '</div>'
+                + (children.length
+                    ? '<span class="subitem-counter" title="Подпункты в «Не требуется» вместе с пунктом: ' + children.length + '">'
+                        + '<svg class="subitem-counter-icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="4" cy="3.5" r="1.8"></circle>'
+                        + '<circle cx="12" cy="12.5" r="1.8"></circle><path d="M4 5.3v3.2a4 4 0 0 0 4 4h2.2"></path></svg>'
+                        + '<span>' + children.length + '</span></span>'
+                    : '') + '</div>'
                 + '</div></div>'
                 + '<div class="td"><span class="ga-nr-where" title="' + esc(where) + '"><span class="ga-badge">ГА</span>' + esc(groupTitle(item.group)) + '</span></div>'
                 + '</div>';
@@ -609,6 +731,11 @@
     function afterRender(root) {
         const scope = root || doc;
         scope.querySelectorAll('.ga-autogrow').forEach(grow);
+        scope.querySelectorAll('[data-ga-upload-trigger]').forEach(trigger => {
+            const itemId = trigger.dataset.gaUploadTrigger;
+            const input = scope.querySelector('[data-ga-file-input="' + itemId + '"]');
+            attachUploadArea(trigger, input, itemId, 'ga:' + dialogId + ':' + itemId);
+        });
         if (state.focus) {
             const target = doc.querySelector(state.focus.selector);
             if (target) {
@@ -701,7 +828,7 @@
         backdrop.className = 'ga-modal-backdrop';
         backdrop.innerHTML = '<div class="ga-modal ' + (extraClass || '') + '" role="dialog" aria-modal="true">'
             + '<div class="ga-modal-head"><div class="ga-modal-title">' + esc(title) + '</div>'
-            + '<button type="button" class="ga-icon-btn" data-ga-modal-close title="Закрыть" aria-label="Закрыть">' + ICONS.remove + '</button></div>'
+            + '<button type="button" class="checklist-action-button" data-ga-modal-close title="Закрыть" aria-label="Закрыть">' + icon('remove') + '</button></div>'
             + '<div class="ga-modal-body">' + bodyHtml + '</div></div>';
         doc.body.appendChild(backdrop);
         return backdrop;
@@ -712,11 +839,25 @@
         return (await getJson('api/ga/item', { dialogId, itemId, userId: who.userId, sessionId: sessionId() })).item;
     }
 
-    function fileRowHtml(file, archived, editable, itemId) {
-        const href = fileHref(file);
+    // A file row of the folder page of the checklists: the name with
+    // «Заменить» and «Скачать» next to it, then where it came from, when and
+    // who added it.
+    function folderFileRowHtml(file, archived, editable, itemId) {
+        const href = fileHref(file, false);
+        const folder = text(file.folder) ? '<span class="ga-muted">' + esc(file.folder) + ' / </span>' : '';
         const name = href
-            ? '<a href="' + esc(href) + '" target="_blank" rel="noopener" data-ga-open-file>' + esc(file.name) + '</a>'
-            : '<span class="is-gone">' + esc(file.name) + '</span>';
+            ? '<a class="folder-document-name" href="' + esc(href) + '" target="_blank" rel="noopener noreferrer" title="Открыть файл: ' + esc(file.name) + '">' + esc(file.name) + '</a>'
+            : '<span class="folder-document-name is-gone">' + esc(file.name) + '</span>';
+        const replace = !archived && editable && file.kind === 'upload'
+            ? '<button class="folder-replace-upload-button checklist-action-button checklist-action-button-replace" type="button"'
+                + ' data-ga-replace="' + esc(file.id) + '" data-ga-item="' + esc(itemId) + '"'
+                + ' title="Загрузить новую версию файла" aria-label="Заменить файл">' + icon('replace') + '</button>'
+            : '';
+        const download = href
+            ? '<a class="folder-download-button checklist-action-button checklist-action-button-download"'
+                + ' href="' + esc(fileHref(file, true)) + '" download title="Скачать файл" aria-label="Скачать файл ' + esc(file.name) + '">'
+                + icon('download') + '</a>'
+            : '';
         const kind = file.kind === 'link'
             ? 'Ссылка на ИД' + (file.sourceItemName ? ' · ' + esc(file.sourceItemName) : '')
             : 'Загружен';
@@ -725,16 +866,13 @@
             ? '<div class="ga-muted">' + (file.reason === 'replaced' ? 'Заменён' : 'Перенесён в архив') + ' '
                 + esc(formatMoment(file.archivedAt)) + (file.archivedByName ? ' · ' + esc(file.archivedByName) : '') + '</div>'
             : '';
-        const actions = !archived && editable
-            ? '<button type="button" class="ga-icon-btn" data-ga-replace="' + esc(file.id) + '" data-ga-item="' + esc(itemId) + '" title="Заменить файл" aria-label="Заменить файл">' + ICONS.upload + '</button>'
-                + '<button type="button" class="ga-icon-btn" data-ga-archive="' + esc(file.id) + '" data-ga-item="' + esc(itemId) + '" title="Перенести в архив" aria-label="Перенести в архив">' + ICONS.archive + '</button>'
-            : '';
-        return '<tr><td><span class="ga-file-icon">' + (file.kind === 'link' ? ICONS.link : ICONS.file) + '</span></td>'
-            + '<td>' + name + mark + archivedInfo + '</td>'
+        return '<tr><td><div class="folder-document-name-layout">' + folder + name
+            + '<span class="folder-document-inline-actions">' + replace + download + '</span></div>'
+            + mark + archivedInfo + '</td>'
+            + '<td>' + (file.kind === 'upload' ? esc(sizeText(file.size)) : '') + '</td>'
             + '<td>' + kind + '</td>'
             + '<td>' + esc(formatMoment(file.at)) + '</td>'
-            + '<td>' + esc(file.byName || '—') + '</td>'
-            + '<td class="ga-actions-cell">' + actions + '</td></tr>';
+            + '<td>' + esc(file.byName || '—') + '</td></tr>';
     }
 
     async function openFolder(itemId) {
@@ -746,24 +884,31 @@
             return;
         }
         const editable = canEditNow();
-        const head = '<tr><th></th><th>Файл</th><th>Источник</th><th>Добавлен</th><th>Кто добавил</th><th></th></tr>';
+        const head = '<tr><th>Файл</th><th>Размер</th><th>Источник</th><th>Добавлен</th><th>Кто добавил</th></tr>';
         const current = (item.files || []).length
-            ? '<table class="ga-table">' + head + item.files.map(file => fileRowHtml(file, false, editable, itemId)).join('') + '</table>'
+            ? '<table class="ga-table">' + head + item.files.map(file => folderFileRowHtml(file, false, editable, itemId)).join('') + '</table>'
             : '<div class="ga-muted">Файлов нет</div>';
         const archive = (item.archive || []).length
-            ? '<table class="ga-table">' + head + item.archive.map(file => fileRowHtml(file, true, false, itemId)).join('') + '</table>'
+            ? '<table class="ga-table">' + head + item.archive.map(file => folderFileRowHtml(file, true, false, itemId)).join('') + '</table>'
             : '<div class="ga-muted">Архив пуст</div>';
         const actions = editable
-            ? '<div class="ga-link-actions">'
-                + '<button type="button" class="ga-btn" data-ga-upload="' + esc(itemId) + '">' + ICONS.upload + '<span>Загрузить файл</span></button>'
-                + '<button type="button" class="ga-btn" data-ga-link-pick="' + esc(itemId) + '">' + ICONS.link + '<span>Сослаться на файл</span></button>'
-                + '</div>'
+            ? '<div class="doc-cell ga-modal-actions"><div class="doc-actions" role="toolbar" aria-label="Действия с файлами пункта">'
+                + '<button class="upload-btn doc-icon-btn checklist-action-button checklist-action-button-upload" type="button"'
+                + ' data-ga-folder-upload="' + esc(itemId) + '" title="Загрузить файлы в пункт" aria-label="Загрузить файлы в пункт">' + icon('upload') + '</button>'
+                + '<button class="doc-icon-btn checklist-action-button checklist-action-button-folder" type="button"'
+                + ' data-ga-link-pick="' + esc(itemId) + '" title="Сослаться на файл чек-листа ИД" aria-label="Сослаться на файл чек-листа ИД">' + icon('link') + '</button>'
+                + '</div><input type="file" data-ga-folder-input="' + esc(itemId) + '" style="display:none;" multiple></div>'
             : '';
-        openModal('Папка пункта: ' + item.name.trim(),
+        const modal = openModal('Папка пункта: ' + item.name.trim(),
             actions
             + '<h4>Файлы</h4>' + current
-            + '<h4>Архив</h4>' + archive,
-            'ga-modal-folder').dataset.gaFolderItem = itemId;
+            + '<h4>Архив версий</h4>' + archive,
+            'ga-modal-folder');
+        modal.dataset.gaFolderItem = itemId;
+        const trigger = modal.querySelector('[data-ga-folder-upload]');
+        if (trigger) {
+            attachUploadArea(trigger, modal.querySelector('[data-ga-folder-input]'), itemId, 'ga-folder:' + dialogId + ':' + itemId);
+        }
     }
 
     async function openHistory(itemId) {
@@ -803,7 +948,7 @@
                 + entry.documents.map(document => (
                     '<button type="button" class="ga-pick-doc" data-ga-pick-source="' + esc(source.dialogId) + '"'
                     + ' data-ga-pick-item="' + esc(entry.itemId) + '" data-ga-pick-doc="' + esc(document.id) + '" data-ga-target="' + esc(itemId) + '">'
-                    + '<span class="ga-file-icon">' + ICONS.file + '</span><span>' + esc(document.name) + '</span>'
+                    + '<span class="ga-file-icon">' + icon('file') + '</span><span>' + esc(document.name) + '</span>'
                     + '<span class="ga-muted">' + esc(formatMoment(document.at)) + '</span></button>'
                 )).join('')
                 + '</div>'
@@ -850,13 +995,14 @@
 
     // ---- events (delegated: the panel is redrawn with the checklist) ----
 
-    let uploadTarget = { itemId: '', replaceFileId: '' };
+    let replaceTarget = { itemId: '', fileId: '' };
 
-    function pickFiles(itemId, replaceFileId) {
-        const input = doc.querySelector('[data-ga-file-input]');
-        if (!input) return;
-        uploadTarget = { itemId, replaceFileId: replaceFileId || '' };
-        input.multiple = !replaceFileId;
+    // «Заменить» of the checklists: the new version takes the place of the
+    // file, the old one goes to the archive of versions.
+    function pickReplacement(itemId, fileId) {
+        const input = doc.querySelector('[data-ga-replace-input]');
+        if (!input || !canEditNow()) return;
+        replaceTarget = { itemId, fileId };
         input.value = '';
         input.click();
     }
@@ -876,9 +1022,9 @@
 
     doc.addEventListener('click', async function (event) {
         const target = event.target.closest('[data-ga-status],[data-ga-set-status],[data-ga-link-edit],[data-ga-link-done],'
-            + '[data-ga-upload],[data-ga-link-pick],[data-ga-folder],[data-ga-history],[data-ga-rename],[data-ga-delete],'
+            + '[data-ga-link-pick],[data-ga-folder],[data-ga-history],[data-ga-rename],[data-ga-delete],'
             + '[data-ga-add-sub],[data-ga-new-sub-save],[data-ga-new-sub-cancel],[data-ga-new-item-save],[data-ga-modal-close],'
-            + '[data-ga-replace],[data-ga-archive],[data-ga-pick-doc],[data-ga-architect-add],[data-ga-architect-cancel],'
+            + '[data-ga-replace],[data-ga-pick-doc],[data-ga-architect-add],[data-ga-architect-cancel],'
             + '[data-ga-architect-remove]');
         if (!event.target.closest('.ga-status-menu') && !(target && target.dataset.gaStatus !== undefined)) {
             closeMenu();
@@ -918,14 +1064,8 @@
             delete state.linkEditor[itemId];
             if (field) await saveText('linkText', itemId, field.value.trim());
             redraw();
-        } else if (data.gaUpload !== undefined) {
-            pickFiles(data.gaUpload, '');
         } else if (data.gaReplace !== undefined) {
-            pickFiles(data.gaItem, data.gaReplace);
-        } else if (data.gaArchive !== undefined) {
-            if (!global.confirm('Перенести файл в архив пункта?')) return;
-            await change('archiveFile', { itemId: data.gaItem, fileId: data.gaArchive });
-            await refreshOpenFolder();
+            pickReplacement(data.gaItem, data.gaReplace);
         } else if (data.gaLinkPick !== undefined) {
             openPicker(data.gaLinkPick);
         } else if (data.gaPickDoc !== undefined) {
@@ -1017,11 +1157,12 @@
     doc.addEventListener('change', async function (event) {
         const field = event.target;
         if (!field.dataset) return;
-        if (field.dataset.gaFileInput !== undefined) {
-            const files = Array.from(field.files || []);
-            const target = uploadTarget;
+        if (field.dataset.gaReplaceInput !== undefined) {
+            const files = Array.from(field.files || []).slice(0, 1);
+            const target = replaceTarget;
             field.value = '';
-            await upload(target.itemId, files, target.replaceFileId);
+            if (!files.length || !target.fileId) return;
+            await uploadFiles(target.itemId, files, target.fileId);
             await refreshOpenFolder();
             return;
         }
