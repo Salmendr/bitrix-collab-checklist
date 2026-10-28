@@ -190,6 +190,20 @@ def _prepare_custom_job_target(job: dict, item: dict) -> dict:
     return updated or {**job, "target_path": resolved_target}
 
 
+def _refuse_move_into_itself(job: dict) -> None:
+    """A folder never goes into itself: Yandex refuses it anyway, here the
+    reason is said in words."""
+    if clean_cell_value(job.get("action")) not in {"move_item_folder", "rename_item_folder"}:
+        return
+    source = clean_cell_value(job.get("source_path")).rstrip("/").casefold()
+    target = clean_cell_value(job.get("target_path")).rstrip("/").casefold()
+    if source and target.startswith(source + "/"):
+        raise RuntimeError(
+            "Папку пункта нельзя перенести внутрь неё самой: "
+            + clean_cell_value(job.get("target_path"))
+        )
+
+
 def _execute_yandex_structure_mutation(job: dict) -> dict:
     action = clean_cell_value(job.get("action"))
     dialog_id = normalize_dialog_id(job.get("dialog_id"))
@@ -205,6 +219,7 @@ def _execute_yandex_structure_mutation(job: dict) -> dict:
     from app.checklists.yandex_subfolders import retarget_subitem_job
     job = retarget_subitem_job(job, item)
     job = _prepare_custom_job_target(job, item)
+    _refuse_move_into_itself(job)
     try:
         return _run_yandex_structure_mutation(job)
     except RuntimeError as exc:
@@ -714,6 +729,11 @@ def start_yandex_structure_workers() -> dict:
             daemon=True,
         )
         thread.start()
+
+    # Folders of custom «Концепция» items made inside the folder of the
+    # standard item by an earlier rule go to their place.
+    from app.checklists.concept_folder_repair import start_concept_folder_repair
+    start_concept_folder_repair()
 
     return {
         "ok": True,

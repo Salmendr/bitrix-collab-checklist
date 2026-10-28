@@ -1066,20 +1066,14 @@ def resolve_custom_item_parent_yandex_path(
         # items we need the group directory, therefore one common leading
         # segment is sufficient for stages P/R (01_Общие данные,
         # 02_Стадия П/Р, 03_Экспертиза ...).  If a deeper common directory
-        # exists, use it as well.
+        # exists, use it as well.  It is never the folder of a standard item
+        # itself: the only item of «Концепция» lies right in the stage folder,
+        # so its custom items lie there too, next to it.
+        common_parts = common_parts[
+            :max(0, min(len(parts) for parts in split_paths) - 1)
+        ]
         if common_parts:
             relative_parent = "/".join(common_parts)
-            return normalize_yandex_disk_path(
-                f"{root_path.rstrip('/')}/{relative_parent}"
-            )
-
-        first_segments = {
-            parts[0]
-            for parts in split_paths
-            if parts
-        }
-        if len(first_segments) == 1:
-            relative_parent = next(iter(first_segments))
             return normalize_yandex_disk_path(
                 f"{root_path.rstrip('/')}/{relative_parent}"
             )
@@ -1336,6 +1330,7 @@ def resolve_item_group_parent_yandex_path(
 
     specs = get_folder_specs_for_checklist(checklist_key) or {}
     relative_candidates: list[str] = []
+    has_stage_level_item = False
 
     for raw_spec in specs.values():
         spec = raw_spec or {}
@@ -1365,6 +1360,8 @@ def resolve_item_group_parent_yandex_path(
         )
         if parent_relative:
             relative_candidates.append(parent_relative)
+        else:
+            has_stage_level_item = True
 
     if relative_candidates:
         relative_candidates.sort(
@@ -1377,6 +1374,11 @@ def resolve_item_group_parent_yandex_path(
         return normalize_yandex_disk_path(
             f"{root_path.rstrip('/')}/{relative_candidates[0]}"
         )
+
+    # The standard items of the section lie right in the stage folder
+    # («Согласованная/Утвержденная концепция»): so do its custom items.
+    if has_stage_level_item:
+        return root_path
 
     group_title = clean_cell_value(config.get_group_title(normalized_group_id))
     if not group_title:
