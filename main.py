@@ -98,6 +98,7 @@ from app.checklists.id_reminder_routes import router as id_reminder_router
 from app.auth.middleware import AuthMiddleware
 from app.auth.routes import router as auth_router
 from app.checklists.id_reminders import start_worker as start_id_reminders, stop_worker as stop_id_reminders
+from app.checklists.date_reminders import start_worker as start_date_reminders, stop_worker as stop_date_reminders
 
 app = FastAPI()
 app.include_router(id_reminder_router)
@@ -105,6 +106,7 @@ app.include_router(id_reminder_router)
 @app.on_event("shutdown")
 def shutdown_id_reminders():
     stop_id_reminders()
+    stop_date_reminders()
 
 
 @app.middleware("http")
@@ -229,3 +231,4 @@ def startup_event():
     )
 
     start_id_reminders()
+    start_date_reminders()

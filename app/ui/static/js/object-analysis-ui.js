@@ -80,7 +80,10 @@
             panel: dialogId => request('GET', '/api/object-analysis', { dialogId }),
             slice: dialogId => request('GET', '/api/object-analysis/slice', { dialogId }),
             risks: dialogId => request('GET', '/api/object-analysis/risks', { dialogId }),
-            saveField: (dialogId, field, value) => request('POST', '/api/object-analysis/field', { dialogId, field, value }),
+            saveField: (dialogId, field, value, extra) => request(
+                'POST', '/api/object-analysis/field', Object.assign({ dialogId, field, value }, extra || {})
+            ),
+            usersUrl: () => base + '/api/checklist/bitrix-users',
             changeOption: (dialogId, list, action, optionId, label) => request(
                 'POST', '/api/object-analysis/options', { dialogId, list, action, optionId: optionId || '', label: label || '' }
             ),
@@ -230,14 +233,15 @@
             case 'oprCustomerDate':
             case 'oprPdDate':
                 return project[key]
-                    ? '<span class="oa-text">' + esc(formatDate(project[key])) + '</span>'
+                    ? '<span class="oa-text" title="' + esc(recipientsTitle(project, key)) + '">' + esc(formatDate(project[key])) + '</span>'
                     : '<span class="oa-placeholder">—</span>';
             case 'meeting':
             case 'vks': {
                 const value = meetingText(project[key]);
+                const weekly = value && project[key].weekly ? 'Еженедельно, с ' + formatDate(project[key].at) + '\n' : '';
                 return value
-                    ? '<span class="oa-text' + (project[key].weekly ? ' is-weekly' : '') + '"'
-                        + (project[key].weekly ? ' title="Еженедельно, с ' + esc(formatDate(project[key].at)) + '"' : '') + '>'
+                    ? '<span class="oa-text' + (weekly ? ' is-weekly' : '') + '"'
+                        + ' title="' + esc(weekly + recipientsTitle(project, key)) + '">'
                         + esc(value) + '</span>'
                     : '<span class="oa-placeholder">—</span>';
             }
@@ -287,8 +291,13 @@
 
     let popover = null;
     let popoverClose = null;
+    let popoverCleanup = null;
 
     function closeEditor() {
+        if (popoverCleanup) {
+            popoverCleanup();
+            popoverCleanup = null;
+        }
         if (popover) {
             popover.remove();
             popover = null;
@@ -334,7 +343,9 @@
         };
         doc.addEventListener('mousedown', popoverClose, true);
         doc.addEventListener('keydown', popoverKey, true);
-        if (setup) setup(popover);
+        // setup may return what to stop when the editor closes.
+        const cleanup = setup ? setup(popover) : null;
+        if (typeof cleanup === 'function') popoverCleanup = cleanup;
         const focus = popover.querySelector('[data-oa-focus]');
         if (focus) focus.focus();
         return popover;
@@ -356,10 +367,10 @@
         }
     }
 
-    async function save(element, ctx, project, field, value) {
+    async function save(element, ctx, project, field, value, extra) {
         setBusy(element, true);
         try {
-            const result = await ctx.api.saveField(project.dialogId, field, value);
+            const result = await ctx.api.saveField(project.dialogId, field, value, extra);
             ctx.onProject(result.project);
             closeEditor();
         } catch (error) {
@@ -588,18 +599,137 @@
         });
     }
 
+    // ---- reminders of a date ----
+
+    const REMINDER_NOTE = 'Личным сообщением в Битриксе в 8:30 по Хабаровску: за 7, 3 и 1 день и в сам день.';
+    const WEEKLY_NOTE = 'Личным сообщением в Битриксе в 8:30 по Хабаровску в каждый день встречи.';
+    const DELIVERY_STATUS = {
+        sent: 'отправлено',
+        pending: 'в очереди',
+        sending: 'отправляется',
+        failed: 'не отправлено',
+        uncertain: 'Битрикс не подтвердил',
+        expired: 'не отправлено вовремя'
+    };
+
+    function reminderInfo(project, key) {
+        return (project.reminders && project.reminders[key]) || { recipients: [], history: [] };
+    }
+
+    function recipientsTitle(project, key) {
+        const people = reminderInfo(project, key).recipients || [];
+        return people.length
+            ? 'Напоминания: ' + people.map(person => person.name).join(', ')
+            : 'Напоминания никому не отправляются';
+    }
+
+    // The time of a reminder is Khabarovsk time (UTC+10) wherever the
+    // window is open.
+    function khabarovskMoment(value) {
+        const moment = new Date(text(value));
+        if (Number.isNaN(moment.getTime())) return '';
+        const local = new Date(moment.getTime() + 10 * 3600 * 1000);
+        const pad = number => String(number).padStart(2, '0');
+        return pad(local.getUTCDate()) + '.' + pad(local.getUTCMonth() + 1) + '.' + local.getUTCFullYear()
+            + ' ' + pad(local.getUTCHours()) + ':' + pad(local.getUTCMinutes());
+    }
+
+    function remindersHtml(project, key, weekly) {
+        const history = (reminderInfo(project, key).history || []).map(entry => (
+            '<li' + (entry.status === 'sent' ? '' : ' class="is-problem"') + (entry.error ? ' title="' + esc(entry.error) + '"' : '') + '>'
+            + esc(khabarovskMoment(entry.at)) + ' · ' + esc(entry.userName) + ' · ' + esc(DELIVERY_STATUS[entry.status] || entry.status)
+            + '</li>'
+        )).join('');
+        return '<div class="oa-pop-subtitle">Получатели напоминаний</div>'
+            + '<div class="oa-recipients" data-oa-recipients></div>'
+            + '<div class="oa-user-picker">'
+            + '<input type="search" class="oa-pop-input" placeholder="Добавить: имя или фамилия сотрудника" autocomplete="off" data-oa-user-input>'
+            + '<input type="hidden" data-oa-user-id><input type="hidden" data-oa-user-name>'
+            + '<div class="oa-user-results" data-oa-user-results hidden></div>'
+            + '<div class="oa-user-hint" data-oa-user-hint></div>'
+            + '</div>'
+            + '<div class="oa-pop-note" data-oa-schedule>' + esc(weekly ? WEEKLY_NOTE : REMINDER_NOTE) + '</div>'
+            + (history ? '<div class="oa-pop-subtitle">Последние напоминания</div><ul class="oa-reminder-history">' + history + '</ul>' : '');
+    }
+
+    // Chips of the recipients and the search of Bitrix employees; returns
+    // the list as it is now and the stop of the search.
+    function bindRecipients(element, ctx, project, key) {
+        let people = (reminderInfo(project, key).recipients || [])
+            .map(person => ({ userId: text(person.userId), name: text(person.name) }));
+        const box = element.querySelector('[data-oa-recipients]');
+        const input = element.querySelector('[data-oa-user-input]');
+        function paint() {
+            box.innerHTML = people.length
+                ? people.map(person => (
+                    '<span class="oa-recipient" data-oa-recipient="' + esc(person.userId) + '">' + esc(person.name)
+                    + '<button type="button" class="oa-recipient-remove" data-oa-recipient-remove="' + esc(person.userId) + '"'
+                    + ' title="Убрать из получателей" aria-label="Убрать ' + esc(person.name) + ' из получателей">×</button></span>'
+                )).join('')
+                : '<span class="oa-placeholder">Никого: напоминания не отправляются</span>';
+        }
+        box.addEventListener('click', event => {
+            const remove = event.target.closest('[data-oa-recipient-remove]');
+            if (!remove) return;
+            event.preventDefault();
+            people = people.filter(person => person.userId !== remove.dataset.oaRecipientRemove);
+            paint();
+        });
+        paint();
+        let picker = null;
+        if (global.ChecklistBitrixUserPicker && ctx.api.usersUrl) {
+            picker = global.ChecklistBitrixUserPicker.create({
+                input,
+                results: element.querySelector('[data-oa-user-results]'),
+                hint: element.querySelector('[data-oa-user-hint]'),
+                idInput: element.querySelector('[data-oa-user-id]'),
+                nameInput: element.querySelector('[data-oa-user-name]'),
+                apiUrl: ctx.api.usersUrl,
+                onSelect(user) {
+                    const userId = text(user && user.userId);
+                    if (!userId) return;
+                    if (!people.some(person => person.userId === userId)) {
+                        people.push({ userId, name: text(user.name) || 'ID ' + userId });
+                    }
+                    paint();
+                    picker.clear();
+                }
+            });
+        } else {
+            input.disabled = true;
+            input.placeholder = 'Поиск сотрудников недоступен';
+        }
+        // The popover grows with the found employees: it stays on the screen.
+        const observer = global.ResizeObserver ? new global.ResizeObserver(() => {
+            const anchor = ctx.findAnchor(project.dialogId, key);
+            if (anchor && element.isConnected) place(anchor, element);
+        }) : null;
+        if (observer) observer.observe(element);
+        return {
+            list: () => people.map(person => ({ userId: person.userId, name: person.name })),
+            stop() {
+                if (picker) picker.destroy();
+                if (observer) observer.disconnect();
+            }
+        };
+    }
+
     function editDate(anchor, project, ctx, key) {
         const title = key === 'oprCustomerDate' ? 'Дата передачи ОПР Заказчику' : 'Дата передачи ОПР в стадию ПД';
         const html = '<div class="oa-pop-title">' + esc(title) + '</div>'
             + '<input type="date" class="oa-pop-input" value="' + esc(project[key] || '') + '" data-oa-date data-oa-focus>'
+            + remindersHtml(project, key, false)
             + footer('Очистить');
-        openPopover(anchor, html, element => {
+        return openPopover(anchor, html, element => {
+            element.classList.add('oa-popover-dates');
             const input = element.querySelector('[data-oa-date]');
+            const recipients = bindRecipients(element, ctx, project, key);
             bindFooter(
                 element,
-                () => save(element, ctx, project, key, input.value),
-                () => save(element, ctx, project, key, '')
+                () => save(element, ctx, project, key, input.value, { recipients: recipients.list() }),
+                () => save(element, ctx, project, key, '', { recipients: recipients.list() })
             );
+            return recipients.stop;
         });
     }
 
@@ -610,15 +740,21 @@
             + '<input type="datetime-local" class="oa-pop-input" value="' + esc(meeting.at || '') + '" data-oa-at data-oa-focus>'
             + '<label class="oa-pop-check oa-pop-weekly"><input type="checkbox" data-oa-weekly' + (meeting.weekly ? ' checked' : '') + '>'
             + '<span>Повторять еженедельно</span></label>'
+            + remindersHtml(project, key, meeting.weekly)
             + footer('Очистить');
-        openPopover(anchor, html, element => {
+        return openPopover(anchor, html, element => {
+            element.classList.add('oa-popover-dates');
             const at = element.querySelector('[data-oa-at]');
             const weekly = element.querySelector('[data-oa-weekly]');
+            const note = element.querySelector('[data-oa-schedule]');
+            weekly.addEventListener('change', () => { note.textContent = weekly.checked ? WEEKLY_NOTE : REMINDER_NOTE; });
+            const recipients = bindRecipients(element, ctx, project, key);
             bindFooter(
                 element,
-                () => save(element, ctx, project, key, { at: at.value, weekly: weekly.checked }),
-                () => save(element, ctx, project, key, { at: '', weekly: false })
+                () => save(element, ctx, project, key, { at: at.value, weekly: weekly.checked }, { recipients: recipients.list() }),
+                () => save(element, ctx, project, key, { at: '', weekly: false }, { recipients: recipients.list() })
             );
+            return recipients.stop;
         });
     }
 

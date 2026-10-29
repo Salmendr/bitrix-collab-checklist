@@ -26,6 +26,7 @@ from typing import Any
 
 from app.db import get_conn
 from app.logging_utils import write_debug_log
+from app.checklists import date_reminders
 from app.checklists.utils import clean_cell_value, normalize_dialog_id, normalize_status
 
 
@@ -214,6 +215,8 @@ def _empty_record() -> dict:
         "vks": {"at": "", "weekly": False},
         "customerResponsible": "",
         "risks": None,
+        # Recipients of the reminders of every date and who set it.
+        "reminders": {},
     }
 
 
@@ -245,6 +248,11 @@ def _clean_record(raw: Any) -> dict:
         record[field] = {"at": at, "weekly": bool(meeting.get("weekly")) and bool(at)}
     record["customerResponsible"] = str(raw.get("customerResponsible") or "")[:MAX_RESPONSIBLE_TEXT]
     record["risks"] = _clean_risks(raw.get("risks")) if raw.get("risks") is not None else None
+    reminders = raw.get("reminders") if isinstance(raw.get("reminders"), dict) else {}
+    record["reminders"] = {
+        field: date_reminders.clean_meta(reminders[field])
+        for field in date_reminders.FIELDS if isinstance(reminders.get(field), dict)
+    }
     return record
 
 
@@ -492,7 +500,8 @@ def _require(base: str, user_id: str, right: str) -> dict:
 # Field changes
 # ---------------------------------------------------------------------------
 
-def update_field(dialog_id: str, field: str, value: Any, *, actor: dict) -> dict:
+def update_field(dialog_id: str, field: str, value: Any, *, actor: dict, recipients: Any = None) -> dict:
+    """recipients: the list of the reminders of a date; None keeps it."""
     base = base_of(dialog_id)
     if not base:
         raise ObjectAnalysisError("Не указан проект")
@@ -502,7 +511,10 @@ def update_field(dialog_id: str, field: str, value: Any, *, actor: dict) -> dict
     options = list_options()
 
     def change(record: dict) -> None:
+        before = record[field]
         record[field] = _validated(field, value, record, options)
+        if field in date_reminders.FIELDS:
+            _change_reminders(record, field, before, recipients, actor)
 
     record = _change_record(base, actor, change)
     write_debug_log("object_analysis_field_changed", {
@@ -554,6 +566,23 @@ def _validated(field: str, value: Any, record: dict, options: dict) -> Any:
             raise ObjectAnalysisError(f"Не больше {MAX_RESPONSIBLE_TEXT} символов")
         return text
     raise ObjectAnalysisError("Неизвестное поле")
+
+
+def _change_reminders(record: dict, field: str, before: Any, recipients: Any, actor: dict) -> None:
+    meta = date_reminders.clean_meta(record["reminders"].get(field))
+    if recipients is not None:
+        try:
+            meta["recipients"] = date_reminders.validated_recipients(
+                recipients, date_reminders.recipients_of(meta)
+            )
+        except date_reminders.RecipientError as exc:
+            raise ObjectAnalysisError(str(exc)) from exc
+    # A new date: its reminders count from now and name who set it.
+    if date_reminders.value_key(field, before) != date_reminders.value_key(field, record[field]):
+        meta["setById"] = clean_cell_value(actor.get("userId"))
+        meta["setByName"] = clean_cell_value(actor.get("userName"))
+        meta["setAt"] = date_reminders.iso(date_reminders.now_utc())
+    record["reminders"][field] = meta
 
 
 def _chosen_options(value: Any, current: list[str], options: dict, list_key: str) -> list[str]:
@@ -887,9 +916,28 @@ def project_view(base: str, record: dict, *, name: str = "", user_id: str = "",
         "meeting": record["meeting"],
         "vks": record["vks"],
         "customerResponsible": record["customerResponsible"],
+        "reminders": reminders_view(base, record),
         "idChecklistUrl": checklist_link(base, "id"),
         "oprChecklistUrl": checklist_link(base, "opr"),
     }
+
+
+def reminders_view(base: str, record: dict) -> dict:
+    try:
+        sent = date_reminders.history(base)
+    except Exception as exc:
+        write_debug_log("object_analysis_reminder_history_failed", {"base": base, "error": str(exc)})
+        sent = {}
+    defaults = date_reminders.default_recipients()
+    result = {}
+    for field in date_reminders.FIELDS:
+        meta = date_reminders.clean_meta(record["reminders"].get(field))
+        result[field] = {
+            "recipients": date_reminders.recipients_of(meta, defaults),
+            "setByName": meta["setByName"],
+            "history": sent.get(field, []),
+        }
+    return result
 
 
 def _common(options: dict | None = None) -> dict:

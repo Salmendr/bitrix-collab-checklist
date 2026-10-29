@@ -1,6 +1,6 @@
 {
-  "stage": "8.31-ga-controls",
-  "generatedAt": "2026-10-28T12:00:00+00:00",
+  "stage": "8.32-date-reminders",
+  "generatedAt": "2026-10-29T12:00:00+00:00",
   "loadOrder": [
     "checklist-host-diagnostics.js",
     "popup-bootstrap.js",
@@ -516,8 +516,8 @@
       "bytes": 18245
     },
     "object-analysis-ui.js": {
-      "sha256": "26b9ecc3a33e2469a055b8b095be04ad9e950f5a12667850276b7e576896fe62",
-      "bytes": 36596
+      "sha256": "dd38d187aa2cc4c6a115129c5e924a19c3519f5030ff166867d5c8999b930b3a",
+      "bytes": 44270
     },
     "popup-object-analysis.js": {
       "sha256": "b762e317598e6c5c123bc43e8266394d47fbd51c0c4f7545ef1fbabb97376813",

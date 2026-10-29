@@ -18,7 +18,7 @@ from app.ui.template_engine import render_ui_template
 
 router = APIRouter()
 
-ASSET_VERSION = "8.30-grad-analysis"
+ASSET_VERSION = "8.32-date-reminders"
 
 
 def _actor(payload: dict) -> dict:
@@ -55,6 +55,7 @@ async def api_object_analysis_field(request: Request):
             clean_cell_value(payload.get("field")),
             payload.get("value"),
             actor=_actor(payload),
+            recipients=payload.get("recipients"),
         )
     except object_analysis.ObjectAnalysisError as exc:
         return _error(exc)
@@ -153,7 +154,7 @@ def _page(request: Request, template: str, title: str, dialog_id: str, user_id: 
         .replace("\u2029", "\\u2029")
     )
     static = f"{app_base}/ui-static"
-    return HTMLResponse(render_ui_template(template, {
+    context = {
         "PAGE_TITLE": html.escape(title),
         "PAGE_BOOTSTRAP_JSON": bootstrap_json,
         "OBJECT_ANALYSIS_CSS_URL": html.escape(f"{static}/css/object-analysis.css?v={ASSET_VERSION}"),
@@ -163,7 +164,11 @@ def _page(request: Request, template: str, title: str, dialog_id: str, user_id: 
             + ("object-analysis-page.js" if template == "object_analysis.html" else "object-risks-page.js")
             + f"?v={ASSET_VERSION}"
         ),
-    }))
+    }
+    if template == "object_analysis.html":
+        # The recipients of the reminders of a date are picked from Bitrix.
+        context["BITRIX_USER_PICKER_JS_URL"] = html.escape(f"{static}/js/bitrix-user-picker.js?v={ASSET_VERSION}")
+    return HTMLResponse(render_ui_template(template, context))
 
 
 @router.get("/object-analysis", response_class=HTMLResponse)

@@ -269,6 +269,70 @@
 .oa-pop-actions { display: flex; align-items: center; gap: 6px; margin-top: 10px; }
 .oa-pop-spacer { flex: 1 1 auto; }
 
+/* Reminders of a date: the recipients and the search of Bitrix employees. */
+.oa-popover.oa-popover-dates { width: 340px; }
+.oa-recipients { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px; }
+.oa-recipient {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    max-width: 100%;
+    padding: 2px 3px 2px 9px;
+    border-radius: 999px;
+    background: #eef4ff;
+    color: #1d4ed8;
+    font-size: 12px;
+    font-weight: 700;
+}
+.oa-recipient-remove {
+    width: 18px;
+    height: 18px;
+    padding: 0;
+    border: 0;
+    border-radius: 999px;
+    background: transparent;
+    color: #667085;
+    font-size: 14px;
+    line-height: 18px;
+    cursor: pointer;
+}
+.oa-recipient-remove:hover { background: #dbe7ff; color: #b42318; }
+.oa-recipient-remove:disabled { cursor: default; }
+.oa-user-results {
+    margin-top: 4px;
+    max-height: 180px;
+    overflow-y: auto;
+    padding: 4px;
+    border: 1px solid #d0d5dd;
+    border-radius: 8px;
+    background: #fff;
+}
+.oa-user-results[hidden] { display: none; }
+.oa-user-results .bitrix-user-picker-option {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    padding: 6px 8px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+.oa-user-results .bitrix-user-picker-option:hover,
+.oa-user-results .bitrix-user-picker-option:focus-visible { background: #f2f4f7; outline: none; }
+.oa-user-results .bitrix-user-picker-option-name { color: #1f2328; font-weight: 700; }
+.oa-user-results .bitrix-user-picker-option-meta { margin-top: 1px; color: #667085; font-size: 11px; }
+.oa-user-results .bitrix-user-picker-empty { padding: 6px 8px; color: #667085; font-size: 12px; }
+.oa-user-hint { margin-top: 3px; color: #98a2b3; font-size: 11px; }
+.oa-user-hint:empty { display: none; }
+.oa-user-hint[data-kind="error"],
+.oa-user-hint[data-kind="warning"] { color: #b42318; }
+.oa-pop-note { margin-top: 8px; color: #667085; font-size: 11px; line-height: 1.35; }
+.oa-reminder-history { margin: 0; padding-left: 16px; color: #667085; font-size: 11px; line-height: 1.5; }
+.oa-reminder-history .is-problem { color: #b42318; }
+
 .oa-swatches { display: flex; gap: 6px; flex-wrap: wrap; }
 .oa-swatch {
     width: 24px;
