@@ -13,11 +13,18 @@ T = TypeVar("T")
 
 YANDEX_PROJECT_LOCKS_GUARD = threading.Lock()
 YANDEX_PROJECT_LOCKS: dict[str, threading.RLock] = {}
+# Who holds the lock of a project now: a long wait names it in the log.
+YANDEX_PROJECT_LOCK_HOLDERS: dict[str, dict] = {}
+YANDEX_PROJECT_LOCK_WAIT_LOG_SECONDS = 60.0
 YANDEX_RESOURCE_RETRY_DELAYS_SECONDS = (1.0, 2.0, 4.0, 8.0)
 
 
+def _project_lock_key(dialog_id: str) -> str:
+    return normalize_dialog_id(dialog_id) or clean_cell_value(dialog_id) or "global"
+
+
 def _project_lock(dialog_id: str) -> threading.RLock:
-    key = normalize_dialog_id(dialog_id) or clean_cell_value(dialog_id) or "global"
+    key = _project_lock_key(dialog_id)
     with YANDEX_PROJECT_LOCKS_GUARD:
         return YANDEX_PROJECT_LOCKS.setdefault(key, threading.RLock())
 
@@ -104,8 +111,35 @@ def yandex_project_resource_guard(
     """
     normalized_dialog_id = normalize_dialog_id(dialog_id)
     lock = _project_lock(normalized_dialog_id)
+    key = _project_lock_key(normalized_dialog_id)
     started = time.monotonic()
-    lock.acquire()
+    while not lock.acquire(timeout=YANDEX_PROJECT_LOCK_WAIT_LOG_SECONDS):
+        with YANDEX_PROJECT_LOCKS_GUARD:
+            holder = dict(YANDEX_PROJECT_LOCK_HOLDERS.get(key) or {})
+        write_debug_log("yandex_project_resource_lock_waiting", {
+            "dialogId": normalized_dialog_id,
+            "checklistKey": clean_cell_value(checklist_key),
+            "itemId": clean_cell_value(item_id),
+            "operation": clean_cell_value(operation),
+            "waitedSeconds": round(time.monotonic() - started),
+            "heldByOperation": holder.get("operation", ""),
+            "heldByItemId": holder.get("itemId", ""),
+            "heldByThread": holder.get("thread", ""),
+            "heldForSeconds": round(time.monotonic() - holder["since"]) if holder else None,
+        })
+    with YANDEX_PROJECT_LOCKS_GUARD:
+        holder = YANDEX_PROJECT_LOCK_HOLDERS.get(key)
+        if holder and holder.get("threadId") == threading.get_ident():
+            holder["depth"] += 1
+        else:
+            YANDEX_PROJECT_LOCK_HOLDERS[key] = {
+                "operation": clean_cell_value(operation),
+                "itemId": clean_cell_value(item_id),
+                "thread": threading.current_thread().name,
+                "threadId": threading.get_ident(),
+                "since": time.monotonic(),
+                "depth": 1,
+            }
     from app.checklists.yandex_scope import active_project
     scope_token = active_project.set(normalized_dialog_id)
     waited = time.monotonic() - started
@@ -121,4 +155,10 @@ def yandex_project_resource_guard(
         yield
     finally:
         active_project.reset(scope_token)
+        with YANDEX_PROJECT_LOCKS_GUARD:
+            holder = YANDEX_PROJECT_LOCK_HOLDERS.get(key)
+            if holder and holder.get("threadId") == threading.get_ident():
+                holder["depth"] -= 1
+                if holder["depth"] <= 0:
+                    YANDEX_PROJECT_LOCK_HOLDERS.pop(key, None)
         lock.release()

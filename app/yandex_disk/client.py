@@ -11,6 +11,8 @@ from app.settings import (
 from app.checklists.yandex_resource_locks import (
     run_with_yandex_resource_retry,
 )
+from app.logging_utils import write_debug_log
+import hashlib
 
 
 def clean_disk_value(value) -> str:
@@ -149,6 +151,35 @@ class ProgressFileReader:
         return getattr(self.raw, name)
 
 
+# Yandex Disk caps the REST API upload of archives at 128 KiB/s: a 1 GB
+# archive then takes more than two hours. The type is taken from the file name
+# when the upload link is requested; a name without an extension is not
+# capped. An archive is uploaded under a temporary name without extension in
+# the same folder and renamed on Yandex afterwards. Other files go as before.
+YANDEX_ARCHIVE_EXTENSIONS = frozenset({
+    "zip", "zipx", "rar", "7z", "gz", "tgz", "tar", "bz2", "tbz", "tbz2",
+    "xz", "txz", "lz", "lzma", "lzh", "z", "zst", "cab", "arj", "ace",
+})
+YANDEX_UPLOAD_LOG_INTERVAL_SECONDS = 60.0
+
+
+def yandex_upload_needs_neutral_name(file_name: str) -> bool:
+    name = clean_disk_value(file_name).rsplit("/", 1)[-1]
+    extension = name.rsplit(".", 1)[-1].casefold() if "." in name else ""
+    return extension in YANDEX_ARCHIVE_EXTENSIONS
+
+
+def yandex_neutral_upload_path(target_path: str) -> str:
+    """The same folder, a name without any dot: no extension, no cap."""
+    normalized = normalize_yandex_disk_path(target_path)
+    folder, _, name = normalized.rpartition("/")
+    token = hashlib.sha1(normalized.encode("utf-8")).hexdigest()[:12]
+    readable = "".join(
+        "_" if ch in "./\\" or ord(ch) < 32 else ch for ch in name
+    ).strip(" _")[:60]
+    return f"{folder}/{readable + ' ' if readable else ''}загружается {token}"
+
+
 def yandex_disk_upload_file(
     target_path: str,
     local_path,
@@ -163,14 +194,45 @@ def yandex_disk_upload_file(
         raise RuntimeError(f"Local file not found: {source_path}")
 
     total_bytes = source_path.stat().st_size
-    upload_href = yandex_disk_get_upload_href(normalized_path, overwrite=overwrite)
+    neutral = yandex_upload_needs_neutral_name(normalized_path)
+    upload_path = yandex_neutral_upload_path(normalized_path) if neutral else normalized_path
+    assert_operation_path(normalized_path)
+    if neutral and not overwrite and yandex_disk_try_get_resource_meta(normalized_path) is not None:
+        raise RuntimeError(
+            f"Yandex Disk upload failed (status 409): {normalized_path} already exists"
+        )
+    upload_href = yandex_disk_get_upload_href(upload_path, overwrite=True if neutral else overwrite)
+
+    started = time.monotonic()
+    last_log = [started]
+    write_debug_log("yandex_file_upload_started", {
+        "path": normalized_path,
+        "uploadPath": upload_path,
+        "temporaryName": neutral,
+        "totalBytes": total_bytes,
+    })
+
+    def report(uploaded_bytes: int, size: int):
+        now = time.monotonic()
+        if now - last_log[0] >= YANDEX_UPLOAD_LOG_INTERVAL_SECONDS:
+            last_log[0] = now
+            elapsed = max(0.001, now - started)
+            write_debug_log("yandex_file_upload_progress", {
+                "path": normalized_path,
+                "uploadedBytes": uploaded_bytes,
+                "totalBytes": size,
+                "elapsedSeconds": round(elapsed),
+                "speedKBps": round(uploaded_bytes / 1024 / elapsed),
+            })
+        if progress_callback:
+            progress_callback(uploaded_bytes, size)
 
     def upload_once():
         with open(source_path, "rb") as source:
             reader = ProgressFileReader(
                 raw=source,
                 total_bytes=total_bytes,
-                progress_callback=progress_callback,
+                progress_callback=report,
             )
             return requests.put(
                 upload_href,
@@ -185,6 +247,33 @@ def yandex_disk_upload_file(
         upload_once,
         operation_name="upload file",
     )
+    elapsed = max(0.001, time.monotonic() - started)
+
+    if neutral:
+        try:
+            yandex_disk_move_path(upload_path, normalized_path, overwrite=True)
+        except Exception as exc:
+            write_debug_log("yandex_file_upload_rename_failed", {
+                "path": normalized_path,
+                "uploadPath": upload_path,
+                "error": str(exc),
+            })
+            try:
+                yandex_disk_delete_path(upload_path, permanently=True)
+            except Exception as cleanup_exc:
+                write_debug_log("yandex_file_upload_temporary_delete_failed", {
+                    "uploadPath": upload_path,
+                    "error": str(cleanup_exc),
+                })
+            raise
+
+    write_debug_log("yandex_file_upload_finished", {
+        "path": normalized_path,
+        "temporaryName": neutral,
+        "totalBytes": total_bytes,
+        "elapsedSeconds": round(elapsed, 1),
+        "speedKBps": round(total_bytes / 1024 / elapsed),
+    })
 
     return {
         "ok": True,
