@@ -18,7 +18,7 @@ from app.ui.template_engine import render_ui_template
 
 router = APIRouter()
 
-ASSET_VERSION = "8.32-date-reminders"
+ASSET_VERSION = "8.34-panel-risks"
 
 
 def _actor(payload: dict) -> dict:
@@ -56,6 +56,7 @@ async def api_object_analysis_field(request: Request):
             payload.get("value"),
             actor=_actor(payload),
             recipients=payload.get("recipients"),
+            weekly=payload.get("weekly"),
         )
     except object_analysis.ObjectAnalysisError as exc:
         return _error(exc)

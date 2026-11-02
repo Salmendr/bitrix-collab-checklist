@@ -500,8 +500,10 @@ def _require(base: str, user_id: str, right: str) -> dict:
 # Field changes
 # ---------------------------------------------------------------------------
 
-def update_field(dialog_id: str, field: str, value: Any, *, actor: dict, recipients: Any = None) -> dict:
-    """recipients: the list of the reminders of a date; None keeps it."""
+def update_field(dialog_id: str, field: str, value: Any, *, actor: dict, recipients: Any = None,
+                 weekly: Any = None) -> dict:
+    """recipients: the list of the reminders of a date; None keeps it.
+    weekly: «Еженедельно» of a date of OPR; None keeps it."""
     base = base_of(dialog_id)
     if not base:
         raise ObjectAnalysisError("Не указан проект")
@@ -514,7 +516,7 @@ def update_field(dialog_id: str, field: str, value: Any, *, actor: dict, recipie
         before = record[field]
         record[field] = _validated(field, value, record, options)
         if field in date_reminders.FIELDS:
-            _change_reminders(record, field, before, recipients, actor)
+            _change_reminders(record, field, before, recipients, actor, weekly)
 
     record = _change_record(base, actor, change)
     write_debug_log("object_analysis_field_changed", {
@@ -568,8 +570,12 @@ def _validated(field: str, value: Any, record: dict, options: dict) -> Any:
     raise ObjectAnalysisError("Неизвестное поле")
 
 
-def _change_reminders(record: dict, field: str, before: Any, recipients: Any, actor: dict) -> None:
+def _change_reminders(record: dict, field: str, before: Any, recipients: Any, actor: dict,
+                      weekly: Any = None) -> None:
     meta = date_reminders.clean_meta(record["reminders"].get(field))
+    weekly_before = date_reminders.meta_weekly(field, meta)
+    if field in date_reminders.DATE_FIELDS and weekly is not None:
+        meta["weekly"] = bool(weekly) and bool(clean_cell_value(record[field]))
     if recipients is not None:
         try:
             meta["recipients"] = date_reminders.validated_recipients(
@@ -578,7 +584,8 @@ def _change_reminders(record: dict, field: str, before: Any, recipients: Any, ac
         except date_reminders.RecipientError as exc:
             raise ObjectAnalysisError(str(exc)) from exc
     # A new date: its reminders count from now and name who set it.
-    if date_reminders.value_key(field, before) != date_reminders.value_key(field, record[field]):
+    if (date_reminders.value_key(field, before, weekly_before)
+            != date_reminders.value_key(field, record[field], date_reminders.meta_weekly(field, meta))):
         meta["setById"] = clean_cell_value(actor.get("userId"))
         meta["setByName"] = clean_cell_value(actor.get("userName"))
         meta["setAt"] = date_reminders.iso(date_reminders.now_utc())
@@ -644,7 +651,15 @@ def _clean_risks(raw: Any) -> dict:
             cleaned[key] = _probability(probabilities.get(key))
         except ObjectAnalysisError:
             cleaned[key] = None
-    return {"rows": rows, "probabilities": cleaned}
+    result = {"rows": rows, "probabilities": cleaned}
+    override = raw.get("totalOverride") if isinstance(raw.get("totalOverride"), dict) else {}
+    if _int(override.get("level")) in RISK_LEVEL_BY_NUMBER:
+        result["totalOverride"] = {
+            "level": _int(override.get("level")),
+            "userName": str(override.get("userName") or "")[:200],
+            "at": str(override.get("at") or "")[:40],
+        }
+    return result
 
 
 def probability_level(probabilities: dict) -> int:
@@ -669,12 +684,26 @@ def risk_total(risks: dict | None) -> dict:
     if from_probability:
         ratings.append(from_probability)
     if not ratings:
-        return {**NOT_RATED, "ratings": []}
-    worst = sorted(ratings, reverse=True)[:RISK_TOTAL_WORST]
-    # Integer arithmetic: floor(mean + 1/2) without float error.
-    level = (2 * sum(worst) + len(worst)) // (2 * len(worst))
-    level = max(1, min(7, level))
-    return {**RISK_LEVEL_BY_NUMBER[level], "ratings": worst, "probabilityLevel": from_probability}
+        computed = {**NOT_RATED, "ratings": [], "probabilityLevel": 0}
+    else:
+        worst = sorted(ratings, reverse=True)[:RISK_TOTAL_WORST]
+        # Integer arithmetic: floor(mean + 1/2) without float error.
+        level = (2 * sum(worst) + len(worst)) // (2 * len(worst))
+        level = max(1, min(7, level))
+        computed = {**RISK_LEVEL_BY_NUMBER[level], "ratings": worst, "probabilityLevel": from_probability}
+    # A total set by hand stays until a rating of the table changes.
+    override = risks.get("totalOverride") or {}
+    if override.get("level") in RISK_LEVEL_BY_NUMBER:
+        return {
+            **RISK_LEVEL_BY_NUMBER[override["level"]],
+            "ratings": computed["ratings"],
+            "probabilityLevel": computed["probabilityLevel"],
+            "manual": True,
+            "manualBy": override.get("userName") or "",
+            "manualAt": override.get("at") or "",
+            "computed": {key: computed[key] for key in ("level", "label", "color", "text")},
+        }
+    return {**computed, "manual": False}
 
 
 def change_risks(dialog_id: str, op: str, payload: dict, *, actor: dict) -> dict:
@@ -706,6 +735,8 @@ def change_risks(dialog_id: str, op: str, payload: dict, *, actor: dict) -> dict
                 level = _int(value)
                 if level and level not in RISK_LEVEL_BY_NUMBER:
                     raise ObjectAnalysisError("Неизвестная оценка риска")
+                if row["level"] != level:
+                    risks.pop("totalOverride", None)
                 row["level"] = level
             else:
                 raise ObjectAnalysisError("Неизвестное поле")
@@ -714,14 +745,33 @@ def change_risks(dialog_id: str, op: str, payload: dict, *, actor: dict) -> dict
                 raise ObjectAnalysisError(f"Не больше {MAX_RISK_ROWS} строк")
             name = " ".join(str(payload.get("name") or "").split()) or "Новая характеристика"
             rows.append({"id": "r" + uuid.uuid4().hex[:10], "name": name[:MAX_RISK_NAME], "description": "", "level": 0})
+            risks.pop("totalOverride", None)
         elif op == "row-delete":
             if row is not None:
                 rows.remove(row)
+                if row.get("level"):
+                    risks.pop("totalOverride", None)
         elif op == "probability":
             key = clean_cell_value(payload.get("key"))
             if key not in PROBABILITY_KEYS:
                 raise ObjectAnalysisError("Неизвестная стадия")
-            risks["probabilities"][key] = _probability(payload.get("value"))
+            value = _probability(payload.get("value"))
+            if risks["probabilities"].get(key) != value:
+                risks.pop("totalOverride", None)
+            risks["probabilities"][key] = value
+        elif op == "total":
+            # «Итоговая оценка» by hand; 0 gives it back to the algorithm.
+            level = _int(payload.get("level"))
+            if level and level not in RISK_LEVEL_BY_NUMBER:
+                raise ObjectAnalysisError("Неизвестная оценка риска")
+            if level:
+                risks["totalOverride"] = {
+                    "level": level,
+                    "userName": clean_cell_value(actor.get("userName"))[:200],
+                    "at": _now(),
+                }
+            else:
+                risks.pop("totalOverride", None)
         else:
             raise ObjectAnalysisError("Неизвестное действие")
         record["risks"] = risks
@@ -935,6 +985,7 @@ def reminders_view(base: str, record: dict) -> dict:
         result[field] = {
             "recipients": date_reminders.recipients_of(meta, defaults),
             "setByName": meta["setByName"],
+            "weekly": date_reminders.meta_weekly(field, meta),
             "history": sent.get(field, []),
         }
     return result

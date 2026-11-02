@@ -5,7 +5,8 @@
     // server shows it to the leaders, administrators and GIPs of the
     // project; its data belong to the project, so every checklist window of
     // the project shows the same panel. The arrow opens the slice of all
-    // objects, «Экономика» the risk tables.
+    // objects, «Внешние риски» the risk tables. The panel opens folded; the
+    // chevron of the right corner unfolds it, like the subitems of an item.
 
     const doc = global.document;
     const panelEl = doc.getElementById('objectAnalysisPanel');
@@ -14,7 +15,7 @@
     if (!panelEl || !UI || !popupApi) return;
 
     const REFRESH_PAUSE_MS = 5000;
-    const state = { data: null, loadedAt: 0, loading: null };
+    const state = { data: null, loadedAt: 0, loading: null, collapsed: true };
 
     function actor() {
         const editor = global.currentEditor || {};
@@ -70,15 +71,23 @@
             panelEl.innerHTML = '';
             return;
         }
+        const collapsed = !!state.collapsed;
+        const toggleTitle = collapsed ? 'Развернуть панель' : 'Свернуть панель';
+        panelEl.classList.toggle('is-collapsed', collapsed);
         panelEl.innerHTML = '<div class="oa-panel-head">'
-            + '<span class="oa-panel-title">Анализ состояния объекта</span>'
+            + '<span class="oa-panel-title" data-oa-toggle>Анализ состояния объекта</span>'
+            + '<span class="oa-panel-actions">'
             + '<button type="button" class="oa-expand" data-oa-slice title="Общий срез по всем объектам" aria-label="Общий срез по всем объектам">'
             + '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M9 2h5v5M14 2 8 8M7 3H3v10h10V9" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>'
-            + '</button></div>'
-            + '<div class="oa-grid-scroll"><div class="oa-grid" style="grid-template-columns:' + UI.gridTemplate(false) + '">'
-            + UI.headerHtml(false)
-            + UI.rowHtml(data.project, ctx, false)
-            + '</div></div>';
+            + '</button>'
+            + '<button type="button" class="oa-panel-toggle' + (collapsed ? '' : ' is-expanded') + '" data-oa-toggle'
+            + ' aria-expanded="' + (collapsed ? 'false' : 'true') + '" title="' + toggleTitle + '" aria-label="' + toggleTitle + '">'
+            + '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3.5 10.5 8 6 12.5"></path></svg>'
+            + '</button></span></div>'
+            + (collapsed ? '' : '<div class="oa-grid-scroll"><div class="oa-grid" style="grid-template-columns:' + UI.gridTemplate(false) + '">'
+                + UI.headerHtml(false)
+                + UI.rowHtml(data.project, ctx, false)
+                + '</div></div>');
         panelEl.hidden = false;
     }
 
@@ -107,6 +116,13 @@
         if (event.target.closest('[data-oa-slice]')) {
             event.preventDefault();
             global.open(pageUrl('object-analysis'), '_blank');
+            return;
+        }
+        if (event.target.closest('[data-oa-toggle]')) {
+            event.preventDefault();
+            if (!state.collapsed && typeof UI.closeEditor === 'function') UI.closeEditor();
+            state.collapsed = !state.collapsed;
+            render();
         }
     });
     UI.bindGrid(panelEl, ctx);

@@ -2,8 +2,10 @@
 
 A personal Bitrix message at 8:30 Khabarovsk time 7, 3 and 1 day before a
 date and in the morning of the day itself; a weekly meeting gets one in the
-morning of every meeting day. The message names the project and leads to
-its OPR checklist.
+morning of every meeting day. A date of OPR with «Еженедельно» gets one at
+8:00 every Monday from the week it was set till the date, 3 days before and
+on the day (one message when a Monday is one of these days). The message
+names the project and leads to its OPR checklist.
 
 Every date has its own recipients: «Карман Сергей» until somebody changes
 the list in the editor of the date. Only the people of the list get the
@@ -35,6 +37,9 @@ from app.checklists.utils import clean_cell_value
 TZ = timezone(timedelta(hours=10))
 REMIND_AT = time(8, 30)
 DAYS_BEFORE = (7, 3, 1, 0)
+# «Еженедельно» of a date of OPR: Mondays, then 3 days before and the day.
+MONDAYS_REMIND_AT = time(8, 0)
+MONDAYS_DAYS_BEFORE = (3, 0)
 DEFAULT_RECIPIENTS = (("256", "Карман Сергей"),)
 MAX_RECIPIENTS = 30
 
@@ -45,11 +50,11 @@ SUBJECTS = {
     "oprCustomerDate": "дата передачи ОПР Заказчику",
     "oprPdDate": "дата передачи ОПР в стадию ПД",
     "meeting": "совещание по объекту (внутреннее)",
-    "vks": "ВКС с Заказчиком",
+    "vks": "ВКС/совещание с Заказчиком",
 }
 WEEKLY_SUBJECTS = {
     "meeting": "еженедельное совещание по объекту (внутреннее)",
-    "vks": "еженедельная ВКС с Заказчиком",
+    "vks": "еженедельная ВКС/совещание с Заказчиком",
 }
 WHEN = {7: "Через 7 дней", 3: "Через 3 дня", 1: "Завтра", 0: "Сегодня"}
 
@@ -153,6 +158,8 @@ def clean_meta(raw: Any) -> dict:
         "setById": clean_cell_value(raw.get("setById")),
         "setByName": clean_cell_value(raw.get("setByName")),
         "setAt": clean_cell_value(raw.get("setAt")) if _parse_moment(raw.get("setAt") or "") else "",
+        # «Еженедельно» of a date of OPR (DATE_FIELDS only).
+        "weekly": bool(raw.get("weekly")),
     }
 
 
@@ -192,13 +199,32 @@ def validated_recipients(value: Any, previous: list[dict]) -> list[dict]:
     return result
 
 
-def value_key(field: str, value: Any) -> str:
-    """What the reminders of a date belong to: a new key drops the old ones."""
+def value_key(field: str, value: Any, weekly: bool = False) -> str:
+    """What the reminders of a date belong to: a new key drops the old ones.
+    weekly: «Еженедельно» of a date of OPR, kept in the meta of the date."""
     if field in MEETING_FIELDS:
         value = value if isinstance(value, dict) else {}
         at = clean_cell_value(value.get("at"))
         return (at + ("|weekly" if value.get("weekly") else "")) if at else ""
-    return clean_cell_value(value)
+    day = clean_cell_value(value)
+    return (day + ("|mondays" if weekly else "")) if day else ""
+
+
+def meta_weekly(field: str, meta: dict | None) -> bool:
+    return field in DATE_FIELDS and bool((meta or {}).get("weekly"))
+
+
+def days_text(days: int) -> str:
+    if days in WHEN:
+        return WHEN[days]
+    tail = days % 100
+    if 11 <= tail <= 14 or days % 10 in (0, 5, 6, 7, 8, 9):
+        unit = "дней"
+    elif days % 10 == 1:
+        unit = "день"
+    else:
+        unit = "дня"
+    return f"Через {days} {unit}"
 
 
 def _event(field: str, value: Any) -> tuple[date, time | None, bool] | None:
@@ -216,21 +242,27 @@ def _event(field: str, value: Any) -> tuple[date, time | None, bool] | None:
 # Schedule and the message
 # ---------------------------------------------------------------------------
 
-def due_slots(field: str, value: Any, set_at: str, now: datetime) -> list[dict]:
-    """The reminder of this date due at `now`: only today's 8:30 can be."""
+def due_slots(field: str, value: Any, set_at: str, now: datetime, mondays: bool = False) -> list[dict]:
+    """The reminder of this date due at `now`: only today's one can be.
+    mondays: «Еженедельно» of a date of OPR."""
     event = _event(field, value)
     if event is None:
         return []
     event_day, event_time, weekly = event
+    mondays = bool(mondays) and field in DATE_FIELDS
     local_now = now.astimezone(TZ)
     today = local_now.date()
-    slot = datetime.combine(today, REMIND_AT, TZ)
+    slot = datetime.combine(today, MONDAYS_REMIND_AT if mondays else REMIND_AT, TZ)
     if local_now < slot:
         return []
     set_moment = _parse_moment(set_at) if set_at else None
     if set_moment is not None and slot < set_moment:
         return []
-    if weekly:
+    if mondays:
+        days, occurrence = (event_day - today).days, event_day
+        if days < 0 or not (days in MONDAYS_DAYS_BEFORE or today.weekday() == 0):
+            return []
+    elif weekly:
         if today < event_day or (today - event_day).days % 7:
             return []
         days, occurrence = 0, today
@@ -241,12 +273,13 @@ def due_slots(field: str, value: Any, set_at: str, now: datetime) -> list[dict]:
     if days == 0 and event_time is not None and local_now >= datetime.combine(today, event_time, TZ):
         return []
     return [{
-        "slotKey": f"{value_key(field, value)}|{occurrence.isoformat()}|{days}",
+        "slotKey": f"{value_key(field, value, mondays)}|{occurrence.isoformat()}|{days}",
         "slotAt": iso(slot),
         "daysBefore": days,
         "occurrence": occurrence,
         "time": event_time,
         "weekly": weekly,
+        "mondays": mondays,
     }]
 
 
@@ -258,12 +291,14 @@ def _plain(value: Any) -> str:
 def build_message(field: str, slot: dict, *, project: str, link: str, set_by_name: str) -> str:
     from app.checklists.messages import build_message_value_link
 
-    when = WHEN[slot["daysBefore"]] + ", " + slot["occurrence"].strftime("%d.%m.%Y")
+    when = days_text(slot["daysBefore"]) + ", " + slot["occurrence"].strftime("%d.%m.%Y")
     if slot["time"] is not None:
         when += " в " + slot["time"].strftime("%H:%M")
     subject = WEEKLY_SUBJECTS[field] if slot["weekly"] else SUBJECTS[field]
     name = build_message_value_link(_plain(project), link)
     lines = ["⏰ " + when + ": " + subject + " по объекту «[B]" + name + "[/B]»."]
+    if slot.get("mondays"):
+        lines.append("Еженедельное напоминание по понедельникам до этой даты.")
     if clean_cell_value(set_by_name):
         lines.append("Дату поставил: " + _plain(set_by_name))
     return "\n".join(lines)
@@ -307,11 +342,12 @@ def collect_due(now: datetime | None = None) -> int:
     for base, record in sorted(_records().items()):
         for field in FIELDS:
             value = record.get(field)
-            key = value_key(field, value)
+            meta = clean_meta((record.get("reminders") or {}).get(field))
+            mondays = meta_weekly(field, meta)
+            key = value_key(field, value, mondays)
             if not key:
                 continue
-            meta = clean_meta((record.get("reminders") or {}).get(field))
-            slots = [slot for slot in due_slots(field, value, meta["setAt"], now) if not _slot_made(base, field, slot)]
+            slots = [slot for slot in due_slots(field, value, meta["setAt"], now, mondays) if not _slot_made(base, field, slot)]
             if not slots:
                 continue
             recipients = recipients_of(meta)
@@ -357,9 +393,9 @@ def _still_wanted(conn, record: dict) -> bool:
 
     current = object_analysis._read_record(conn, record["base_dialog_id"])
     field = record["field"]
-    if value_key(field, current.get(field)) != record["value_key"]:
-        return False
     meta = clean_meta((current.get("reminders") or {}).get(field))
+    if value_key(field, current.get(field), meta_weekly(field, meta)) != record["value_key"]:
+        return False
     return any(user["userId"] == record["user_id"] for user in recipients_of(meta))
 
 

@@ -11,16 +11,17 @@
         { key: 'contractStatus', group: 'Договор', title: 'Статус договора', width: 'minmax(118px, 1.1fr)' },
         { key: 'contract', group: 'Договор', title: 'Договор', width: '58px' },
         { key: 'stages', group: 'Договор', title: 'Стадии по договору', width: 'minmax(92px, .9fr)' },
-        { key: 'risk', group: 'Оценка рисков', title: 'Экономика', width: 'minmax(100px, .9fr)' },
-        { key: 'general', group: 'Оценка рисков', title: 'Общее', width: 'minmax(120px, 1.3fr)' },
+        // A column without a group takes both rows of the header.
+        { key: 'risk', group: '', title: 'Внешние риски', width: 'minmax(100px, .9fr)' },
         { key: 'surveys', group: 'ИД', title: 'Изыскания', width: '68px' },
         { key: 'tu', group: 'ИД', title: 'ТУ', width: '50px' },
         { key: 'ga', group: 'Граданализ', title: 'Чек-лист ГА', width: '90px' },
+        { key: 'general', group: '', title: 'Риски проекта', width: 'minmax(120px, 1.3fr)' },
         { key: 'oprSections', group: 'ОПР', title: 'Готовность ОПР', width: 'minmax(150px, 1.7fr)' },
         { key: 'oprCustomerDate', group: 'ОПР', title: 'Передача ОПР Заказчику', width: '86px' },
         { key: 'oprPdDate', group: 'ОПР', title: 'Передача ОПР в стадию ПД', width: '86px' },
         { key: 'meeting', group: 'ОПР', title: 'Совещание по объекту (внутр.)', width: '104px' },
-        { key: 'vks', group: 'Для передачи', title: 'ВКС с Заказчиком', width: '104px' },
+        { key: 'vks', group: 'Для передачи', title: 'ВКС/Совещание с Заказчиком', width: '104px' },
         { key: 'customerResponsible', group: 'Для передачи', title: 'Ответственный от Заказчика', width: 'minmax(110px, 1.2fr)' }
     ];
     const NAME_COLUMN = { key: 'name', group: '', title: 'Объект', width: 'minmax(150px, 1.3fr)' };
@@ -194,13 +195,17 @@
             }
             case 'risk': {
                 const risk = project.risk || {};
-                const tip = risk.level
+                let tip = risk.level
                     ? 'Итоговая оценка по худшим оценкам: ' + (risk.ratings || []).join(', ')
                     : 'Риски ещё не оценены';
+                if (risk.manual) {
+                    tip = 'Итоговая оценка изменена вручную' + (risk.manualBy ? ' (' + risk.manualBy + ')' : '')
+                        + '; по алгоритму: ' + ((risk.computed || {}).label || 'не оценено');
+                }
                 return '<button type="button" class="oa-risk" data-oa-open="risks"'
                     + ' style="background:' + esc(risk.color || '#eef1f5') + ';color:' + esc(risk.text || '#667085') + '"'
                     + ' title="' + esc(tip + '. Нажмите, чтобы открыть расчёт рисков') + '">'
-                    + esc(risk.label || 'Не оценено') + '</button>';
+                    + esc(risk.label || 'Не оценено') + (risk.manual ? ' <span class="oa-risk-hand" aria-label="вручную">✎</span>' : '') + '</button>';
             }
             case 'general': {
                 const general = project.general || {};
@@ -231,10 +236,14 @@
                     + half('notReady', sections.notReady, 'oa-chip-not-ready', canEdit ? '+ не готовые' : 'не готовых нет');
             }
             case 'oprCustomerDate':
-            case 'oprPdDate':
+            case 'oprPdDate': {
+                const mondays = !!(project[key] && reminderInfo(project, key).weekly);
+                const note = mondays ? 'Напоминания еженедельно по понедельникам\n' : '';
                 return project[key]
-                    ? '<span class="oa-text" title="' + esc(recipientsTitle(project, key)) + '">' + esc(formatDate(project[key])) + '</span>'
+                    ? '<span class="oa-text' + (mondays ? ' is-weekly' : '') + '" title="' + esc(note + recipientsTitle(project, key)) + '">'
+                        + esc(formatDate(project[key])) + '</span>'
                     : '<span class="oa-placeholder">—</span>';
+            }
             case 'meeting':
             case 'vks': {
                 const value = meetingText(project[key]);
@@ -263,19 +272,27 @@
             + '>' + cellInner(key, project, ctx) + '</div>';
     }
 
+    function single(column) {
+        return !column.group && column.key !== 'name';
+    }
+
     function headerHtml(withName) {
         const list = columns(withName);
         const groups = [];
         list.forEach(column => {
             const last = groups[groups.length - 1];
-            if (last && last.title === column.group) last.span += 1;
+            if (single(column)) groups.push({ column });
+            else if (last && !last.column && last.title === column.group) last.span += 1;
             else groups.push({ title: column.group, span: 1 });
         });
-        const top = groups.map(group => (
-            '<div class="oa-head oa-head-group' + (group.title ? '' : ' is-blank') + '" style="grid-column:span ' + group.span + '">'
-            + esc(group.title) + '</div>'
+        // The grid places the second row around the cells of both rows.
+        const top = groups.map(group => (group.column
+            ? '<div class="oa-head oa-head-single" style="grid-row:span 2" title="' + esc(group.column.title) + '">'
+                + esc(group.column.title) + '</div>'
+            : '<div class="oa-head oa-head-group' + (group.title ? '' : ' is-blank') + '" style="grid-column:span ' + group.span + '">'
+                + esc(group.title) + '</div>'
         )).join('');
-        const bottom = list.map(column => (
+        const bottom = list.filter(column => !single(column)).map(column => (
             '<div class="oa-head oa-head-column' + (column.key === 'name' ? ' is-name' : '') + '" title="' + esc(column.title) + '">' + esc(column.title) + '</div>'
         )).join('');
         return top + bottom;
@@ -603,6 +620,8 @@
 
     const REMINDER_NOTE = 'Личным сообщением в Битриксе в 8:30 по Хабаровску: за 7, 3 и 1 день и в сам день.';
     const WEEKLY_NOTE = 'Личным сообщением в Битриксе в 8:30 по Хабаровску в каждый день встречи.';
+    const MONDAYS_NOTE = 'Личным сообщением в Битриксе в 8:00 по Хабаровску: каждый понедельник с недели, когда указана дата, '
+        + 'а также за 3 дня и в сам день.';
     const DELIVERY_STATUS = {
         sent: 'отправлено',
         pending: 'в очереди',
@@ -634,7 +653,7 @@
             + ' ' + pad(local.getUTCHours()) + ':' + pad(local.getUTCMinutes());
     }
 
-    function remindersHtml(project, key, weekly) {
+    function remindersHtml(project, key, note) {
         const history = (reminderInfo(project, key).history || []).map(entry => (
             '<li' + (entry.status === 'sent' ? '' : ' class="is-problem"') + (entry.error ? ' title="' + esc(entry.error) + '"' : '') + '>'
             + esc(khabarovskMoment(entry.at)) + ' · ' + esc(entry.userName) + ' · ' + esc(DELIVERY_STATUS[entry.status] || entry.status)
@@ -648,7 +667,7 @@
             + '<div class="oa-user-results" data-oa-user-results hidden></div>'
             + '<div class="oa-user-hint" data-oa-user-hint></div>'
             + '</div>'
-            + '<div class="oa-pop-note" data-oa-schedule>' + esc(weekly ? WEEKLY_NOTE : REMINDER_NOTE) + '</div>'
+            + '<div class="oa-pop-note" data-oa-schedule>' + esc(note) + '</div>'
             + (history ? '<div class="oa-pop-subtitle">Последние напоминания</div><ul class="oa-reminder-history">' + history + '</ul>' : '');
     }
 
@@ -716,18 +735,24 @@
 
     function editDate(anchor, project, ctx, key) {
         const title = key === 'oprCustomerDate' ? 'Дата передачи ОПР Заказчику' : 'Дата передачи ОПР в стадию ПД';
+        const mondays = !!reminderInfo(project, key).weekly;
         const html = '<div class="oa-pop-title">' + esc(title) + '</div>'
             + '<input type="date" class="oa-pop-input" value="' + esc(project[key] || '') + '" data-oa-date data-oa-focus>'
-            + remindersHtml(project, key, false)
+            + '<label class="oa-pop-check oa-pop-weekly"><input type="checkbox" data-oa-mondays' + (mondays ? ' checked' : '') + '>'
+            + '<span>Еженедельно по понедельникам</span></label>'
+            + remindersHtml(project, key, mondays ? MONDAYS_NOTE : REMINDER_NOTE)
             + footer('Очистить');
         return openPopover(anchor, html, element => {
             element.classList.add('oa-popover-dates');
             const input = element.querySelector('[data-oa-date]');
+            const weekly = element.querySelector('[data-oa-mondays]');
+            const note = element.querySelector('[data-oa-schedule]');
+            weekly.addEventListener('change', () => { note.textContent = weekly.checked ? MONDAYS_NOTE : REMINDER_NOTE; });
             const recipients = bindRecipients(element, ctx, project, key);
             bindFooter(
                 element,
-                () => save(element, ctx, project, key, input.value, { recipients: recipients.list() }),
-                () => save(element, ctx, project, key, '', { recipients: recipients.list() })
+                () => save(element, ctx, project, key, input.value, { recipients: recipients.list(), weekly: weekly.checked }),
+                () => save(element, ctx, project, key, '', { recipients: recipients.list(), weekly: false })
             );
             return recipients.stop;
         });
@@ -735,12 +760,12 @@
 
     function editMeeting(anchor, project, ctx, key) {
         const meeting = project[key] || { at: '', weekly: false };
-        const title = key === 'vks' ? 'ВКС с Заказчиком' : 'Совещание по объекту (внутреннее)';
+        const title = key === 'vks' ? 'ВКС/Совещание с Заказчиком' : 'Совещание по объекту (внутреннее)';
         const html = '<div class="oa-pop-title">' + esc(title) + '</div>'
             + '<input type="datetime-local" class="oa-pop-input" value="' + esc(meeting.at || '') + '" data-oa-at data-oa-focus>'
             + '<label class="oa-pop-check oa-pop-weekly"><input type="checkbox" data-oa-weekly' + (meeting.weekly ? ' checked' : '') + '>'
             + '<span>Повторять еженедельно</span></label>'
-            + remindersHtml(project, key, meeting.weekly)
+            + remindersHtml(project, key, meeting.weekly ? WEEKLY_NOTE : REMINDER_NOTE)
             + footer('Очистить');
         return openPopover(anchor, html, element => {
             element.classList.add('oa-popover-dates');

@@ -3,7 +3,8 @@
 
     // The risk tables of all objects in the order of the slice; the window
     // opens at the table of its project. Every change is saved at once and
-    // the server answers with the new «Итоговая оценка».
+    // the server answers with the new «Итоговая оценка». The total can be
+    // set by hand; a new row or another rating gives it back to the algorithm.
 
     const doc = global.document;
     const UI = global.ObjectAnalysisUI;
@@ -32,14 +33,36 @@
         return (state.data.riskLevels || []).find(entry => Number(entry.level) === Number(number)) || null;
     }
 
-    function totalHtml(total) {
-        const tip = total.level
-            ? 'Среднее трёх худших оценок: ' + (total.ratings || []).join(', ')
-                + (total.probabilityLevel ? '. Из них по вероятности реализации: ' + total.probabilityLevel : '')
+    function totalHtml(total, canEdit) {
+        const computed = total.manual ? (total.computed || {}) : total;
+        let tip = (total.ratings || []).length
+            ? 'По алгоритму (среднее трёх худших оценок: ' + (total.ratings || []).join(', ')
+                + (total.probabilityLevel ? '; из них по вероятности реализации: ' + total.probabilityLevel : '')
+                + '): ' + (computed.label || '')
             : 'Нет ни одной оценки';
-        return '<span class="oa-risk-total-label">Итоговая оценка риска</span>'
-            + '<span class="oa-risk-pill" style="background:' + esc(total.color) + ';color:' + esc(total.text) + '" title="' + esc(tip) + '">'
-            + esc(total.label) + '</span>';
+        if (total.manual) {
+            tip = 'Изменено вручную' + (total.manualBy ? ': ' + total.manualBy : '') + '. ' + tip
+                + '. Новая строка или другая оценка в таблице вернёт расчёт по алгоритму.';
+        }
+        const label = '<span class="oa-risk-total-label">Итоговая оценка риска</span>';
+        const manualMark = total.manual ? '<span class="oa-risk-manual" title="' + esc(tip) + '">вручную</span>' : '';
+        if (!canEdit) {
+            return label
+                + '<span class="oa-risk-pill" style="background:' + esc(total.color) + ';color:' + esc(total.text) + '" title="' + esc(tip) + '">'
+                + esc(total.label) + '</span>' + manualMark;
+        }
+        // The select shows the rating; the first option gives the total back
+        // to the algorithm.
+        const selected = total.manual ? Number(total.level) : 0;
+        return label
+            + '<select class="oa-risk-select oa-risk-total-select" data-oa-total title="' + esc(tip) + '"'
+            + ' style="background:' + esc(total.color) + ';color:' + esc(total.text) + '">'
+            + '<option value="0"' + (selected ? '' : ' selected') + '>По алгоритму: ' + esc(computed.label || 'Не оценено') + '</option>'
+            + (state.data.riskLevels || []).map(entry => (
+                '<option value="' + entry.level + '"' + (selected === Number(entry.level) ? ' selected' : '') + '>'
+                + esc(entry.label) + '</option>'
+            )).join('')
+            + '</select>' + manualMark;
     }
 
     function levelSelect(row, canEdit) {
@@ -92,7 +115,7 @@
             + '<header class="oa-risk-head"><h2 class="oa-risk-title">' + esc(table.name) + '</h2>'
             + '<span class="oa-risk-group">' + esc(table.group) + '</span>'
             + (canEdit ? '' : '<span class="oa-risk-readonly">только просмотр</span>')
-            + '<span class="oa-risk-total" data-oa-total>' + totalHtml(table.total) + '</span></header>'
+            + '<span class="oa-risk-total" data-oa-total-box>' + totalHtml(table.total, canEdit) + '</span></header>'
             + '<div class="oa-risk-table">'
             + '<div class="oa-risk-row oa-risk-row-head"><div>Характеристика</div><div>Описание характеристики</div><div>Оценка риска</div><div></div></div>'
             + rows
@@ -144,8 +167,8 @@
             return;
         }
         const card = listEl.querySelector('[data-oa-risk="' + CSS.escape(dialogId) + '"]');
-        const totalEl = card && card.querySelector('[data-oa-total]');
-        if (totalEl) totalEl.innerHTML = totalHtml(result.total);
+        const totalEl = card && card.querySelector('[data-oa-total-box]');
+        if (totalEl) totalEl.innerHTML = totalHtml(result.total, !!table.canEdit);
     }
 
     async function change(dialogId, op, payload, rerender, control) {
@@ -177,6 +200,10 @@
         const dialogId = card.dataset.oaRisk;
         const table = state.byId[dialogId];
         if (!table) return;
+        if (target.hasAttribute('data-oa-total')) {
+            await change(dialogId, 'total', { level: Number(target.value) || 0 }, false, target);
+            return;
+        }
         if (target.dataset.oaProbability) {
             const raw = String(target.value || '').trim();
             if (raw !== '' && (!/^\d+$/.test(raw) || Number(raw) > 100)) {
