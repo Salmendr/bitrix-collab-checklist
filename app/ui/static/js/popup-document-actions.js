@@ -833,7 +833,26 @@ function bindDocumentActions() {
                 // job.  The server decides whether this click means retry or
                 // opening Yandex; stale data-* attributes are never trusted.
                 const state = await getYandexPopupActionState(itemId);
-                if (state.job && state.job.jobId) {
+                // The folder is ready and only files of the item are still
+                // going to Yandex: the link works, the menu opens.
+                const structureBusy = ['queued', 'running'].includes(
+                    String(state.status || '').toLowerCase()
+                );
+                const filesUploading = (
+                    state.action === 'wait'
+                    && !!state.hasMirrorPending
+                    && !structureBusy
+                    && !!String(state.folderUrl || '').trim()
+                );
+                const opensFolder = (
+                    state.action === 'open'
+                    || state.action === 'lookup'
+                    || filesUploading
+                );
+                // Redrawing the list under the menu closed it at once (the
+                // list moves, the menu closes on any scroll or resize), so a
+                // ready folder opens without a redraw.
+                if (state.job && state.job.jobId && !opensFolder) {
                     applyYandexStructureJobToLocalItem(itemId, state.job);
                     renderAll();
                 }
@@ -846,7 +865,7 @@ function bindDocumentActions() {
                     return;
                 }
 
-                if (state.action === 'wait') {
+                if (state.action === 'wait' && !filesUploading) {
                     const jobId = String(
                         state.job && state.job.jobId || ''
                     ).trim();
@@ -875,6 +894,9 @@ function bindDocumentActions() {
                         currentYandexItemButton(itemId, this),
                         storedUrl
                     );
+                    if (filesUploading) {
+                        setSaveState('', 'Файлы пункта ещё загружаются на Яндекс.Диск');
+                    }
                     return;
                 }
 
@@ -919,6 +941,12 @@ function bindDocumentActions() {
                 );
             } catch (error) {
                 console.log('open or retry item Yandex folder error:', error);
+                if (typeof debugLog === 'function') {
+                    debugLog('yandex_popup_action_failed', {
+                        itemId,
+                        error: String(error && error.message || error || '')
+                    });
+                }
                 window.alert(
                     error && error.message
                         ? error.message

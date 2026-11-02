@@ -42,6 +42,8 @@ let lockHeartbeatInFlight = false;
 let sessionRecoveryPromise = null;
 let suppressAutoCloseSave = false;
 let popupFinalizationInProgress = false;
+// The session the last pagehide/beforeunload finalized by a beacon.
+let unloadFinalizedSessionId = '';
 let popupUploadFinalizeWaitPromise = null;
 let popupFinalizeRequestInProgress = false;
 
@@ -689,9 +691,29 @@ window.addEventListener(
         updateLockNotice();
 
         const detail = event && event.detail || {};
+        const activeSessionId = String(detail.sessionId || '').trim();
         if (
             String(detail.status || '').trim() === 'active'
-            && String(detail.sessionId || '').trim()
+            && activeSessionId
+            && closeSummarySent
+            && !suppressAutoCloseSave
+            && !popupFinalizationInProgress
+            && activeSessionId !== unloadFinalizedSessionId
+        ) {
+            // beforeunload came but the window stayed (a download, a slow
+            // or cancelled navigation, a late close of the slider), and the
+            // heartbeat started a new session with the lock. The close of
+            // the window must finish this session too, or its lock stays
+            // and the same user finds the checklist locked by himself.
+            closeSummarySent = false;
+            debugLog('popup_unload_finalize_rearmed', {
+                sessionId: activeSessionId,
+                finalizedSessionId: unloadFinalizedSessionId
+            });
+        }
+        if (
+            String(detail.status || '').trim() === 'active'
+            && activeSessionId
         ) {
             registerPopupCloseHandoff({
                 source: 'edit_session_state'
@@ -1758,6 +1780,7 @@ function sendCloseSummaryOnce(eventName) {
     }
 
     if (getActiveEditSessionId()) {
+        const finalizingSessionId = getActiveEditSessionId();
         const finalizeResult = finalizeDirtyChecklists(
             eventName,
             true
@@ -1767,6 +1790,7 @@ function sendCloseSummaryOnce(eventName) {
             const queued = !!(result && result.queued);
             if (queued) {
                 closeSummarySent = true;
+                unloadFinalizedSessionId = finalizingSessionId;
             }
             debugLog('popup_unload_finalize_requested', {
                 eventName,

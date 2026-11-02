@@ -368,8 +368,8 @@
       "bytes": 12564
     },
     "popup-document-actions.js": {
-      "sha256": "9ea6b91ff512f3bd5da3d649f113819a605a8356af7f0d197e2a69084def21be",
-      "bytes": 35323
+      "sha256": "c5703d7d6d6ea411e643e565f935342deb0c882722671267c979878d103e8168",
+      "bytes": 36758
     },
     "popup-window-channel.js": {
       "sha256": "5b9abaff9f29705db8745e4737f28bfb449fc23b4ae3ef2cf47050607f2f5723",
@@ -388,8 +388,8 @@
       "bytes": 25202
     },
     "popup-session-enhancements.js": {
-      "sha256": "fa52a1d442b4a4e153e9140c8ad5cb1f570ceb22c75acfd0d2e4601baf54a693",
-      "bytes": 54702
+      "sha256": "a4f336eeac7ba1aa5b3b4a20e93224d00439a02e850332b9115e6cdeebacd146",
+      "bytes": 55869
     },
     "popup-edit-session.js": {
       "sha256": "8cd402644dc0c9724b46b22c725e19a572232fa81d7105a8d3c094de9d6c7c42",
