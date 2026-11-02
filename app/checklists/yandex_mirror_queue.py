@@ -2,8 +2,8 @@ from app.checklists.yandex_upload_preflight import is_manual_recovery, require_e
 from app.checklists.yandex_scope import require_project_path, item_folder, canonical_path
 import os
 import threading
+import time
 from pathlib import Path
-from queue import Queue, Empty
 from datetime import datetime
 
 from app.logging_utils import write_debug_log
@@ -75,7 +75,74 @@ from app.yandex_disk.client import (
 )
 
 
-YANDEX_MIRROR_QUEUE: Queue[str] = Queue()
+# A file at least this large takes a worker for minutes: one such upload at
+# a time, so the other worker stays free for the small files.
+YANDEX_MIRROR_LARGE_FILE_BYTES = 64 * 1024 * 1024
+# The upload reports its progress and hears of a cancel once a second, not
+# on every block of a few kilobytes it sends.
+YANDEX_MIRROR_PROGRESS_INTERVAL_SECONDS = 1.0
+
+
+class YandexMirrorQueue:
+    """Jobs in the order they came. A worker takes the first job of a
+    project no other worker is busy with, so the jobs of a project run one
+    at a time and in their order; a large upload is taken only while
+    another worker stays free for the rest, so a big archive of one project
+    does not hold the small files of the others."""
+
+    def __init__(self):
+        self._entries: list[dict] = []
+        self._condition = threading.Condition()
+        self._busy_projects: set[str] = set()
+        self._large_running = 0
+
+    def put(self, job_id: str, *, project: str = "", large: bool = False) -> None:
+        with self._condition:
+            self._entries.append({"jobId": job_id, "project": project, "large": bool(large)})
+            self._condition.notify_all()
+
+    def qsize(self) -> int:
+        with self._condition:
+            return len(self._entries)
+
+    def _pick(self, worker_count: int) -> dict | None:
+        large_limit = max(1, worker_count - 1)
+        passed: set[str] = set()
+        for index, entry in enumerate(self._entries):
+            project = entry["project"]
+            # A later job never overtakes an earlier one of its project.
+            if project in passed:
+                continue
+            if project in self._busy_projects or (entry["large"] and self._large_running >= large_limit):
+                passed.add(project)
+                continue
+            del self._entries[index]
+            self._busy_projects.add(project)
+            self._large_running += 1 if entry["large"] else 0
+            return entry
+        return None
+
+    def take(self, timeout: float, worker_count: int) -> dict | None:
+        deadline = time.monotonic() + timeout
+        with self._condition:
+            while True:
+                entry = self._pick(worker_count)
+                if entry is not None:
+                    return entry
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return None
+                self._condition.wait(remaining)
+
+    def done(self, entry: dict) -> None:
+        with self._condition:
+            self._busy_projects.discard(entry["project"])
+            if entry["large"]:
+                self._large_running = max(0, self._large_running - 1)
+            self._condition.notify_all()
+
+
+YANDEX_MIRROR_QUEUE = YandexMirrorQueue()
 YANDEX_MIRROR_GUARD = threading.Lock()
 
 YANDEX_MIRROR_QUEUED_JOB_IDS: set[str] = set()
@@ -113,12 +180,13 @@ def _block_yandex_mirror_for_auth(error_text: str) -> None:
 
 
 def get_yandex_mirror_worker_count() -> int:
-    raw_value = str(os.getenv("YANDEX_MIRROR_WORKER_COUNT", "1") or "1").strip()
+    # Two: one for a large upload, one for everything else.
+    raw_value = str(os.getenv("YANDEX_MIRROR_WORKER_COUNT", "2") or "2").strip()
 
     try:
         value = int(raw_value)
     except Exception:
-        value = 1
+        value = 2
 
     if value < 1:
         return 1
@@ -317,7 +385,14 @@ def enqueue_yandex_mirror_job(job_id: str, source: str = "") -> dict:
             }
 
         YANDEX_MIRROR_QUEUED_JOB_IDS.add(job_id)
-        YANDEX_MIRROR_QUEUE.put(job_id)
+        YANDEX_MIRROR_QUEUE.put(
+            job_id,
+            project=normalize_dialog_id(job.get("dialog_id")),
+            large=(
+                clean_cell_value(job.get("job_type")) == "upload"
+                and int(job.get("file_size") or 0) >= YANDEX_MIRROR_LARGE_FILE_BYTES
+            ),
+        )
 
     write_debug_log("yandex_mirror_job_queued", {
         "jobId": job_id,
@@ -1119,8 +1194,19 @@ def process_upload_job(job: dict):
     )
 
     update_upload_job_progress(job_id, "folder_prepare", 5)
+    last_report = [0.0]
 
     def on_upload_progress(uploaded_bytes: int, total_bytes: int):
+        # Called for every block of a few kilobytes: two database writes on
+        # each made a 1 GB archive go for an hour and held the other files.
+        now = time.monotonic()
+        if (
+            uploaded_bytes < total_bytes
+            and now - last_report[0] < YANDEX_MIRROR_PROGRESS_INTERVAL_SECONDS
+        ):
+            return
+        last_report[0] = now
+
         if is_job_cancelled(job_id):
             raise RuntimeError("job cancelled")
 
@@ -1475,19 +1561,18 @@ def yandex_mirror_worker(worker_index: int):
     })
 
     while True:
-        try:
-            job_id = YANDEX_MIRROR_QUEUE.get(timeout=3)
-        except Empty:
+        entry = YANDEX_MIRROR_QUEUE.take(3, get_yandex_mirror_worker_count())
+        if entry is None:
             continue
 
-        job_id = clean_cell_value(job_id)
+        job_id = clean_cell_value(entry["jobId"])
 
         with YANDEX_MIRROR_GUARD:
             auth_blocked = YANDEX_MIRROR_AUTH_BLOCKED
         if auth_blocked:
             with YANDEX_MIRROR_GUARD:
                 YANDEX_MIRROR_QUEUED_JOB_IDS.discard(job_id)
-            YANDEX_MIRROR_QUEUE.task_done()
+            YANDEX_MIRROR_QUEUE.done(entry)
             continue
 
         with YANDEX_MIRROR_GUARD:
@@ -1543,7 +1628,7 @@ def yandex_mirror_worker(worker_index: int):
             with YANDEX_MIRROR_GUARD:
                 YANDEX_MIRROR_RUNNING_JOB_IDS.discard(job_id)
 
-            YANDEX_MIRROR_QUEUE.task_done()
+            YANDEX_MIRROR_QUEUE.done(entry)
 
 
 def start_yandex_mirror_workers():
