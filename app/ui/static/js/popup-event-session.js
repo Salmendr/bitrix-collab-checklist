@@ -16,6 +16,13 @@
             });
         }
 
+        const saveContinueBtn = document.getElementById('saveContinueBtn');
+        if (saveContinueBtn) {
+            saveContinueBtn.addEventListener('click', async function () {
+                await savePopupSessionAndContinue();
+            });
+        }
+
         if (cancelBtn) {
             cancelBtn.addEventListener('click', async function () {
                 if (isReadOnlyWindow()) {

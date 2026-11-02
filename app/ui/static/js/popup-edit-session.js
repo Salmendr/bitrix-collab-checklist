@@ -488,6 +488,25 @@
         );
     }
 
+    // «Сохранить»: the server committed the session and gave its locks to a
+    // new session of this window; the window goes on with it.
+    function adopt(session) {
+        const nextId = String(
+            session && (session.sessionId || session.session_id) || ''
+        ).trim();
+        if (!nextId) {
+            return false;
+        }
+        activeSessionId = nextId;
+        lastActivityAt = new Date().toISOString();
+        lastActivityHeartbeatAt = 0;
+        setSessionStatus('active');
+        debugLog('popup_edit_session_continued', {
+            sessionId: activeSessionId
+        });
+        return true;
+    }
+
     function getSessionId() {
         return activeSessionId;
     }
@@ -515,6 +534,7 @@
         finalize,
         finalizeOnUnload,
         rollback,
+        adopt,
         commitOnUnload,
         invalidate,
         getSessionId,

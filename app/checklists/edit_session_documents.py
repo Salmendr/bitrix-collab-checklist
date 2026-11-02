@@ -400,10 +400,7 @@ async def _transactional_upload_document_inner(
         target_item["documentUrl"] = clean_cell_value(first_doc.get("fileUrl"))
         target_item["documentName"] = clean_cell_value(first_doc.get("name"))
 
-        actual_group = int(target_item.get("group") or item_group or 0)
-        if config.is_active_group(actual_group):
-            target_item["status"] = "Есть"
-            target_item["priority"] = derive_indicator_from_status("Есть")
+        # A file does not change the status: it is set by hand.
 
         saved = save_checklist(
             normalized_dialog_id,
@@ -703,9 +700,7 @@ async def _transactional_replace_document_inner(
         first_doc = documents[0] if documents else {}
         target_item["documentUrl"] = clean_cell_value(first_doc.get("fileUrl"))
         target_item["documentName"] = clean_cell_value(first_doc.get("name"))
-        if config.is_active_group(target_item.get("group")):
-            target_item["status"] = "Есть"
-            target_item["priority"] = derive_indicator_from_status("Есть")
+        # A file does not change the status: it is set by hand.
 
         data["items"][item_index] = target_item
         saved = save_checklist(
@@ -921,13 +916,7 @@ def transactional_remove_document(
         else:
             target_item["folderPath"] = ""
             target_item["folderUrl"] = ""
-            if (
-                config.reset_status_on_last_document_removed
-                and config.is_active_group(target_item.get("group"))
-                and not preserve_status
-            ):
-                target_item["status"] = ""
-                target_item["priority"] = "white"
+            # Removing the last file does not change the status either.
 
         data["items"][item_index] = target_item
         saved = save_checklist(

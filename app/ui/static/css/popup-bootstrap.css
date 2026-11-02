@@ -2,9 +2,9 @@
  * Popup CSS entry point.
  * Import order preserves the cascade of the former inline <style> block.
  */
-@import url("./popup.css?v=8.15");
+@import url("./popup.css?v=8.35-save-statuses");
 @import url("./uploads.css?v=8.15");
-@import url("./checklist.css?v=8.15.5");
+@import url("./checklist.css?v=8.35-save-statuses");
 @import url("./action-controls.css?v=8.19-folder-replace");
 @import url("./documents.css?v=8.15.9");
 @import url("./checklist-overrides.css?v=8.15");

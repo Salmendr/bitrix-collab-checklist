@@ -7,6 +7,7 @@ from app.settings import (
 )
 
 from app.db import init_db
+from app.logging_utils import install_quiet_access_log
 from app.ui.template_engine import UI_STATIC_ROOT
 
 from app.ui.routes import router as ui_router
@@ -99,6 +100,10 @@ from app.auth.middleware import AuthMiddleware
 from app.auth.routes import router as auth_router
 from app.checklists.id_reminders import start_worker as start_id_reminders, stop_worker as stop_id_reminders
 from app.checklists.date_reminders import start_worker as start_date_reminders, stop_worker as stop_date_reminders
+
+
+# Successful polling of the windows stays out of the docker log.
+install_quiet_access_log()
 
 app = FastAPI()
 app.include_router(id_reminder_router)

@@ -47,3 +47,42 @@ def write_debug_log(event: str, payload: dict):
 
     with open(DEBUG_LOG_PATH, "a", encoding="utf-8") as f:
         f.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+# The windows ask these every few seconds while a file goes to Yandex or a
+# session lives; their successful answers filled the docker log. Errors of
+# them and every other request are still logged.
+# ACCESS_LOG_QUIET_POLLING=0 logs them all again.
+QUIET_ACCESS_LOG_PATHS = (
+    "/api/checklist/document-mirror-status",
+    "/api/checklist/upload-job-status",
+    "/api/checklist/yandex-structure-job",
+    "/api/checklist/yandex-mirror-queue-state",
+    "/api/checklist/session/heartbeat",
+    "/api/checklist/session/status",
+    "/api/checklist/lock/heartbeat",
+    "/api/debug/event",
+)
+
+
+class QuietPollingAccessLog:
+    """A filter of the uvicorn access log: drops successful polling."""
+
+    def filter(self, record) -> bool:
+        try:
+            args = record.args
+            path = str(args[2]).split("?", 1)[0].rstrip("/")
+            status = int(args[4])
+        except Exception:
+            return True
+        return not (status < 400 and path.endswith(QUIET_ACCESS_LOG_PATHS))
+
+
+def install_quiet_access_log() -> bool:
+    import logging
+
+    if os.getenv("ACCESS_LOG_QUIET_POLLING", "1").strip().lower() in {"0", "false", "off", "no"}:
+        return False
+    access = logging.getLogger("uvicorn.access")
+    if not any(isinstance(entry, QuietPollingAccessLog) for entry in access.filters):
+        access.addFilter(QuietPollingAccessLog())
+    return True

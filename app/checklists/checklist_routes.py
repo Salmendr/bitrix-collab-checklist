@@ -2164,6 +2164,22 @@ async def api_checklist_update_item(request: Request):
             elif int(target_item.get("group") or 0) == config.not_required_group_id:
                 target_item["group"] = resolve_required_group_for_item(config.key, target_item)
 
+            # A status chosen on an item with subitems stays until a status
+            # of its subitems changes; then it follows them again.
+            from app.checklists.subitems import parent_id_of, subitems_basis
+            active_children = [
+                child for child in items
+                if parent_id_of(child) == item_id
+                and normalize_status(child.get("status")) != "Не требуется"
+            ]
+            if active_children and new_status != "Не требуется":
+                target_item["statusManual"] = {
+                    "status": new_status,
+                    "basis": subitems_basis(active_children),
+                }
+            else:
+                target_item.pop("statusManual", None)
+
         elif field == "plan":
             target_item["plan"] = normalize_date_string(value)
 

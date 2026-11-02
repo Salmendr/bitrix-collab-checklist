@@ -68,6 +68,7 @@
             let currentEditorReadyPromise = null;
                         const saveStateEl = document.getElementById('saveState');
                         let uploadJobPollTimer = null;
+                        let uploadJobPollToken = null;
             const leftTableBodyEl = document.getElementById('leftTableBody');
             const middleTableBodyEl = document.getElementById('middleTableBody');
             const rightTableBodyEl = document.getElementById('rightTableBody');
@@ -160,6 +161,7 @@
             function normalizeStatus(status) {
                 const s = String(status || '').trim();
                 if (s === 'Есть') return 'Есть';
+                if (s === 'В работе') return 'В работе';
                 if (s === 'Нет') return 'Нет';
                 if (s === 'Не требуется') return 'Не требуется';
                 return '';
@@ -167,19 +169,15 @@
             function indicatorClass(status) {
                 const s = normalizeStatus(status);
                 if (s === 'Есть') return 'status-indicator green';
+                if (s === 'В работе') return 'status-indicator yellow';
                 if (s === 'Не требуется') return 'status-indicator gray';
                 return 'status-indicator';
             }
 
+            // The status is chosen by hand in the mini-menu of the circle.
             function getStatusCircleTitle(status) {
-                const s = normalizeStatus(status);
-                if (s === 'Есть') {
-                    return 'Статус «Есть». Нажмите, чтобы отметить «Не требуется»';
-                }
-                if (s === 'Не требуется') {
-                    return 'Статус «Не требуется». Нажмите, чтобы вернуть пункт';
-                }
-                return 'Статус «Нет». Нажмите, чтобы отметить «Есть»';
+                const s = normalizeStatus(status) || 'Нет';
+                return 'Статус «' + s + '». Нажмите, чтобы выбрать статус';
             }
 
             function getItemDocuments(item) {
@@ -208,8 +206,9 @@
             }
 
             function stopUploadJobPolling() {
+                uploadJobPollToken = null;
                 if (uploadJobPollTimer) {
-                    clearInterval(uploadJobPollTimer);
+                    clearTimeout(uploadJobPollTimer);
                     uploadJobPollTimer = null;
                 }
             }
@@ -236,7 +235,17 @@
                     return;
                 }
 
-                uploadJobPollTimer = setInterval(async function () {
+                // Fast at first, then rarer: an archive goes to Yandex for
+                // minutes. A hidden window does not ask.
+                const pollStartedAt = Date.now();
+                const pollDelay = () => {
+                    const elapsed = Date.now() - pollStartedAt;
+                    return elapsed < 10000 ? 900 : (elapsed < 60000 ? 5000 : 10000);
+                };
+                const pollToken = {};
+                uploadJobPollToken = pollToken;
+                const pollOnce = async function () {
+                    if (document.hidden) return;
                     try {
                         const response = await fetch(
                             appUrl('api/checklist/upload-job-status') +
@@ -272,7 +281,15 @@
                     } catch (e) {
                         console.log('upload job polling error:', e);
                     }
-                }, 900);
+                };
+                const scheduleNext = function () {
+                    uploadJobPollTimer = setTimeout(async function () {
+                        if (uploadJobPollToken !== pollToken) return;
+                        await pollOnce();
+                        if (uploadJobPollToken === pollToken) scheduleNext();
+                    }, pollDelay());
+                };
+                scheduleNext();
             }
 
             function formatFileSize(size) {
@@ -743,6 +760,7 @@
                     : items;
                 const activeItems = progressSource.filter(x => normalizeStatus(x.status) !== 'Не требуется');
                 const completedItems = activeItems.filter(x => normalizeStatus(x.status) === 'Есть');
+                const workItems = activeItems.filter(x => normalizeStatus(x.status) === 'В работе');
                 let activeCount = activeItems.length;
                 let completedCount = completedItems.length;
                 if (currentChecklistKey === 'opr' && window.ChecklistGa) {
@@ -751,9 +769,23 @@
                     completedCount += Number(gradAnalysis.done || 0);
                 }
                 const percent = activeCount ? Math.round((completedCount / activeCount) * 100) : 0;
+                // «В работе» goes on top of «Есть» in yellow.
+                const workPercent = activeCount
+                    ? Math.min(100 - percent, Math.round((workItems.length / activeCount) * 100))
+                    : 0;
 
-                progressValueEl.textContent = percent + '%';
+                progressValueEl.innerHTML = percent + '%'
+                    + (workPercent ? ' <span class="progress-work-value" title="В работе">+' + workPercent + '%</span>' : '');
+                progressValueEl.title = 'Есть: ' + percent + '%' + (workPercent ? ', в работе: ' + workPercent + '%' : '');
                 progressBarEl.style.width = percent + '%';
+                let workBarEl = document.getElementById('progressBarWork');
+                if (!workBarEl && progressBarEl.parentNode) {
+                    workBarEl = document.createElement('div');
+                    workBarEl.id = 'progressBarWork';
+                    workBarEl.className = 'progress-bar progress-bar-work';
+                    progressBarEl.parentNode.appendChild(workBarEl);
+                }
+                if (workBarEl) workBarEl.style.width = workPercent + '%';
             }
             function buildItemNameCell(item, indicatorClassName) {
                 const itemName = String(item && item.name || '');

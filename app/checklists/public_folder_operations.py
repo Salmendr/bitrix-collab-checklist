@@ -829,9 +829,7 @@ def _apply_public_upload(record: dict) -> dict:
         target_item["documentName"] = clean_cell_value(
             first_document.get("name")
         )
-        if config.is_active_group(target_item.get("group")):
-            target_item["status"] = "Есть"
-            target_item["priority"] = derive_indicator_from_status("Есть")
+        # A file does not change the status: it is set by hand.
         data["items"][item_index] = target_item
         saved = save_checklist(
             dialog_id,
@@ -1060,9 +1058,7 @@ def _apply_public_replacement(record: dict) -> dict:
         target_item["documentName"] = clean_cell_value(
             first_document.get("name")
         )
-        if config.is_active_group(target_item.get("group")):
-            target_item["status"] = "Есть"
-            target_item["priority"] = derive_indicator_from_status("Есть")
+        # A file does not change the status: it is set by hand.
         data["items"][item_index] = target_item
         save_checklist(
             dialog_id,

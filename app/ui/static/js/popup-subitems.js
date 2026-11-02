@@ -107,26 +107,52 @@
 
     // ---- derived state ----
 
-    // Mirror of the backend rule: a parent with active subitems is "Есть"
-    // only when all of them are "Есть".
+    // Mirror of the backend rule (subitems.py): a parent with active
+    // subitems is «Нет» while none is started, «В работе» when one is
+    // «В работе» or «Есть», «Есть» when all are «Есть». A status chosen on
+    // the parent stays until a status of its subitems changes.
+    function subitemsBasis(children) {
+        return children
+            .map(child => text(child.id) + ':' + normalizeStatus(child.status))
+            .sort()
+            .join('|');
+    }
+
+    function derivedParentStatus(children) {
+        const statuses = children.map(child => normalizeStatus(child.status));
+        if (statuses.length && statuses.every(status => status === 'Есть')) return 'Есть';
+        if (statuses.some(status => status === 'Есть' || status === 'В работе')) return 'В работе';
+        return 'Нет';
+    }
+
+    function priorityOf(status) {
+        if (status === 'Есть') return 'green';
+        if (status === 'В работе') return 'yellow';
+        return status === 'Нет' || status === 'Не требуется' ? 'gray' : 'white';
+    }
+
     function applyDerivedStatuses() {
         currentItems().forEach(item => {
             if (parentIdOf(item) || isNotRequired(item)) return;
             const children = activeSubitems(item.id);
-            if (!children.length) return;
-            const allDone = children.every(
-                child => normalizeStatus(child.status) === 'Есть'
-            );
-            const current = normalizeStatus(item.status);
-            let derived = current;
-            if (allDone) {
-                derived = 'Есть';
-            } else if (current === 'Есть') {
-                derived = 'Нет';
+            if (!children.length) {
+                delete item.statusManual;
+                return;
             }
+            const current = normalizeStatus(item.status);
+            const manual = item.statusManual;
+            if (
+                manual
+                && normalizeStatus(manual.status) === current
+                && manual.basis === subitemsBasis(children)
+            ) {
+                return;
+            }
+            delete item.statusManual;
+            const derived = derivedParentStatus(children);
             if (derived !== current) {
                 item.status = derived;
-                item.priority = derived === 'Есть' ? 'green' : 'gray';
+                item.priority = priorityOf(derived);
             }
         });
     }
@@ -159,10 +185,10 @@
 
     function statusTitle(item) {
         if (!hasActiveSubitems(item) || isNotRequired(item)) return '';
-        if (normalizeStatus(item.status) === 'Есть') {
-            return 'Все подпункты выполнены. Нажмите, чтобы отметить «Не требуется»';
-        }
-        return 'Статус пункта станет «Есть», когда будут выполнены все подпункты';
+        const status = normalizeStatus(item.status) || 'Нет';
+        return 'Статус «' + status + '» по подпунктам'
+            + (item.statusManual ? ' (выбран вручную)' : '')
+            + '. Нажмите, чтобы выбрать статус';
     }
 
     // ---- markup ----

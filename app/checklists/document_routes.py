@@ -566,10 +566,7 @@ async def api_checklist_upload_document(
         target_item["documentUrl"] = clean_cell_value(first_doc.get("fileUrl"))
         target_item["documentName"] = clean_cell_value(first_doc.get("name"))
 
-        actual_group = int(target_item.get("group") or item_group or 0)
-        if config.is_active_group(actual_group):
-            target_item["status"] = "Есть"
-            target_item["priority"] = derive_indicator_from_status("Есть")
+        # A file does not change the status: it is set by hand.
 
         data["items"] = items
 
@@ -1115,13 +1112,7 @@ async def api_checklist_replace_document(
             )
         )
 
-        if config.is_active_group(
-            target_item.get("group")
-        ):
-            target_item["status"] = "Есть"
-            target_item["priority"] = (
-                derive_indicator_from_status("Есть")
-            )
+        # A file does not change the status: it is set by hand.
 
         items[target_item_index] = target_item
         data["items"] = items
@@ -1523,13 +1514,7 @@ async def api_checklist_remove_document(request: Request):
         target_item["documentUrl"] = ""
         target_item["documentName"] = ""
 
-        if (
-            config.reset_status_on_last_document_removed
-            and config.is_active_group(target_item.get("group"))
-            and not preserve_status
-        ):
-            target_item["status"] = ""
-            target_item["priority"] = "white"
+        # Removing the last file does not change the status either.
 
     data["items"] = items
     data = normalize_checklist_data(data, config.key)
@@ -2372,7 +2357,7 @@ def api_checklist_folder(
     ui_static_base_url = (
         f"{app_base_path}/ui-static"
     )
-    ui_asset_version = "8.27-item-folders"
+    ui_asset_version = "8.35-save-statuses"
     popup_url = (
         f"{app_base_path}/popup"
         f"?dialogId={quote(dialog_id, safe='')}"

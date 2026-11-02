@@ -11,6 +11,8 @@ from app.db import get_conn
 from app.logging_utils import write_debug_log
 
 from app.checklists.edit_sessions import (
+    get_edit_session,
+    public_edit_session_payload,
     EditSessionConflictError,
     commit_edit_session,
     get_edit_session_for_actor,
@@ -926,6 +928,9 @@ def finalize_edit_session_payload(payload: dict) -> dict:
         or payload.get("closeEvent")
         or "save_and_close"
     )
+    # «Сохранить»: everything of «Сохранить и закрыть», but the window stays
+    # and a new session of it keeps the locks.
+    continue_editing = bool(payload.get("continueEditing"))
 
     if not session_id:
         raise ValueError("sessionId is required")
@@ -1012,6 +1017,7 @@ def finalize_edit_session_payload(payload: dict) -> dict:
                 dialog_id=dialog_id,
                 user_id=user_id,
                 reason=reason,
+                continue_editing=continue_editing,
             )
             if clean_cell_value(committed_session.get("status")) != "committed":
                 raise EditSessionConflictError(
@@ -1054,6 +1060,13 @@ def finalize_edit_session_payload(payload: dict) -> dict:
             "messageStatus": "queued",
             "messageError": "",
         }
+        successor_id = clean_cell_value(committed_session.get("successorSessionId"))
+        if successor_id:
+            response["locksReleased"] = False
+            response["continuedSessionId"] = successor_id
+            response["continuedSession"] = public_edit_session_payload(
+                get_edit_session(successor_id)
+            )
         _update_finalization(
             session_id,
             status="completed",

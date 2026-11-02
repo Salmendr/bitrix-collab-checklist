@@ -5,6 +5,11 @@
     let pendingTarget = null;
     let pollingTimer = null;
     let pollingInProgress = false;
+    // Fast at first (a small file is on Yandex in seconds), then rarer: an
+    // archive goes for minutes. A hidden window does not ask.
+    let pollingStartedAt = 0;
+    let pollingKnownIds = [];
+    let pollingPaused = false;
 
     function normalizeStatus(value) {
         return String(value || '').trim().toLowerCase();
@@ -194,29 +199,70 @@
         }
     }
 
-    function startPollingIfNeeded() {
-        const hasPending = getReplaceButtons().some(
+    function pendingDocumentIds() {
+        return getReplaceButtons().filter(
             button => ['queued', 'running'].includes(
                 normalizeStatus(
                     button.dataset.mirrorStatus
                 )
             )
-        );
+        ).map(button => String(button.dataset.documentId || ''));
+    }
 
-        if (!hasPending || pollingTimer) return;
+    function pollingDelay() {
+        const elapsed = Date.now() - pollingStartedAt;
+        if (elapsed < 10000) return 1200;
+        if (elapsed < 60000) return 5000;
+        return 10000;
+    }
+
+    function scheduleNextPoll() {
+        pollingTimer = global.setTimeout(async function () {
+            pollingTimer = null;
+            if (document.hidden) {
+                pollingPaused = true;
+                return;
+            }
+            await pollPendingButtons();
+            if (!pollingTimer && pollingStartedAt && pendingDocumentIds().length) {
+                scheduleNextPoll();
+            }
+        }, pollingDelay());
+    }
+
+    function startPollingIfNeeded() {
+        const ids = pendingDocumentIds();
+        if (!ids.length) return;
+
+        // A new upload: fast again.
+        if (ids.some(id => !pollingKnownIds.includes(id))) {
+            pollingStartedAt = Date.now();
+            if (pollingTimer) {
+                global.clearTimeout(pollingTimer);
+                pollingTimer = null;
+            }
+        }
+        pollingKnownIds = ids;
+        if (pollingTimer || pollingPaused) return;
+        if (!pollingStartedAt) pollingStartedAt = Date.now();
 
         void pollPendingButtons();
-        pollingTimer = global.setInterval(
-            pollPendingButtons,
-            1200
-        );
+        scheduleNextPoll();
     }
 
     function stopPolling() {
-        if (!pollingTimer) return;
-        global.clearInterval(pollingTimer);
+        if (pollingTimer) global.clearTimeout(pollingTimer);
         pollingTimer = null;
+        pollingStartedAt = 0;
+        pollingKnownIds = [];
+        pollingPaused = false;
     }
+
+    document.addEventListener('visibilitychange', function () {
+        if (document.visibilityState !== 'visible' || !pollingPaused) return;
+        pollingPaused = false;
+        startPollingIfNeeded();
+    });
 
     function ensureReplacementInput() {
         if (

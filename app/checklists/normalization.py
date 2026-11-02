@@ -392,6 +392,8 @@ def derive_indicator_from_status(status: str) -> str:
     status = normalize_status(status)
     if status == "Есть":
         return "green"
+    if status == "В работе":
+        return "yellow"
     if status == "Нет" or status == "Не требуется":
         return "gray"
     return "white"

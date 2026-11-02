@@ -11,7 +11,10 @@ Invariants enforced by :func:`apply_item_hierarchy` on every normalization:
 * a subitem sent to "Не требуется" is detached: ``parentItemId`` is cleared
   and ``notRequiredReturnParentId`` remembers where to return it;
 * ``order`` of top-level items is 1..n per group, of subitems 1..m per parent;
-* a parent with active subitems is "Есть" only when all of them are "Есть".
+* a parent with active subitems takes its status from them: "Нет" while
+  none of them is started, "В работе" when one is "В работе" or "Есть",
+  "Есть" when all are "Есть". A status set by hand on the parent ("В работе",
+  "Нет") stays until a status of its subitems or the list of them changes.
 """
 from __future__ import annotations
 
@@ -22,6 +25,28 @@ from app.checklists.utils import clean_cell_value
 
 
 NOT_REQUIRED_STATUS = "Не требуется"
+STARTED_STATUSES = ("Есть", "В работе")
+
+
+def subitems_basis(children: list[dict]) -> str:
+    """What a status set by hand on a parent depends on."""
+    from app.checklists.normalization import normalize_status
+
+    return "|".join(sorted(
+        clean_cell_value(child.get("id")) + ":" + normalize_status(child.get("status"))
+        for child in children
+    ))
+
+
+def derive_parent_status(children: list[dict]) -> str:
+    from app.checklists.normalization import normalize_status
+
+    statuses = [normalize_status(child.get("status")) for child in children]
+    if statuses and all(status == "Есть" for status in statuses):
+        return "Есть"
+    if any(status in STARTED_STATUSES for status in statuses):
+        return "В работе"
+    return "Нет"
 SUBITEM_ALIAS_RE = re.compile(r"_sub_[0-9a-f]{8}$")
 
 
@@ -46,7 +71,7 @@ def build_hierarchy_fields(item: dict | None) -> dict:
     from app.checklists.document_folders import item_subfolders
 
     source = item or {}
-    return {
+    fields = {
         "parentItemId": clean_cell_value(source.get("parentItemId")),
         "notRequiredReturnParentId": clean_cell_value(
             source.get("notRequiredReturnParentId")
@@ -54,6 +79,14 @@ def build_hierarchy_fields(item: dict | None) -> dict:
         # Every folder inside the item, including empty ones.
         "subfolders": item_subfolders(source),
     }
+    # A status set by hand on a parent and the statuses of its subitems then.
+    manual = source.get("statusManual")
+    if isinstance(manual, dict) and clean_cell_value(manual.get("status")):
+        fields["statusManual"] = {
+            "status": clean_cell_value(manual.get("status")),
+            "basis": str(manual.get("basis") or ""),
+        }
+    return fields
 
 
 def _safe_int(value, default: int = 0) -> int:
@@ -135,18 +168,18 @@ def apply_item_hierarchy(items: list[dict], not_required_group_id: int) -> list[
             if normalize_status(child.get("status")) != NOT_REQUIRED_STATUS
         ]
         if not active_children:
+            item.pop("statusManual", None)
             continue
-        all_done = all(
-            normalize_status(child.get("status")) == "Есть"
-            for child in active_children
-        )
         current = normalize_status(item.get("status"))
-        if all_done:
-            derived = "Есть"
-        elif current == "Есть":
-            derived = "Нет"
-        else:
-            derived = current
+        manual = item.get("statusManual") if isinstance(item.get("statusManual"), dict) else None
+        if (
+            manual
+            and normalize_status(manual.get("status")) == current
+            and manual.get("basis") == subitems_basis(active_children)
+        ):
+            continue
+        item.pop("statusManual", None)
+        derived = derive_parent_status(active_children)
         if derived != current:
             item["status"] = derived
             item["priority"] = derive_indicator_from_status(derived)

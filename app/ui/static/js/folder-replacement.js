@@ -285,20 +285,51 @@
         await Promise.all(active.map(pollButton));
     }
 
+    // Fast at first (a small file is on Yandex in seconds), then rarer: an
+    // archive goes for minutes. A hidden window does not ask.
+    let pollingStartedAt = 0;
+    let pollingPaused = false;
+
+    function pollingDelay() {
+        const elapsed = Date.now() - pollingStartedAt;
+        if (elapsed < 10000) return 1200;
+        if (elapsed < 60000) return 5000;
+        return 10000;
+    }
+
+    function scheduleNextPoll() {
+        pollingTimer = global.setTimeout(async function () {
+            pollingTimer = null;
+            if (destroyed) return;
+            if (global.document.hidden) {
+                pollingPaused = true;
+                return;
+            }
+            await pollAll();
+            if (!pollingTimer && pollingStartedAt) scheduleNextPoll();
+        }, pollingDelay());
+    }
+
     function startPolling() {
         stopPolling();
+        pollingStartedAt = Date.now();
         void pollAll();
-        pollingTimer = global.setInterval(
-            pollAll,
-            1200
-        );
+        if (pollingStartedAt) scheduleNextPoll();
     }
 
     function stopPolling() {
-        if (!pollingTimer) return;
-        global.clearInterval(pollingTimer);
+        if (pollingTimer) global.clearTimeout(pollingTimer);
         pollingTimer = null;
+        pollingStartedAt = 0;
+        pollingPaused = false;
     }
+
+    global.document.addEventListener('visibilitychange', function () {
+        if (global.document.visibilityState !== 'visible' || !pollingPaused || destroyed) return;
+        pollingPaused = false;
+        void pollAll();
+        if (pollingStartedAt && !pollingTimer) scheduleNextPoll();
+    });
 
     function actor() {
         return typeof core.getActor === 'function'

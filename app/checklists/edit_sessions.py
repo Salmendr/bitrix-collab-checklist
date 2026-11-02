@@ -1010,8 +1010,55 @@ def _schedule_committed_edit_session_jobs(
     timer.start()
 
 
+def _create_successor_session_in_transaction(conn, record: dict, locks: list, now: str) -> str:
+    """«Сохранить» without closing: a new session of the same window takes
+    the locks of the committed one in the same transaction, so nobody else
+    can take the checklist in between. Its Cancel returns to what was saved.
+    locks: (checklist_key, lock_id) of the committed session, already
+    released in this transaction (one lock per checklist is unique)."""
+    successor_id = uuid.uuid4().hex
+    conn.execute("""
+        INSERT INTO edit_sessions(
+            session_id, dialog_id, user_id, user_name, client_session_id,
+            status, close_reason, metadata_json, started_at, heartbeat_at,
+            expires_at, last_activity_at, idle_expires_at, commit_started_at,
+            committed_at, rollback_started_at, rolled_back_at, expired_at,
+            error, created_at, updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, 'active', '', ?, ?, ?, ?, ?, ?, '', '', '', '', '', '', ?, ?)
+    """, (
+        successor_id,
+        record.get("dialog_id") or "",
+        record.get("user_id") or "",
+        record.get("user_name") or "",
+        record.get("client_session_id") or "",
+        json_dumps({
+            **(json_loads(record.get("metadata_json") or "{}", {}) or {}),
+            "continuedFrom": record["session_id"],
+        }),
+        now,
+        now,
+        utc_after_seconds_iso(EDIT_SESSION_TTL_SECONDS),
+        now,
+        utc_after_seconds_iso(EDIT_SESSION_INACTIVITY_SECONDS),
+        now,
+        now,
+    ))
+    for checklist_key, lock_id in locks:
+        conn.execute("""
+            INSERT INTO edit_session_checklists(
+                session_id, dialog_id, checklist_key, status, lock_id, snapshot_id,
+                started_at, updated_at, lock_acquired_at, lock_heartbeat_at,
+                lock_released_at, lock_release_reason
+            )
+            VALUES (?, ?, ?, 'locked', ?, '', ?, ?, ?, ?, '', '')
+        """, (successor_id, record.get("dialog_id") or "", checklist_key, lock_id, now, now, now, now))
+    return successor_id
+
+
 def complete_edit_session_commit(
     session_id: str,
+    continue_editing: bool = False,
 ) -> dict:
     ensure_edit_session_tables()
 
@@ -1136,12 +1183,29 @@ def complete_edit_session_commit(
         from app.checklists.grad_analysis import finalize_drafts as finalize_ga_drafts
         finalize_ga_drafts(conn, record["session_id"], commit=True, now=now)
 
+        held_locks = []
+        if continue_editing:
+            held_locks = [
+                (row["checklist_key"], row["lock_id"])
+                for row in conn.execute("""
+                    SELECT checklist_key, lock_id
+                    FROM edit_session_checklists
+                    WHERE session_id = ?
+                      AND status = 'locked'
+                      AND COALESCE(lock_id, '') <> ''
+                """, (record["session_id"],)).fetchall()
+            ]
+
         release_edit_session_locks_in_transaction(
             conn,
             session_id=record["session_id"],
-            reason="session_committed",
+            reason="session_saved_continued" if continue_editing else "session_committed",
             now=now,
         )
+
+        successor_id = ""
+        if continue_editing:
+            successor_id = _create_successor_session_in_transaction(conn, record, held_locks, now)
 
         conn.commit()
 
@@ -1163,7 +1227,18 @@ def complete_edit_session_commit(
         record["session_id"]
     )
 
-    return get_edit_session(record["session_id"]) or {}
+    committed = get_edit_session(record["session_id"]) or {}
+    if successor_id:
+        from app.logging_utils import write_debug_log
+
+        committed["successorSessionId"] = successor_id
+        write_debug_log("edit_session_saved_continued", {
+            "sessionId": record["session_id"],
+            "successorSessionId": successor_id,
+            "dialogId": record.get("dialog_id") or "",
+            "userId": record.get("user_id") or "",
+        })
+    return committed
 
 
 def commit_edit_session(
@@ -1171,6 +1246,7 @@ def commit_edit_session(
     dialog_id: str = "",
     user_id: str = "",
     reason: str = "save_and_close",
+    continue_editing: bool = False,
 ) -> dict:
     record = begin_edit_session_commit(
         session_id,
@@ -1191,7 +1267,8 @@ def commit_edit_session(
 
     try:
         return complete_edit_session_commit(
-            target_session_id
+            target_session_id,
+            continue_editing=continue_editing,
         )
     except Exception as exc:
         # A failed durable commit must remain retryable.  Leaving the session

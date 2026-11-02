@@ -132,32 +132,30 @@ const lockNoticeEl = document.getElementById('lockNotice');
 
 const contentEl = document.querySelector('.content');
 if (contentEl && !document.getElementById('footerActions')) {
+    // The bar of the buttons is fixed to the bottom of the window and is
+    // transparent: the checklist shows around it and stays clickable. Only
+    // the white strip under the buttons hides the text, with no gaps.
     const footerNode = document.createElement('div');
     footerNode.id = 'footerActions';
-    footerNode.style.position = 'sticky';
-    footerNode.style.bottom = '0';
-    footerNode.style.zIndex = '30';
-    footerNode.style.marginTop = '14px';
-    footerNode.style.padding = '10px 12px';
-    footerNode.style.display = 'flex';
-    footerNode.style.gap = '10px';
-    footerNode.style.justifyContent = 'flex-end';
-    footerNode.style.alignItems = 'center';
-    footerNode.style.border = '1px solid #e5e7eb';
-    footerNode.style.borderRadius = '12px';
-    footerNode.style.background = '#fafbfc';
-    footerNode.style.boxShadow = '0 -4px 18px rgba(15,23,42,.06)';
+    footerNode.className = 'popup-footer-actions';
     footerNode.innerHTML = `
-        <button id="saveCloseBtn" type="button" style="min-width:150px;height:34px;border:none;border-radius:8px;background:#16a34a;color:#fff;font-size:12px;font-weight:700;cursor:pointer;">
-            Сохранить и закрыть
-        </button>
-        <button id="cancelBtn" type="button" style="min-width:100px;height:34px;border:none;border-radius:8px;background:#dc2626;color:#fff;font-size:12px;font-weight:700;cursor:pointer;">
-            Отмена
-        </button>
+        <div class="popup-footer-buttons">
+            <button id="saveCloseBtn" type="button" class="popup-footer-btn is-save-close">
+                Сохранить и закрыть
+            </button>
+            <button id="saveContinueBtn" type="button" class="popup-footer-btn is-save" title="Сохранить изменения и продолжить работу: чек-лист остаётся за вами">
+                Сохранить
+            </button>
+            <button id="cancelBtn" type="button" class="popup-footer-btn is-cancel">
+                Отмена
+            </button>
+        </div>
     `;
     contentEl.appendChild(footerNode);
+    contentEl.classList.add('has-fixed-footer');
 }
 const saveCloseBtn = document.getElementById('saveCloseBtn');
+const saveContinueBtn = document.getElementById('saveContinueBtn');
 const cancelBtn = document.getElementById('cancelBtn');
 
 // A window of the platform portal is open for viewing only: no edit session
@@ -168,6 +166,7 @@ function isReadOnlyWindow() {
 
 if (isReadOnlyWindow()) {
     if (saveCloseBtn) saveCloseBtn.style.display = 'none';
+    if (saveContinueBtn) saveContinueBtn.style.display = 'none';
     if (cancelBtn) {
         cancelBtn.textContent = 'Закрыть';
         cancelBtn.style.background = '#475467';
@@ -516,6 +515,14 @@ function setActionButtonState() {
         saveCloseBtn.disabled = !(editingAllowed || gradAnalysisEditable());
         saveCloseBtn.style.opacity = saveCloseBtn.disabled ? '0.55' : '1';
         saveCloseBtn.style.cursor = saveCloseBtn.disabled ? 'not-allowed' : 'pointer';
+    }
+    if (saveContinueBtn) {
+        saveContinueBtn.disabled = !!(
+            popupFinalizeRequestInProgress
+            || !(editingAllowed || gradAnalysisEditable())
+        );
+        saveContinueBtn.style.opacity = saveContinueBtn.disabled ? '0.55' : '1';
+        saveContinueBtn.style.cursor = saveContinueBtn.disabled ? 'not-allowed' : 'pointer';
     }
     if (cancelBtn) {
         cancelBtn.disabled = popupFinalizationInProgress;
@@ -1574,6 +1581,7 @@ async function finalizePopupSession(saveChanges, options = {}) {
     popupFinalizeRequestInProgress = true;
 
     if (saveCloseBtn) saveCloseBtn.disabled = true;
+    if (saveContinueBtn) saveContinueBtn.disabled = true;
     if (cancelBtn) cancelBtn.disabled = true;
 
     // Граданализ: «Нет» needs a note; Save stops until it is filled. The
@@ -1593,6 +1601,7 @@ async function finalizePopupSession(saveChanges, options = {}) {
             // The message of the check stays in the save state.
             popupFinalizeRequestInProgress = false;
             if (saveCloseBtn) saveCloseBtn.disabled = false;
+            if (saveContinueBtn) saveContinueBtn.disabled = false;
             if (cancelBtn) cancelBtn.disabled = false;
             return false;
         }
@@ -1608,6 +1617,7 @@ async function finalizePopupSession(saveChanges, options = {}) {
     } catch (renameError) {
         popupFinalizeRequestInProgress = false;
         if (saveCloseBtn) saveCloseBtn.disabled = false;
+        if (saveContinueBtn) saveContinueBtn.disabled = false;
         if (cancelBtn) cancelBtn.disabled = false;
         setSaveState(
             'error',
@@ -1625,6 +1635,7 @@ async function finalizePopupSession(saveChanges, options = {}) {
     } catch (uploadWaitError) {
         popupFinalizeRequestInProgress = false;
         if (saveCloseBtn) saveCloseBtn.disabled = false;
+        if (saveContinueBtn) saveContinueBtn.disabled = false;
         if (cancelBtn) cancelBtn.disabled = false;
         setSaveState(
             'error',
@@ -1714,6 +1725,7 @@ async function finalizePopupSession(saveChanges, options = {}) {
         suppressAutoCloseSave = false;
         closeSummarySent = false;
         if (saveCloseBtn) saveCloseBtn.disabled = false;
+        if (saveContinueBtn) saveContinueBtn.disabled = false;
         if (cancelBtn) cancelBtn.disabled = false;
         updateLockNotice();
         return false;
@@ -1766,6 +1778,130 @@ async function finalizePopupSession(saveChanges, options = {}) {
 }
 
 window.finalizePopupSession = finalizePopupSession;
+
+// «Сохранить»: everything «Сохранить и закрыть» does (the changes, the files
+// to Yandex, the message to the chat), but the window stays open and keeps
+// the checklist: the server gives the locks to a new session of this window
+// in the same transaction, so nobody else takes it in between.
+async function savePopupSessionAndContinue() {
+    if (
+        isReadOnlyWindow()
+        || popupFinalizationInProgress
+        || popupFinalizeRequestInProgress
+    ) {
+        return false;
+    }
+    popupFinalizeRequestInProgress = true;
+    const buttons = [saveCloseBtn, saveContinueBtn, cancelBtn].filter(Boolean);
+    const release = () => {
+        popupFinalizeRequestInProgress = false;
+        buttons.forEach(button => { button.disabled = false; });
+        setActionButtonState();
+        updateLockNotice();
+    };
+    buttons.forEach(button => { button.disabled = true; });
+
+    if (window.ChecklistGa) {
+        let gradAnalysisReady = true;
+        try {
+            gradAnalysisReady = await window.ChecklistGa.checkBeforeSave();
+        } catch (gradAnalysisError) {
+            console.log('Граданализ check skipped:', gradAnalysisError);
+        }
+        if (!gradAnalysisReady) {
+            release();
+            return false;
+        }
+    }
+
+    setSaveState('saving', 'Сохраняем...');
+    try {
+        await waitForPopupUploadsBeforeFinalize(true);
+    } catch (uploadWaitError) {
+        release();
+        setSaveState(
+            'error',
+            uploadWaitError && uploadWaitError.message
+                ? uploadWaitError.message
+                : 'Не удалось завершить очередь загрузки'
+        );
+        return false;
+    }
+
+    // Edits and the session recovery of the heartbeat wait for the answer.
+    popupFinalizationInProgress = true;
+    syncChecklistCache();
+    updateLockNotice();
+    debugLog('save_continue_started', {
+        dialogId,
+        checklistKey: currentChecklistKey,
+        editSessionId: getActiveEditSessionId()
+    });
+
+    const editSessionApi = window.ChecklistPopupEditSession;
+    let result = null;
+    try {
+        const sessionEvents = window.ChecklistPopupSessionEvents;
+        if (sessionEvents && typeof sessionEvents.ensureStarted === 'function') {
+            await sessionEvents.ensureStarted();
+        }
+        await ensureCurrentEditorReady();
+        const dirtyKeys = getDirtyChecklistKeys();
+        const payload = {
+            ...buildSessionFinalizePayload('save_continue'),
+            continueEditing: true
+        };
+        result = await editSessionApi.finalize(payload, 'save_continue');
+        dirtyKeys.forEach(clearChecklistSessionState);
+    } catch (error) {
+        popupFinalizationInProgress = false;
+        const errorText = String(error && error.message || error || '').trim();
+        debugLog('save_continue_failed', {
+            dialogId,
+            checklistKey: currentChecklistKey,
+            error: errorText
+        });
+        release();
+        setSaveState(
+            'error',
+            errorText ? 'Ошибка сохранения: ' + errorText.slice(0, 140) : 'Ошибка сохранения'
+        );
+        return false;
+    }
+
+    const adopted = !!(
+        result
+        && result.continuedSession
+        && typeof editSessionApi.adopt === 'function'
+        && editSessionApi.adopt(result.continuedSession)
+    );
+    popupFinalizationInProgress = false;
+    if (!adopted) {
+        // A repeated request gets no new session: the window starts one.
+        await recoverPopupSessionAndCurrentLock();
+    }
+    try {
+        await reloadCurrentChecklistFromServer();
+        renderAll();
+    } catch (reloadError) {
+        console.log('reload after save skipped:', reloadError);
+    }
+    startLockHeartbeat();
+    release();
+    setSaveState(
+        '',
+        result && result.messageOk === false ? 'Сохранено, сообщение не отправлено' : 'Сохранено'
+    );
+    debugLog('save_continue_completed', {
+        dialogId,
+        checklistKey: currentChecklistKey,
+        editSessionId: getActiveEditSessionId(),
+        adopted
+    });
+    return true;
+}
+
+window.savePopupSessionAndContinue = savePopupSessionAndContinue;
 
 function sendCloseSummaryOnce(eventName) {
     registerPopupCloseHandoff({

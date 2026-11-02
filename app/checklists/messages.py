@@ -20,6 +20,8 @@ def status_emoji(status: str) -> str:
 
     if status in {"Есть", "Да"}:
         return "🟢"
+    if status == "В работе":
+        return "🟡"
     if status == "Нет":
         return "🔴"
     if status == "Не требуется":
