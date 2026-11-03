@@ -162,10 +162,10 @@
             title = share && share.total ? 'Готово пунктов раздела ТУ: ' + share.done + ' из ' + share.total : 'В разделе ТУ нет пунктов';
         }
         const value = percent == null ? '—' : percent + '%';
-        // Граданализ lives in the OPR checklist.
-        const target = kind === 'ga' ? 'opr' : 'id';
-        const link = text(kind === 'ga' ? project.oprChecklistUrl : project.idChecklistUrl);
-        const hint = kind === 'ga' ? '. Нажмите, чтобы открыть чек-лист ОПР' : '. Нажмите, чтобы открыть чек-лист ИД';
+        // Граданализ has its own checklist.
+        const target = kind === 'ga' ? 'ga' : 'id';
+        const link = text(kind === 'ga' ? project.gaChecklistUrl : project.idChecklistUrl);
+        const hint = kind === 'ga' ? '. Нажмите, чтобы открыть чек-лист Граданализ' : '. Нажмите, чтобы открыть чек-лист ИД';
         return '<span class="oa-share' + (percent == null ? ' is-empty' : '') + (link ? ' is-link' : '') + '"'
             + (link ? ' data-oa-open="' + target + '"' : '') + ' title="' + esc(title + (link ? hint : '')) + '">'
             + esc(value) + '</span>';
@@ -820,6 +820,8 @@
                     global.open(project.idChecklistUrl, '_blank', 'noopener');
                 } else if (open.dataset.oaOpen === 'opr' && text(project.oprChecklistUrl)) {
                     global.open(project.oprChecklistUrl, '_blank', 'noopener');
+                } else if (open.dataset.oaOpen === 'ga' && text(project.gaChecklistUrl)) {
+                    global.open(project.gaChecklistUrl, '_blank', 'noopener');
                 }
                 return;
             }

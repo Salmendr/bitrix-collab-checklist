@@ -30,25 +30,54 @@ from app.settings import (
     EDIT_SESSION_INACTIVITY_WARNING_SECONDS,
 )
 
+def _grad_analysis_page_data(dialog_id: str) -> dict:
+    """Граданализ is not a checklist of the table: the window opens on its
+    tab with no items of its own (its rows come from api/ga). Nothing is
+    created here."""
+    from app.checklists.grad_analysis import GA_KEY, GA_TITLE
+    from app.checklists.normalization import build_project_checklists
+    from app.checklists.object_analysis import _saved_checklist
+
+    collab_title = ""
+    for key in ("opr", "id"):
+        saved = _saved_checklist(dialog_id, key) or {}
+        collab_title = clean_cell_value(saved.get("collabTitle"))
+        if collab_title:
+            break
+    return {
+        "title": GA_TITLE,
+        "checklistKey": GA_KEY,
+        "collabTitle": collab_title,
+        "items": [],
+        "groups": [],
+        "projectChecklists": build_project_checklists(),
+        "orderVersion": 0,
+        "progressPercent": 0,
+    }
+
+
 def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
     dialog_id = normalize_dialog_id(dialogId)
     checklist_key = normalize_checklist_key(checklistKey)
-    data = get_checklist(dialog_id, checklist_key)
-    data = attach_latest_yandex_structure_states(
-        data,
-        dialog_id=dialog_id,
-        checklist_key=checklist_key,
-    )
-    data = attach_latest_document_mirror_states(
-        data,
-        dialog_id=dialog_id,
-        checklist_key=checklist_key,
-    )
-    data = attach_assignment_history_counts(
-        data,
-        dialog_id=dialog_id,
-        checklist_key=checklist_key,
-    )
+    if checklist_key == "ga":
+        data = _grad_analysis_page_data(dialog_id)
+    else:
+        data = get_checklist(dialog_id, checklist_key)
+        data = attach_latest_yandex_structure_states(
+            data,
+            dialog_id=dialog_id,
+            checklist_key=checklist_key,
+        )
+        data = attach_latest_document_mirror_states(
+            data,
+            dialog_id=dialog_id,
+            checklist_key=checklist_key,
+        )
+        data = attach_assignment_history_counts(
+            data,
+            dialog_id=dialog_id,
+            checklist_key=checklist_key,
+        )
     project_context = get_project_storage_context(dialog_id) or {}
 
     title_raw = clean_cell_value(data.get("title")) or "Чек-лист"
@@ -73,15 +102,17 @@ def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
 
         write_debug_log("popup_ga_progress_failed", {"dialogId": dialog_id, "error": str(exc)})
         ga_progress = {"done": 0, "total": 0, "percent": None}
-    if checklist_key == "opr":
-        # The OPR progress counts the items of Граданализ too.
+    if checklist_key == "ga":
+        # Граданализ has its own progress; OPR does not count it.
+        progress_percent = int(ga_progress.get("percent") or 0)
+    elif checklist_key == "opr":
+        # Items with subitems count by their subitems, as in the window.
         from app.checklists.normalization import calculate_progress
         from app.checklists.subitems import progress_items
 
         own = calculate_progress(progress_items(data.get("items") or []))
-        done = own["completedCount"] + ga_progress["done"]
-        total = own["activeCount"] + ga_progress["total"]
-        progress_percent = round(done * 100 / total) if total else 0
+        total = own["activeCount"]
+        progress_percent = round(own["completedCount"] * 100 / total) if total else 0
 
     project_root_folder_info = get_project_root_yandex_folder_info(dialog_id)
 
@@ -172,6 +203,20 @@ def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
             "bimPlacement": checklist_config.bim_placement,
             "panelGroupIds": [list(panel) for panel in checklist_config.panel_group_ids],
         }
+
+    # The tab of Граданализ: no groups, no Yandex folders.
+    checklist_layout_meta_by_key["ga"] = {
+        "key": "ga",
+        "title": "Чек-лист Граданализ",
+        "notRequiredGroupId": 0,
+        "defaultGroupId": 0,
+        "allowCustomItemGroupIds": [],
+        "stageYandexFolderAlias": "",
+        "layoutMode": "grad_analysis",
+        "bimGroupId": 0,
+        "bimPlacement": "",
+        "panelGroupIds": [],
+    }
 
     checklist_layout_meta_json = json.dumps(
         checklist_layout_meta_by_key,

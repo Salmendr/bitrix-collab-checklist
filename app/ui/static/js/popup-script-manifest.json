@@ -352,8 +352,8 @@
       "bytes": 10475
     },
     "popup-core.js": {
-      "sha256": "ec116ddf16625aefc2396a544a69b60597d357bb9ad9e931b1ee77011b536114",
-      "bytes": 109780
+      "sha256": "239f70a3b7f71a5d67a4ebd18879b91d12245c4e65018a16fa6eb76c9f51c6a5",
+      "bytes": 111174
     },
     "popup-document-list.js": {
       "sha256": "090e04eea9d27f2431e71e23fc089a5573bee8f65dccd2779df225a3b22fea73",
@@ -384,12 +384,12 @@
       "bytes": 19809
     },
     "popup-document-replacement.js": {
-      "sha256": "a88b3910b85ad8d6af57d65e0f55dc16e71d30de1bdb4e0dac67f67277feb162",
-      "bytes": 26833
+      "sha256": "1f2dc2868ac36045807e1fb720cf569769693c4335d8083d534b687bfc96ab85",
+      "bytes": 27283
     },
     "popup-session-enhancements.js": {
-      "sha256": "5b8bf24ea345057f42fede5ef007e7c12389e51ee8f9c93f078b482430f0bc44",
-      "bytes": 60864
+      "sha256": "c8c3f4a3562596ca8dc4e226598bba448ba9dbd992b4e7501db20703570b8039",
+      "bytes": 61084
     },
     "popup-edit-session.js": {
       "sha256": "abf5c8fe59a3e862d01f65ec396d111dfe3bb04d9011a9ebcbf6cfd06314354c",
@@ -400,8 +400,8 @@
       "bytes": 6629
     },
     "popup-grad-analysis.js": {
-      "sha256": "45dd312846383af65e3f4d5bdccc4b8b95bf1ec773d82d1dbe04ea004c3618ac",
-      "bytes": 64556
+      "sha256": "a4d978f67df6e37f893fe264e41b2fb41d4c32d9f7554287836b1b394a2d6e5d",
+      "bytes": 65590
     },
     "bitrix-user-picker.js": {
       "sha256": "e69ee7af0913383cda4f02ba83279c64fe4650715532eee91176c47cfe57b1c9",
@@ -436,8 +436,8 @@
       "bytes": 10559
     },
     "popup-event-session.js": {
-      "sha256": "ead2a934b6534599bd8383ef25fb47031b3d956842241560a7ee5461ca55a530",
-      "bytes": 6880
+      "sha256": "95b250505a98e119f68df43ca4d4391fe463ef6b1d0542b42b8183840239f3bc",
+      "bytes": 6658
     },
     "popup-renderer-common.js": {
       "sha256": "23de63d24a18c3d9204c230579af1f1027017a40192436e7f2f218ca16c00d9a",
@@ -456,12 +456,12 @@
       "bytes": 4636
     },
     "popup-renderer-generic.js": {
-      "sha256": "29de1ed10b36ccb0a5eaac1bfdfa305b0d762e731dd23dde77ab2d58dfac3354",
-      "bytes": 8578
+      "sha256": "8a26371b55b0ab35fdf6b045c2946eead6003a97061d039e278d62961f6b5678",
+      "bytes": 8212
     },
     "popup-renderer-configured-bim.js": {
-      "sha256": "3a5f61df63e6d84aec370c364aa6b20f0fbded75d8227681d9a88264cdd57e38",
-      "bytes": 4161
+      "sha256": "b266fb19a1f1f46e34a5c84b9b646c79563983b77f6bb5799889776a6f605194",
+      "bytes": 3227
     },
     "popup-event-common.js": {
       "sha256": "a9dc97e525101ed4cfcbb04828c33ee75a975cd954343e6f870e0406196668ff",
@@ -488,8 +488,8 @@
       "bytes": 2244
     },
     "popup-render-orchestrator.js": {
-      "sha256": "818d56799e264d7f14b3113276b491449a048dc3c226ff152b0fd7f539e10c30",
-      "bytes": 11695
+      "sha256": "7f250d1bb53166ec94ded28fd10319882361c3aa1144030c030f56c90f2c0b6b",
+      "bytes": 14028
     },
     "popup-init.js": {
       "sha256": "4596fcfe86614d66f79a923ff65a5b0c8e579dabf2fb7c45b4b99646a9f42b47",
@@ -512,16 +512,16 @@
       "bytes": 17721
     },
     "popup-project-object.js": {
-      "sha256": "e62487ba59db8bda518e03a509e84fadf37cd5eb3ba0431be77b88943d70aa06",
-      "bytes": 18245
+      "sha256": "62c88dbdb67c58be8624485eedc779adb8d0ed7c800f6d0d270508ee4e6e2b55",
+      "bytes": 18372
     },
     "object-analysis-ui.js": {
-      "sha256": "4459ebc29293542e6c7433a624b1df388845a0d1cd78b2b240f3aa38822949a3",
-      "bytes": 46398
+      "sha256": "b1079acd661be3041b81c0d9dd2645a8596212eb7491d2dbff956b7580ce681d",
+      "bytes": 46575
     },
     "popup-object-analysis.js": {
-      "sha256": "f7894dda54d56657aafbb630890a4c1e9c29dbd730dd6946f5bb62b7e668eafd",
-      "bytes": 6430
+      "sha256": "3025fdb2358df59736d809cb6f4d95f02f03950dbb5dd19a4c883b631a06976d",
+      "bytes": 7081
     },
     "checklist-link-menu.js": {
       "sha256": "4d4f9a736e171ae4ad528428cd7e56f4c252b5f133855f6595dfb64d99ec816c",

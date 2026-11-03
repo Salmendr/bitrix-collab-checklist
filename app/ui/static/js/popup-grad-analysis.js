@@ -1,14 +1,14 @@
 (function (global) {
     'use strict';
 
-    // Граданализ (ГА): the right column of the OPR checklist window with the
-    // checklists to КОПР Генплан and КОПР АР, ПБ, ОДИ. The server shows it to
-    // leaders, administrators, architects and GIPs of the project; GIPs only
-    // read it. A change goes to the draft of the edit session of the window
-    // and is kept by «Сохранить и закрыть»; «Отмена» drops it. ГА has its own
-    // lock: the architect and the GIP work on ГА and OPR at the same time.
-    // Its items that are «Не требуется» are shown in the common
-    // «Не требуется» block of OPR.
+    // Граданализ (ГА): its own tab of the checklist window, between ИД and
+    // ОПР, with the checklists to КОПР Генплан and КОПР АР, ПБ, ОДИ.
+    // Everybody sees it; leaders, administrators and the architects of the
+    // project change it. A change goes to the draft of the edit session of
+    // the window and is kept by «Сохранить» / «Сохранить и закрыть»;
+    // «Отмена» drops it. ГА has its own lock, taken by the first change, and
+    // its own progress; its items in «Не требуется» are at the end of the tab.
+    // A link to a file of ИД stays on the version it was made to.
 
     const doc = global.document;
     const popupApi = global.ChecklistPopupApi;
@@ -16,6 +16,8 @@
     const dialogId = String(bootstrap.dialogId || '');
     if (!popupApi || !dialogId) return;
 
+    const KEY = 'ga';
+    const TITLE = 'Чек-лист Граданализ';
     const REFRESH_MS = 30000;
     const STALE_MS = 10000;
     const FIRST_LOAD_WAIT_MS = 4000;
@@ -99,8 +101,8 @@
         return typeof popupFinalizationInProgress !== 'undefined' && !!popupFinalizationInProgress;
     }
 
-    function isOpr() {
-        return typeof currentChecklistKey !== 'undefined' && currentChecklistKey === 'opr';
+    function isTab() {
+        return typeof currentChecklistKey !== 'undefined' && currentChecklistKey === KEY;
     }
 
     function rights() {
@@ -108,7 +110,7 @@
     }
 
     function visible() {
-        return !!(state.data && state.data.visible && !readOnlyWindow());
+        return !!(state.data && state.data.visible);
     }
 
     function canEditNow() {
@@ -192,7 +194,6 @@
     function apply(result, force) {
         const before = JSON.stringify(state.data);
         state.data = result;
-        syncDeferredOprLock();
         if (force) redraw();
         else if (JSON.stringify(result) !== before) rerender(false);
     }
@@ -204,10 +205,7 @@
     }
 
     function rerender(force) {
-        if (!isOpr()) {
-            if (typeof calculateProgress === 'function') calculateProgress();
-            return;
-        }
+        if (!isTab()) return;
         // A background refresh does not tear down a field being typed in.
         if (editingInTables() && !force) {
             state.renderPending = true;
@@ -220,27 +218,6 @@
 
     function redraw() {
         rerender(true);
-    }
-
-    // The OPR lock of an architect who only checks ГА is taken by the first
-    // change of OPR; until then the window shows who holds it.
-    function syncDeferredOprLock() {
-        if (!defersOprLock() || !isOpr() || typeof currentChecklistLock === 'undefined') return;
-        if (currentChecklistLock.owned) return;
-        const holder = state.data && state.data.oprLockedBy;
-        const blocked = !!holder;
-        if (blocked === !!currentChecklistLock.lockedByOther
-            && (!blocked || currentChecklistLock.userName === holder.userName)) return;
-        currentChecklistLock = {
-            owned: false,
-            lockedByOther: blocked,
-            lockId: '',
-            userId: blocked ? String(holder.userId || '') : '',
-            userName: blocked ? String(holder.userName || '') : '',
-            checklistKey: 'opr'
-        };
-        if (typeof updateLockNotice === 'function') updateLockNotice();
-        redraw();
     }
 
     async function change(op, body) {
@@ -412,13 +389,11 @@
     // ---- rendering: the panel ----
 
     function showsPanel() {
-        return isOpr() && visible();
+        return isTab() && visible();
     }
 
     function headerHtml() {
         const data = state.data;
-        const progress = data.progress || {};
-        const percent = progress.percent === null || progress.percent === undefined ? '—' : progress.percent + '%';
         const manage = !!rights().manageArchitects && !readOnlyWindow();
         const chips = (data.architects || []).map(user => (
             '<span class="project-gip-chip ga-architect-chip" title="ID ' + esc(user.userId) + '">'
@@ -453,8 +428,6 @@
         }
         return '<div class="ga-head">'
             + '<div class="ga-head-row">'
-            + '<span class="ga-title">Граданализ</span>'
-            + '<span class="ga-percent" title="Выполнено ' + esc(progress.done || 0) + ' из ' + esc(progress.total || 0) + '">' + esc(percent) + '</span>'
             + '<span class="ga-architects"><span class="project-gip-label">Архитектор:</span>'
             + '<span class="project-gip-list">' + (chips || '<span class="project-gip-empty">не назначен</span>') + '</span>'
             + add + '</span>'
@@ -517,7 +490,42 @@
             + '</div></div>';
     }
 
-    // A file row of the checklists: name, size, «Заменить», «Скачать».
+    // «Заменить» of an upload, or «Сослаться на новую версию» of a link
+    // whose version of ИД went to the archive.
+    function replaceButtonHtml(itemId, file, editable) {
+        if (editable && file.kind === 'upload') {
+            return '<button class="doc-file-replace checklist-action-button checklist-action-button-replace" type="button"'
+                + ' data-ga-replace="' + esc(file.id) + '" data-ga-item="' + esc(itemId) + '"'
+                + ' title="Заменить файл" aria-label="Заменить файл ' + esc(file.name) + '">' + icon('replace') + '</button>';
+        }
+        if (editable && file.kind === 'link' && file.canRelink) {
+            const target = file.newerName ? ' «' + file.newerName + '»' : '';
+            return '<button class="doc-file-replace checklist-action-button checklist-action-button-replace ga-relink" type="button"'
+                + ' data-ga-relink="' + esc(file.id) + '" data-ga-item="' + esc(itemId) + '"'
+                + ' title="' + esc('Сослаться на новую версию из ИД' + target) + '" aria-label="Сослаться на новую версию из ИД">'
+                + icon('replace') + '</button>';
+        }
+        return '';
+    }
+
+    // «Убрать»: a link leaves the item, an upload goes to the archive of
+    // the item; both stay in its folder under «Архив версий».
+    function removeButtonHtml(itemId, file, editable) {
+        if (!editable) return '';
+        const title = file.kind === 'link' ? 'Убрать ссылку' : 'Убрать файл в архив пункта';
+        return '<button class="checklist-action-button checklist-action-button-remove ga-file-remove" type="button"'
+            + ' data-ga-unlink="' + esc(file.id) + '" data-ga-item="' + esc(itemId) + '"'
+            + ' title="' + title + '" aria-label="' + esc(title + ' ' + file.name) + '">' + icon('remove') + '</button>';
+    }
+
+    function fileMarkHtml(file) {
+        if (!file.mark) return '';
+        const kind = file.state === 'deleted' ? ' is-deleted' : file.state === 'archived' ? ' is-archived' : '';
+        return '<div class="ga-file-mark' + kind + '">' + esc(file.mark) + '</div>';
+    }
+
+    // A file row of the checklists: name, size, «Заменить», «Скачать»,
+    // and «Убрать» for those who fill ГА.
     function fileRowHtml(itemId, file, editable) {
         const href = fileHref(file, false);
         const name = href
@@ -526,20 +534,15 @@
         const meta = file.kind === 'link'
             ? '<span class="doc-file-meta ga-id-link" title="Ссылка на файл чек-листа ИД' + (file.sourceItemName ? ' · ' + esc(file.sourceItemName) : '') + '">ИД</span>'
             : '<span class="doc-file-meta">' + esc(sizeText(file.size)) + '</span>';
-        const replace = editable && file.kind === 'upload'
-            ? '<button class="doc-file-replace checklist-action-button checklist-action-button-replace" type="button"'
-                + ' data-ga-replace="' + esc(file.id) + '" data-ga-item="' + esc(itemId) + '"'
-                + ' title="Заменить файл" aria-label="Заменить файл ' + esc(file.name) + '">' + icon('replace') + '</button>'
-            : '<span></span>';
+        const replace = replaceButtonHtml(itemId, file, editable) || '<span></span>';
         const download = href
             ? '<a class="doc-file-download checklist-action-button checklist-action-button-download"'
                 + ' href="' + esc(fileHref(file, true)) + '" download title="Скачать" aria-label="Скачать ' + esc(file.name) + '">'
                 + icon('download') + '</a>'
             : '<span></span>';
-        const mark = file.mark
-            ? '<div class="ga-file-mark' + (file.state === 'deleted' ? ' is-deleted' : '') + '">' + esc(file.mark) + '</div>'
-            : '';
-        return '<div class="doc-file-block"><div class="doc-file-row">' + name + meta + replace + download + '</div>' + mark + '</div>';
+        const remove = editable ? removeButtonHtml(itemId, file, editable) : '';
+        return '<div class="doc-file-block"><div class="doc-file-row' + (editable ? ' ga-file-row-editable' : '') + '">'
+            + name + meta + replace + download + remove + '</div>' + fileMarkHtml(file) + '</div>';
     }
 
     // Files of a dropped folder: one row per top folder, as in the checklists.
@@ -676,7 +679,7 @@
 
     function panelHtml() {
         if (!showsPanel()) return '';
-        // Back to OPR from another checklist: the column is read again.
+        // Back to the tab from another checklist: ГА is read again.
         if (Date.now() - state.loadedAt > STALE_MS) global.setTimeout(load, 0);
         const editable = canEditNow();
         const blocks = (state.data.blocks || []).map(block => {
@@ -689,43 +692,32 @@
                 + '</div></div>'
                 + '</section>';
         }).join('');
-        return '<div class="ga-panel' + (editable ? ' is-editable' : '') + '">'
+        return '<div class="ga-panel ga-tab' + (editable ? ' is-editable' : '') + '">'
             + headerHtml()
             + blocks
+            + notRequiredHtml(editable)
             + '<input type="file" hidden data-ga-replace-input>'
             + '</div>';
     }
 
-    // Items of ГА in «Не требуется» of OPR (rows of the left column).
-    function notRequiredItems() {
-        if (!showsPanel()) return [];
-        return items().filter(item => item.status === 'nr' && !item.hidden);
-    }
-
-    function notRequiredRowsHtml(gridClass) {
-        const list = notRequiredItems();
+    // «Не требуется» at the end of the tab, by sections; subitems of an item
+    // go with it.
+    function notRequiredHtml(editable) {
+        const list = items().filter(item => item.status === 'nr' && !item.hidden);
         if (!list.length) return '';
-        const editable = canEditNow();
-        const groupTitle = id => ((state.data.groups || []).find(group => group.id === id) || {}).title || '';
-        return '<div class="ga-nr-block">' + list.map(item => {
-            const parent = item.parentId ? itemById(item.parentId) : null;
-            const children = childrenOf(item.id);
-            const where = 'Граданализ · ' + groupTitle(item.group) + (parent ? ' · подпункт пункта «' + parent.name.trim() + '»' : '');
-            return '<div class="row not-required ga-nr-row ' + esc(gridClass || '') + '" data-ga-row="' + esc(item.id) + '">'
-                + '<div class="td"><div class="cell-name">'
-                + '<button type="button" class="status-indicator gray ga-status" data-ga-status="' + esc(item.id) + '"'
-                + ' title="' + esc(editable ? 'Не требуется. Нажмите, чтобы вернуть пункт в Граданализ' : 'Не требуется') + '"' + (editable ? '' : ' disabled') + '></button>'
-                + '<div class="item-name-wrap"><span class="item-name">' + esc(item.name) + '</span>'
-                + (children.length
-                    ? '<span class="subitem-counter" title="Подпункты в «Не требуется» вместе с пунктом: ' + children.length + '">'
-                        + '<svg class="subitem-counter-icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="4" cy="3.5" r="1.8"></circle>'
-                        + '<circle cx="12" cy="12.5" r="1.8"></circle><path d="M4 5.3v3.2a4 4 0 0 0 4 4h2.2"></path></svg>'
-                        + '<span>' + children.length + '</span></span>'
-                    : '') + '</div>'
-                + '</div></div>'
-                + '<div class="td"><span class="ga-nr-where" title="' + esc(where) + '"><span class="ga-badge">ГА</span>' + esc(groupTitle(item.group)) + '</span></div>'
-                + '</div>';
-        }).join('') + '</div>';
+        const groups = (state.data.groups || []).filter(group => list.some(item => item.group === group.id));
+        return '<section class="ga-block ga-block-nr" data-ga-block="nr">'
+            + '<div class="ga-block-title">Не требуется</div>'
+            + '<div class="ga-grid-scroll"><div class="ga-grid">'
+            + columnsHtml()
+            + groups.map(group => (
+                '<div class="ga-group" data-ga-nr-group="' + esc(group.id) + '">'
+                + '<div class="ga-group-title">' + esc(group.title) + '</div>'
+                + list.filter(item => item.group === group.id).map(item => rowHtml(item, editable)).join('')
+                + '</div>'
+            )).join('')
+            + '</div></div>'
+            + '</section>';
     }
 
     function afterRender(root) {
@@ -848,11 +840,15 @@
         const name = href
             ? '<a class="folder-document-name" href="' + esc(href) + '" target="_blank" rel="noopener noreferrer" title="Открыть файл: ' + esc(file.name) + '">' + esc(file.name) + '</a>'
             : '<span class="folder-document-name is-gone">' + esc(file.name) + '</span>';
-        const replace = !archived && editable && file.kind === 'upload'
-            ? '<button class="folder-replace-upload-button checklist-action-button checklist-action-button-replace" type="button"'
+        let replace = '';
+        if (!archived && editable && file.kind === 'upload') {
+            replace = '<button class="folder-replace-upload-button checklist-action-button checklist-action-button-replace" type="button"'
                 + ' data-ga-replace="' + esc(file.id) + '" data-ga-item="' + esc(itemId) + '"'
-                + ' title="Загрузить новую версию файла" aria-label="Заменить файл">' + icon('replace') + '</button>'
-            : '';
+                + ' title="Загрузить новую версию файла" aria-label="Заменить файл">' + icon('replace') + '</button>';
+        } else if (!archived) {
+            replace = replaceButtonHtml(itemId, file, editable);
+        }
+        const remove = !archived ? removeButtonHtml(itemId, file, editable) : '';
         const download = href
             ? '<a class="folder-download-button checklist-action-button checklist-action-button-download"'
                 + ' href="' + esc(fileHref(file, true)) + '" download title="Скачать файл" aria-label="Скачать файл ' + esc(file.name) + '">'
@@ -861,13 +857,18 @@
         const kind = file.kind === 'link'
             ? 'Ссылка на ИД' + (file.sourceItemName ? ' · ' + esc(file.sourceItemName) : '')
             : 'Загружен';
-        const mark = file.mark ? '<div class="ga-file-mark' + (file.state === 'deleted' ? ' is-deleted' : '') + '">' + esc(file.mark) + '</div>' : '';
+        const mark = fileMarkHtml(file);
+        const archivedWhat = file.reason === 'unlinked'
+            ? 'Ссылка убрана'
+            : file.reason === 'replaced'
+                ? (file.kind === 'link' ? 'Заменена ссылкой на новую версию' : 'Заменён')
+                : 'Перенесён в архив';
         const archivedInfo = archived
-            ? '<div class="ga-muted">' + (file.reason === 'replaced' ? 'Заменён' : 'Перенесён в архив') + ' '
+            ? '<div class="ga-muted">' + archivedWhat + ' '
                 + esc(formatMoment(file.archivedAt)) + (file.archivedByName ? ' · ' + esc(file.archivedByName) : '') + '</div>'
             : '';
         return '<tr><td><div class="folder-document-name-layout">' + folder + name
-            + '<span class="folder-document-inline-actions">' + replace + download + '</span></div>'
+            + '<span class="folder-document-inline-actions">' + replace + download + remove + '</span></div>'
             + mark + archivedInfo + '</td>'
             + '<td>' + (file.kind === 'upload' ? esc(sizeText(file.size)) : '') + '</td>'
             + '<td>' + kind + '</td>'
@@ -1025,7 +1026,7 @@
             + '[data-ga-link-pick],[data-ga-folder],[data-ga-history],[data-ga-rename],[data-ga-delete],'
             + '[data-ga-add-sub],[data-ga-new-sub-save],[data-ga-new-sub-cancel],[data-ga-new-item-save],[data-ga-modal-close],'
             + '[data-ga-replace],[data-ga-pick-doc],[data-ga-architect-add],[data-ga-architect-cancel],'
-            + '[data-ga-architect-remove]');
+            + '[data-ga-architect-remove],[data-ga-unlink],[data-ga-relink]');
         if (!event.target.closest('.ga-status-menu') && !(target && target.dataset.gaStatus !== undefined)) {
             closeMenu();
         }
@@ -1066,6 +1067,17 @@
             redraw();
         } else if (data.gaReplace !== undefined) {
             pickReplacement(data.gaItem, data.gaReplace);
+        } else if (data.gaUnlink !== undefined) {
+            const item = itemById(data.gaItem);
+            const file = item && (item.files || []).find(entry => entry.id === data.gaUnlink);
+            if (!file) return;
+            const question = file.kind === 'link'
+                ? 'Убрать ссылку на файл «' + file.name + '» из пункта?\n\nОна останется в папке пункта в архиве.'
+                : 'Убрать файл «' + file.name + '» в архив пункта?';
+            if (!global.confirm(question)) return;
+            if (await change('archiveFile', { itemId: data.gaItem, fileId: data.gaUnlink })) await refreshOpenFolder();
+        } else if (data.gaRelink !== undefined) {
+            if (await change('relink', { itemId: data.gaItem, fileId: data.gaRelink })) await refreshOpenFolder();
         } else if (data.gaLinkPick !== undefined) {
             openPicker(data.gaLinkPick);
         } else if (data.gaPickDoc !== undefined) {
@@ -1215,7 +1227,8 @@
 
     // ---- Save ----
 
-    // «Сохранить и закрыть» stops when an item of ГА is «Нет» without a note.
+    // «Сохранить» stops when an item of ГА is «Нет» without a note; the
+    // window goes to the tab of ГА to show it.
     async function checkBeforeSave() {
         if (!visible() || !rights().edit || readOnlyWindow()) return true;
         // Typed notes are saved first.
@@ -1240,6 +1253,13 @@
         }
         state.stopped = true;
         await load();
+        if (!isTab() && typeof loadChecklistByKey === 'function') {
+            try {
+                await loadChecklistByKey(KEY);
+            } catch (error) {
+                console.log('ГА tab skipped:', error);
+            }
+        }
         redraw();
         say('error', 'Заполните примечание у пунктов Граданализа со статусом «Нет»');
         const first = doc.querySelector('[data-ga-row="' + result.missingNotes[0] + '"]');
@@ -1251,10 +1271,6 @@
     }
 
     // ---- lifecycle ----
-
-    function defersOprLock() {
-        return !!(state.data && state.data.rights && state.data.rights.defersOprLock && !readOnlyWindow());
-    }
 
     function ready() {
         return Promise.race([
@@ -1273,16 +1289,24 @@
         return !!(state.data && state.data.draft);
     }
 
+    // A window opened on the tab draws it before its session starts: the
+    // controls come with the session.
     global.addEventListener('checklist-edit-session-state', function (event) {
         const detail = event && event.detail || {};
-        if (detail.status === 'active' && detail.sessionId) load();
+        if (detail.status === 'active' && detail.sessionId) {
+            // A load still running may be of the time before the user was
+            // known: the rights come with a fresh one.
+            Promise.resolve(state.loading).catch(() => null)
+                .then(load)
+                .then(function () { rerender(false); });
+        }
     });
     global.addEventListener('focus', function () {
-        if (isOpr()) load();
+        if (isTab()) load();
     });
-    // Who holds ГА and OPR, and what others saved meanwhile.
+    // Who holds ГА, and what others saved meanwhile.
     global.setInterval(function () {
-        if (isOpr() && !doc.hidden && !state.busy && !finalizing()) load();
+        if (isTab() && !doc.hidden && !state.busy && !finalizing()) load();
     }, REFRESH_MS);
 
     Promise.resolve(
@@ -1290,15 +1314,16 @@
     ).catch(() => null).then(load);
 
     global.ChecklistGa = Object.freeze({
+        KEY,
+        TITLE,
         load,
         ready,
         state,
+        isTab,
         showsPanel,
         panelHtml,
-        notRequiredRowsHtml,
         afterRender,
         canEditNow,
-        defersOprLock,
         progressCounts,
         hasDraft,
         checkBeforeSave

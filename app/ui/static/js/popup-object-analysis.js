@@ -127,6 +127,21 @@
     });
     UI.bindGrid(panelEl, ctx);
 
+    // After «Сохранить»: ИД, ТУ and Граданализ as saved, folded or not. A
+    // load already running may be older than the save; an open editor of
+    // the panel is not torn down, the panel is read once it is closed.
+    let refreshTimer = 0;
+    function refresh() {
+        global.clearTimeout(refreshTimer);
+        if (doc.querySelector('.oa-popover')) {
+            refreshTimer = global.setTimeout(refresh, 1000);
+            return Promise.resolve(null);
+        }
+        return Promise.resolve(state.loading).catch(() => null).then(function () {
+            return load(true);
+        });
+    }
+
     // The risk window and the slice change the same data: read it again
     // when the checklist gets the focus back.
     global.addEventListener('focus', function () { load(false); });
@@ -140,6 +155,7 @@
 
     global.ChecklistPopupObjectAnalysis = Object.freeze({
         load,
+        refresh,
         render,
         state
     });

@@ -350,14 +350,10 @@ function getEditSessionRuntimeState() {
     };
 }
 
-// Граданализ: an architect who only checks ГА takes the OPR lock with the
-// first change of OPR, so the GIP works on OPR meanwhile.
+// Граданализ: its tab takes no lock when it opens; the first change of ГА
+// takes the lock of ГА (api/ga), so viewing it holds nothing.
 function defersCurrentChecklistLock() {
-    return !!(
-        currentChecklistKey === 'opr'
-        && window.ChecklistGa
-        && window.ChecklistGa.defersOprLock()
-    );
+    return currentChecklistKey === 'ga';
 }
 
 // The window can save Граданализ while another employee holds OPR.
@@ -1885,6 +1881,13 @@ async function savePopupSessionAndContinue() {
         renderAll();
     } catch (reloadError) {
         console.log('reload after save skipped:', reloadError);
+    }
+    // «Анализ состояния объекта» shows ИД, ТУ and Граданализ as saved.
+    if (
+        window.ChecklistPopupObjectAnalysis
+        && typeof window.ChecklistPopupObjectAnalysis.refresh === 'function'
+    ) {
+        window.ChecklistPopupObjectAnalysis.refresh();
     }
     startLockHeartbeat();
     release();

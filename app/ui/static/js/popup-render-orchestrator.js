@@ -16,7 +16,64 @@ function getPopupRendererContext() {
     };
 }
 
+// Граданализ: its tab takes the whole width of the tables.
+function renderGradAnalysisTab() {
+    if (!leftTableEl || !tablesGridEl) {
+        throw new Error('table containers not found');
+    }
+    resetTablePanelsForGeneric(1);
+    tablesGridEl.style.gridTemplateColumns = 'minmax(0, 1fr)';
+    tablesGridEl.style.justifyContent = '';
+    if (tablePanels[0]) {
+        tablePanels[0].style.flex = '';
+        tablePanels[0].style.width = '';
+        tablePanels[0].style.maxWidth = '';
+    }
+    const gradAnalysis = window.ChecklistGa;
+    if (!gradAnalysis) {
+        leftTableEl.innerHTML = '<div class="ga-empty">Граданализ не загрузился — обновите окно</div>';
+        return;
+    }
+    if (!gradAnalysis.showsPanel()) {
+        const loaded = !!gradAnalysis.state.data;
+        leftTableEl.innerHTML = '<div class="ga-empty">'
+            + (loaded ? 'Граданализ недоступен' : 'Загружаем Граданализ...') + '</div>';
+        if (!loaded) gradAnalysis.load();
+        return;
+    }
+    leftTableEl.innerHTML = gradAnalysis.panelHtml();
+    gradAnalysis.afterRender(leftTableEl);
+}
+
+// Граданализ is not a checklist of the table: its tab has no items, groups
+// or lock of its own until the first change (api/ga takes it).
+function gradAnalysisTabData() {
+    const gradAnalysis = window.ChecklistGa;
+    return {
+        checklistKey: 'ga',
+        title: gradAnalysis ? gradAnalysis.TITLE : 'Чек-лист Граданализ',
+        collabTitle,
+        items: [],
+        groups: [],
+        projectChecklists: deepClone(projectChecklists),
+        orderVersion: 0
+    };
+}
+
 function registerPopupRendererStrategies() {
+    popupRendererRegistry.register('grad-analysis', {
+        priority: 600,
+        matches: function (context) {
+            return String(context && context.checklistKey || '') === 'ga';
+        },
+        render: function () {
+            renderGradAnalysisTab();
+        },
+        bindEvents: function () {
+            // The tab listens on the document (popup-grad-analysis.js).
+        }
+    });
+
     popupRendererRegistry.register('configured-bim', {
         priority: 500,
         matches: function (context) {
@@ -179,6 +236,14 @@ async function loadChecklistByKey(checklistKey) {
     setSaveState('saving', 'Загружаем...');
 
     try {
+        if (targetKey === 'ga') {
+            applyChecklistData(gradAnalysisTabData());
+            renderAll();
+            startLockHeartbeat();
+            if (window.ChecklistGa) window.ChecklistGa.load();
+            return;
+        }
+
         const cachedData = checklistCache[targetKey];
         if (cachedData) {
             applyChecklistData(deepClone(cachedData));

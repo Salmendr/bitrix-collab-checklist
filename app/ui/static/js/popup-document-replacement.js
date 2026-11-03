@@ -612,8 +612,16 @@
             target,
             file
         );
-        const item = Array.isArray(items)
-            ? items.find(candidate => (
+        // The checklist the replacement started in: the window may show
+        // another one (or Граданализ) by now.
+        const checklistKey = String(
+            target.checklistKey || currentChecklistKey || 'id'
+        );
+        const sourceItems = checklistKey === currentChecklistKey
+            ? items
+            : ((typeof checklistCache !== 'undefined' && checklistCache[checklistKey]) || {}).items;
+        const item = Array.isArray(sourceItems)
+            ? sourceItems.find(candidate => (
                 String(candidate && candidate.id || '')
                 === target.itemId
             ))
@@ -630,9 +638,7 @@
                 data: {
                     type: 'checklist-document-replaced',
                     dialogId: String(dialogId || ''),
-                    checklistKey: String(
-                        currentChecklistKey || 'id'
-                    ),
+                    checklistKey,
                     itemId: target.itemId,
                     itemName: String(
                         item && item.name || ''
@@ -643,15 +649,13 @@
                     source: 'popup'
                 }
             });
-        } else {
+        } else if (checklistKey === currentChecklistKey) {
             const response = await fetch(
                 appUrl('api/checklist')
                 + '?dialogId=' + encodeURIComponent(
                     String(dialogId || '')
                 )
-                + '&checklistKey=' + encodeURIComponent(
-                    String(currentChecklistKey || 'id')
-                )
+                + '&checklistKey=' + encodeURIComponent(checklistKey)
             );
             const snapshot = await response.json();
 
@@ -677,6 +681,7 @@
 
     async function runReplacement(file, target) {
         const manager = popupUploadManager;
+        const startedKey = String(currentChecklistKey || 'id');
 
         if (
             !manager
@@ -724,7 +729,7 @@
 
         const entry = await applyReplacementResult(
             result,
-            target,
+            Object.assign({}, target, { checklistKey: startedKey }),
             file
         );
 

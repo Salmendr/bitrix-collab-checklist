@@ -1,21 +1,24 @@
-"""Граданализ (ГА): the checklists to КОПР Генплан and КОПР АР, ПБ, ОДИ in
-the right column of every OPR checklist window.
+"""Граданализ (ГА): its own checklist of the project window, between ИД and
+ОПР, with the checklists to КОПР Генплан and КОПР АР, ПБ, ОДИ.
 
-Leaders and administrators change it, so do the architects of the project
-(Алексей Кузьмин unless the project names others); GIPs see it; nobody else
-does. ГА has its own lock: the architect and the GIP of a project edit ГА and
-OPR at the same time.
+Everybody sees it; leaders and administrators change it, so do the
+architects of the project (Алексей Кузьмин unless the project names others).
+ГА has its own lock, taken by the first change: viewing it holds nothing.
 
-A change goes to a draft of the edit session of the window; «Сохранить и
-закрыть» commits the draft together with the session, «Отмена» drops it and
-the files uploaded into it. The status of an item is set by hand only: «Да»,
-«Нет» or «Не требуется»; an item never checked is white like «Нет» but
-needs no note. «Проверяющий» gets a record per item whose status the session
-changed: the final status, who and when it was last changed.
+A change goes to a draft of the edit session of the window; «Сохранить» and
+«Сохранить и закрыть» commit the draft together with the session, «Отмена»
+drops it and the files uploaded into it. The status of an item is set by
+hand only: «Да», «Нет» or «Не требуется»; an item never checked is white
+like «Нет» but needs no note. «Проверяющий» gets a record per item whose
+status the session changed: the final status, who and when it was last
+changed. What a session changed goes to the chat message of its Save in a
+block of its own with the progress of ГА; the progress of OPR does not count
+ГА.
 
 Files of ГА live on the application server only (no Yandex Disk). A link to
-a file of the ИД checklist follows the series of that file: a new version
-in ИД replaces it, a file deleted from ИД stays marked so.
+a file of the ИД checklist stays on the very version it was made to: a new
+version in ИД or the archive of ИД does not move it until the architect
+removes it or links another file.
 
 The data are kept apart from the table of checklists: the Yandex Disk
 workers walk that table and must never take ГА for a checklist with folders.
@@ -28,7 +31,7 @@ import re
 import sqlite3
 import threading
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from app.db import get_conn
@@ -44,8 +47,15 @@ from app.checklists.utils import clean_cell_value, normalize_dialog_id
 
 
 GA_KEY = "ga"
+GA_TITLE = "Чек-лист Граданализ"
 YES, NO, NONE, NR = "yes", "no", "", "nr"
 STATUS_LABELS = {YES: "Да", NO: "Нет", NONE: "Нет", NR: "Не требуется"}
+# The chat tells an item never checked apart from «Нет».
+CHAT_STATUS_LABELS = {YES: "Да", NO: "Нет", NONE: "Не проверен", NR: "Не требуется"}
+CHAT_TEXT_LIMIT = 200
+# The left part of a chat line is padded to the longest one of the message.
+CHAT_NAME_LIMIT = 60
+CHANGES_KEPT_DAYS = 30
 DEFAULT_ARCHITECTS = ({"userId": "114", "name": "Алексей Кузьмин"},)
 
 MAX_NAME = 1000
@@ -107,11 +117,21 @@ def ensure_schema(conn=None) -> None:
         conn.execute("""CREATE TABLE IF NOT EXISTS ga_architects (
             base_dialog_id TEXT PRIMARY KEY, users_json TEXT NOT NULL,
             updated_at TEXT NOT NULL DEFAULT '', updated_by TEXT NOT NULL DEFAULT '')""")
+        _ensure_changes_table(conn)
         if own:
             conn.commit()
     finally:
         if own:
             conn.close()
+
+
+def _ensure_changes_table(conn) -> None:
+    # What a committed session changed in ГА, for its chat message.
+    conn.execute("""CREATE TABLE IF NOT EXISTS ga_session_changes (
+        session_id TEXT NOT NULL, dialog_id TEXT NOT NULL,
+        changes_json TEXT NOT NULL, progress_json TEXT NOT NULL DEFAULT '{}',
+        created_at TEXT NOT NULL DEFAULT '',
+        PRIMARY KEY(session_id, dialog_id))""")
 
 
 _schema_ready = False
@@ -370,24 +390,22 @@ def architects(base: str) -> list[dict]:
 
 
 def rights(dialog_id: str, user_id: str) -> dict:
+    """Everybody sees ГА; leaders, administrators and the architects of the
+    project change it."""
     from app.checklists.project_leaders import is_project_leader
-    from app.checklists.project_phases import manager_user_ids
 
     user = clean_cell_value(user_id)
     base = base_of(dialog_id)
-    if not user or not base:
-        return {"view": False, "edit": False, "manageArchitects": False, "defersOprLock": False}
+    if not base:
+        return {"view": False, "edit": False, "manageArchitects": False}
+    if not user:
+        return {"view": True, "edit": False, "manageArchitects": False}
     leader = is_project_leader(base, user)
     architect = user in {entry["userId"] for entry in architects(base)}
-    gip = user in set(manager_user_ids(base))
-    edit = leader or architect
     return {
-        "view": edit or gip,
-        "edit": edit,
+        "view": True,
+        "edit": leader or architect,
         "manageArchitects": leader,
-        # An architect who only checks ГА does not hold the OPR checklist
-        # for the GIP while the window is open.
-        "defersOprLock": architect and not leader and not gip,
     }
 
 
@@ -395,7 +413,7 @@ def _require(dialog_id: str, user_id: str, right: str) -> dict:
     result = rights(dialog_id, user_id)
     if not result[right]:
         raise GaDenied({
-            "view": "Граданализ видят руководители, администраторы, архитекторы и ГИП проекта",
+            "view": "Граданализ недоступен",
             "edit": "Граданализ заполняют руководители, администраторы и архитекторы проекта",
             "manageArchitects": "Архитекторов назначают руководители и администраторы",
         }[right])
@@ -526,6 +544,40 @@ def _id_document_path(dialog_id: str, item_id: str, document_id: str) -> str:
     })
 
 
+def _id_version_path(dialog_id: str, item_id: str, version_id: str) -> str:
+    """The very version of a file of ИД, also after it went to the archive."""
+    from urllib.parse import urlencode
+
+    return "api/checklist/version-file?" + urlencode({
+        "dialogId": dialog_id, "checklistKey": "id", "itemId": item_id, "versionId": version_id,
+    })
+
+
+def _series_current(item: dict | None, series_id: str) -> dict | None:
+    if item is None or not series_id:
+        return None
+    return next(
+        (doc for doc in item.get("documents") or []
+         if isinstance(doc, dict) and clean_cell_value(doc.get("seriesId")) == series_id),
+        None,
+    )
+
+
+def _link_target(record: dict, sources: _IdSources) -> tuple[dict | None, object, dict | None]:
+    """The item of ИД, the pinned version of the link (current or archived)
+    and the current file of its series."""
+    from app.checklists.document_version_links import find_pinned_version_in_item
+
+    item = sources.item(record["sourceDialogId"], record["sourceItemId"])
+    current = _series_current(item, record["seriesId"])
+    if item is None:
+        return None, None, None
+    if not record["documentId"]:
+        # A link of the first days without the version: its series.
+        return item, None, current
+    return item, find_pinned_version_in_item(item, record["documentId"]), current
+
+
 def _file_view(record: dict, dialog_id: str, sources: _IdSources) -> dict:
     view = {
         "id": record["id"], "kind": record["kind"], "name": record["name"], "size": record["size"],
@@ -536,25 +588,31 @@ def _file_view(record: dict, dialog_id: str, sources: _IdSources) -> dict:
     if record["kind"] == "upload":
         view["url"] = _file_path(dialog_id, record["id"])
         return view
-    item = sources.item(record["sourceDialogId"], record["sourceItemId"])
-    current = None
-    if item is not None:
-        current = next(
-            (doc for doc in item.get("documents") or []
-             if clean_cell_value(doc.get("seriesId")) == record["seriesId"]),
-            None,
-        )
+    item, version, current = _link_target(record, sources)
     view["sourceItemName"] = clean_cell_value((item or {}).get("name"))
-    if current is None:
+    if version is None and not record["documentId"] and current is not None:
+        view["name"] = clean_cell_value(current.get("name")) or record["name"]
+        view["url"] = _id_document_path(record["sourceDialogId"], record["sourceItemId"], clean_cell_value(current.get("id")))
+        view["state"] = "current"
+        return view
+    if version is None:
         view.update({"state": "deleted", "url": "", "mark": "файл удалён из ИД"})
         return view
-    view["name"] = clean_cell_value(current.get("name")) or record["name"]
-    view["url"] = _id_document_path(record["sourceDialogId"], record["sourceItemId"], clean_cell_value(current.get("id")))
-    if clean_cell_value(current.get("id")) != record["documentId"]:
-        day = _short_date(current.get("uploadedAt") or current.get("modifiedAt") or "")
-        view.update({"state": "updated", "mark": "файл обновлён в ИД" + (" " + day if day else "")})
-    else:
+    view["name"] = version.file_name or record["name"]
+    view["url"] = _id_version_path(record["sourceDialogId"], record["sourceItemId"], version.version_id)
+    if version.location == "current_document":
         view["state"] = "current"
+        return view
+    # The linked version went to the archive of ИД; the link stays on it.
+    view["state"] = "archived"
+    newer = current is not None and clean_cell_value(current.get("id")) != record["documentId"]
+    if newer:
+        day = _short_date(current.get("uploadedAt") or current.get("modifiedAt") or "")
+        view["mark"] = "в ИД новая версия" + (" от " + day if day else "") + " — ссылка на прежнюю"
+        view["newerName"] = clean_cell_value(current.get("name"))
+        view["canRelink"] = True
+    else:
+        view["mark"] = "файл в архиве ИД — ссылка на него"
     return view
 
 
@@ -586,7 +644,7 @@ def _item_view(item: dict, items: list[dict], hidden: set[str], dialog_id: str, 
 
 
 def progress_counts(dialog_id: str) -> dict:
-    """The committed ГА of a checklist: for the OPR progress and the panel."""
+    """The committed ГА of a stage: its own progress, the panel column."""
     dialog_id = normalize_dialog_id(dialog_id)
     conn = _conn()
     try:
@@ -605,7 +663,6 @@ def state_payload(dialog_id: str, user_id: str, session_id: str = "") -> dict:
         committed, _revision = _read_committed(conn, dialog_id)
         draft = _read_draft(conn, own_session, dialog_id) if own_session else None
         ga_lock = _lock_holder(conn, dialog_id, GA_KEY)
-        opr_lock = _lock_holder(conn, dialog_id, "opr")
     finally:
         conn.close()
     data = draft or committed
@@ -631,7 +688,6 @@ def state_payload(dialog_id: str, user_id: str, session_id: str = "") -> dict:
         "draft": draft is not None,
         "missingNotes": missing_notes(data),
         "lockedBy": other(ga_lock),
-        "oprLockedBy": other(opr_lock),
     })
     return payload
 
@@ -728,6 +784,16 @@ def _set_status(items: list[dict], item: dict, status: str, actor: dict, now: st
         _touch(item, actor, now)
 
 
+def _link_record(source: str, id_item: dict, document: dict, series_id: str, actor: dict, now: str) -> dict:
+    return _clean_file({
+        "id": uuid.uuid4().hex, "kind": "link", "name": clean_cell_value(document.get("name")),
+        "size": document.get("size"), "at": now,
+        "byId": actor.get("userId"), "byName": actor.get("userName"),
+        "sourceDialogId": source, "sourceItemId": clean_cell_value(id_item.get("id")),
+        "seriesId": series_id, "documentId": clean_cell_value(document.get("id")),
+    })
+
+
 def _new_id(items: list[dict]) -> str:
     taken = {item["id"] for item in items}
     while True:
@@ -805,16 +871,40 @@ def _apply(data: dict, op: str, payload: dict, actor: dict, dialog_id: str, now:
         if document is None:
             raise GaError("Файл не найден в ИД — обновите список")
         series_id = clean_cell_value(document.get("seriesId")) or clean_cell_value(document.get("id"))
-        if any(f["kind"] == "link" and f["sourceDialogId"] == source and f["seriesId"] == series_id
-               for f in item["files"]):
+        # The link stays on this version: another version of the same file
+        # may be linked next to it.
+        if any(f["kind"] == "link" and f["sourceDialogId"] == source
+               and f["documentId"] == clean_cell_value(document.get("id")) for f in item["files"]):
             raise GaError("Ссылка на этот файл уже есть")
-        item["files"].append(_clean_file({
-            "id": uuid.uuid4().hex, "kind": "link", "name": clean_cell_value(document.get("name")),
-            "size": document.get("size"), "at": now,
-            "byId": actor.get("userId"), "byName": actor.get("userName"),
-            "sourceDialogId": source, "sourceItemId": clean_cell_value(id_item.get("id")),
-            "seriesId": series_id, "documentId": clean_cell_value(document.get("id")),
-        }))
+        item["files"].append(_link_record(source, id_item, document, series_id, actor, now))
+    elif op == "relink":
+        # «Сослаться на новую версию»: the link of an archived version of
+        # ИД goes to the current file of its series; the old link goes to
+        # the archive of the item.
+        item = _find(items, payload.get("itemId"))
+        record = next((f for f in item["files"] if f["id"] == clean_cell_value(payload.get("fileId"))), None)
+        if record is None or record["kind"] != "link":
+            raise GaError("Ссылка не найдена")
+        id_item, _version, current = _link_target(record, _IdSources())
+        if current is None:
+            raise GaError("В ИД нет новой версии этого файла")
+        if clean_cell_value(current.get("id")) == record["documentId"]:
+            raise GaError("Ссылка уже ведёт на последнюю версию")
+        existing = next(
+            (f for f in item["files"] if f["kind"] == "link" and f["sourceDialogId"] == record["sourceDialogId"]
+             and f["documentId"] == clean_cell_value(current.get("id"))),
+            None,
+        )
+        if existing is not None:
+            # The new version is linked already: the old link only leaves.
+            fresh = existing
+            item["files"] = [f for f in item["files"] if f is not record]
+        else:
+            fresh = _link_record(record["sourceDialogId"], id_item, current, record["seriesId"], actor, now)
+            item["files"] = [fresh if f is record else f for f in item["files"]]
+        item["archive"].append({**record, "archivedAt": now, "archivedById": clean_cell_value(actor.get("userId")),
+                                "archivedByName": clean_cell_value(actor.get("userName")),
+                                "reason": "replaced", "replacedBy": fresh["id"]})
     elif op == "archiveFile":
         item = _find(items, payload.get("itemId"))
         record = next((f for f in item["files"] if f["id"] == clean_cell_value(payload.get("fileId"))), None)
@@ -822,7 +912,8 @@ def _apply(data: dict, op: str, payload: dict, actor: dict, dialog_id: str, now:
             raise GaError("Файл не найден")
         item["files"] = [f for f in item["files"] if f is not record]
         item["archive"].append({**record, "archivedAt": now, "archivedById": clean_cell_value(actor.get("userId")),
-                                "archivedByName": clean_cell_value(actor.get("userName")), "reason": "archived"})
+                                "archivedByName": clean_cell_value(actor.get("userName")),
+                                "reason": "unlinked" if record["kind"] == "link" else "archived"})
     elif op == "upload":
         item = _find(items, payload.get("itemId"))
         record = payload["record"]
@@ -1054,6 +1145,8 @@ def finalize_drafts(conn, session_id: str, *, commit: bool, now: str) -> None:
         ).fetchone()
         revision = _int(committed_row["revision"]) if committed_row else 0
         if commit:
+            before = normalize(json.loads(committed_row["data_json"])) if committed_row else normalize({})
+            _record_changes(conn, session_id, dialog_id, before, draft, now)
             if revision != _int(row["base_revision"]):
                 # The lock of ГА prevents this; the draft still wins.
                 write_debug_log("ga_commit_over_newer_revision", {
@@ -1090,6 +1183,128 @@ def finalize_drafts(conn, session_id: str, *, commit: bool, now: str) -> None:
             timer.start()
     if rows:
         write_debug_log("ga_drafts_finalized", {"sessionId": session_id, "commit": commit, "drafts": len(rows)})
+
+
+# ---------------------------------------------------------------------------
+# The chat message of a Save
+# ---------------------------------------------------------------------------
+
+def _short(value: str, limit: int = CHAT_TEXT_LIMIT) -> str:
+    value = " ".join(clean_cell_value(value).split())
+    return value if len(value) <= limit else value[:limit - 1].rstrip() + "…"
+
+
+def _file_label(record: dict) -> str:
+    return record["name"] + (" (ссылка на ИД)" if record["kind"] == "link" else "")
+
+
+def changes_between(before: dict, after: dict) -> list[dict]:
+    """What a draft changed, in the form of the changes of the checklists
+    (field, itemId, itemName, oldValue, newValue) for the chat message."""
+    old_items = {item["id"]: item for item in before.get("items") or []}
+    changes: list[dict] = []
+
+    def add(field, item, old="", new=""):
+        changes.append({"field": field, "itemId": item["id"], "itemName": _short(item["name"], CHAT_NAME_LIMIT),
+                        "oldValue": old, "newValue": new})
+
+    for item in after.get("items") or []:
+        old = old_items.get(item["id"])
+        if old is None:
+            add("add-item", item, "", _short(item["name"]))
+            continue
+        if old["name"] != item["name"]:
+            add("name", item, _short(old["name"]), _short(item["name"]))
+        if old["status"] != item["status"]:
+            add("ga-status", item, CHAT_STATUS_LABELS[old["status"]], CHAT_STATUS_LABELS[item["status"]])
+        if old["linkText"] != item["linkText"]:
+            add("ga-link-text", item, _short(old["linkText"]), _short(item["linkText"]) or "—")
+        if old["note"] != item["note"]:
+            add("ga-note", item, _short(old["note"]), _short(item["note"]) or "—")
+        old_files = {record["id"]: record for record in old["files"]}
+        new_files = {record["id"]: record for record in item["files"]}
+        archived = {record["id"]: record for record in item["archive"]}
+        replaced = {
+            record.get("replacedBy"): record for record in item["archive"]
+            if record["id"] in old_files and record.get("replacedBy")
+        }
+        for file_id, record in new_files.items():
+            if file_id in old_files:
+                continue
+            previous = replaced.get(file_id)
+            if previous is not None:
+                add("document-replacement", item, _file_label(previous), _file_label(record))
+            else:
+                add("document-add", item, "", _file_label(record))
+        for file_id, record in old_files.items():
+            # A new replacement still in the item was told above.
+            replacement = archived.get(file_id, {}).get("replacedBy")
+            if file_id in new_files or (replacement in new_files and replacement not in old_files):
+                continue
+            add("document-remove", item, _file_label(record),
+                "ссылка убрана" if record["kind"] == "link" else "в архиве")
+    kept = {item["id"] for item in after.get("items") or []}
+    for item_id, item in old_items.items():
+        if item_id not in kept:
+            add("delete-item", item, _short(item["name"]), "")
+    return changes
+
+
+def _record_changes(conn, session_id: str, dialog_id: str, before: dict, after: dict, now: str) -> None:
+    changes = changes_between(before, after)
+    _ensure_changes_table(conn)
+    if not changes:
+        conn.execute("DELETE FROM ga_session_changes WHERE session_id = ? AND dialog_id = ?", (session_id, dialog_id))
+        return
+    conn.execute(
+        """INSERT INTO ga_session_changes(session_id, dialog_id, changes_json, progress_json, created_at)
+           VALUES (?, ?, ?, ?, ?)
+           ON CONFLICT(session_id, dialog_id) DO UPDATE SET changes_json = excluded.changes_json,
+               progress_json = excluded.progress_json, created_at = excluded.created_at""",
+        (session_id, dialog_id, json.dumps(changes, ensure_ascii=False),
+         json.dumps(progress_of(after)), now),
+    )
+    try:
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=CHANGES_KEPT_DAYS)).isoformat(timespec="seconds")
+        conn.execute("DELETE FROM ga_session_changes WHERE created_at < ?", (cutoff,))
+    except sqlite3.Error:
+        pass
+
+
+def summary_sessions(session_id: str) -> list[dict]:
+    """The ГА blocks of the chat message of a committed session."""
+    conn = _conn()
+    try:
+        rows = conn.execute(
+            "SELECT dialog_id, changes_json, progress_json FROM ga_session_changes WHERE session_id = ?",
+            (clean_cell_value(session_id),),
+        ).fetchall()
+    except sqlite3.OperationalError:
+        rows = []
+    finally:
+        conn.close()
+    result = []
+    for row in rows:
+        try:
+            changes = json.loads(row["changes_json"] or "[]")
+            progress = json.loads(row["progress_json"] or "{}")
+        except Exception:
+            continue
+        if not changes:
+            continue
+        result.append({
+            "dialogId": row["dialog_id"],
+            "checklistKey": GA_KEY,
+            "changes": changes,
+            "data": {
+                "checklistKey": GA_KEY,
+                "title": GA_TITLE,
+                "dialogId": row["dialog_id"],
+                "resolvedDialogId": row["dialog_id"],
+                "gaProgress": progress,
+            },
+        })
+    return result
 
 
 def session_check(dialog_id: str, session_id: str, user_id: str) -> dict:

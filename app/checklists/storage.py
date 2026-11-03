@@ -28,8 +28,19 @@ def make_storage_dialog_id(dialog_id: str, checklist_key: str = "id") -> str:
     return dialog_id if checklist_key == "id" else f"{dialog_id}::{checklist_key}"
 
 
+# Граданализ keeps its data in its own tables (grad_analysis.py): a row of
+# it here would be a checklist of ИД with Yandex folders.
+SEPARATE_CHECKLIST_KEYS = frozenset({"ga"})
+
+
+def _refuse_separate_key(checklist_key: str) -> None:
+    if checklist_key in SEPARATE_CHECKLIST_KEYS:
+        raise ValueError("Граданализ хранится отдельно от чек-листов")
+
+
 def save_checklist(dialog_id: str, data: dict, checklist_key: str = "id", *,
                    preserve_server_yandex: bool = False):
+    _refuse_separate_key(normalize_checklist_key(checklist_key))
     storage_dialog_id = make_storage_dialog_id(dialog_id, checklist_key)
     checklist_key = normalize_checklist_key(checklist_key)
     data = normalize_checklist_data(data, checklist_key)
@@ -77,6 +88,7 @@ def save_checklist(dialog_id: str, data: dict, checklist_key: str = "id", *,
 
 def get_checklist(dialog_id: str, checklist_key: str = "id"):
     checklist_key = normalize_checklist_key(checklist_key)
+    _refuse_separate_key(checklist_key)
     normalized_id = normalize_dialog_id(dialog_id)
 
     aliases = []

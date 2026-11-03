@@ -82,10 +82,6 @@
             updateLockNotice();
         } else {
             await editSessionApi.start();
-            if (currentChecklistKey === 'opr' && global.ChecklistGa) {
-                // The rights of Граданализ decide whether OPR is taken now.
-                await global.ChecklistGa.ready();
-            }
             if (!defersCurrentChecklistLock()) {
                 await acquireChecklistLock(currentChecklistKey, true);
             }

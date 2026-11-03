@@ -1,4 +1,4 @@
-"""Граданализ (ГА): API of the right column of the OPR checklist window."""
+"""Граданализ (ГА): API of its tab in the checklist window."""
 from __future__ import annotations
 
 import mimetypes
@@ -55,11 +55,9 @@ async def api_ga(request: Request, dialogId: str = "", userId: str = "", session
     if not dialog_id:
         return JSONResponse({"ok": False, "error": "dialogId is required"}, status_code=400)
     if is_read_only(request):
-        # The platform portal sees the checklists only; the OPR progress
-        # counts ГА for everybody.
-        progress = await run_in_threadpool(grad_analysis.progress_counts, dialog_id)
-        return JSONResponse({"ok": True, "visible": False, "progress": progress,
-                             "rights": {"view": False, "edit": False}})
+        # The platform portal sees ГА like the other checklists, read only.
+        payload = await run_in_threadpool(grad_analysis.state_payload, dialog_id, "", "")
+        return JSONResponse(payload)
     payload = await run_in_threadpool(
         grad_analysis.state_payload, dialog_id, clean_cell_value(userId), clean_cell_value(sessionId),
     )

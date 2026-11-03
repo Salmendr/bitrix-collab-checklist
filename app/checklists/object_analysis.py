@@ -877,7 +877,7 @@ def project_id_figures(base: str) -> dict:
 
 
 def project_ga_figure(base: str) -> dict:
-    """«Чек-лист ГА»: the Граданализ of the OPR checklist of the first stage."""
+    """«Чек-лист ГА»: the Граданализ of the first stage."""
     from app.checklists.grad_analysis import progress_counts
 
     try:
@@ -969,6 +969,7 @@ def project_view(base: str, record: dict, *, name: str = "", user_id: str = "",
         "reminders": reminders_view(base, record),
         "idChecklistUrl": checklist_link(base, "id"),
         "oprChecklistUrl": checklist_link(base, "opr"),
+        "gaChecklistUrl": checklist_link(base, "ga"),
     }
 
 

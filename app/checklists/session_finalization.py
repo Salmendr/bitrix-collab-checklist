@@ -714,6 +714,18 @@ def deliver_finalized_edit_session(session_id: str) -> dict:
             session_id=clean_cell_value(session_id),
             fallback_sessions=fallback_sessions,
         )
+        try:
+            # Граданализ keeps its own record of what the session changed.
+            from app.checklists.grad_analysis import summary_sessions as ga_summary_sessions
+
+            summary_sessions = list(summary_sessions or []) + ga_summary_sessions(
+                clean_cell_value(session_id)
+            )
+        except Exception as ga_exc:
+            write_debug_log("ga_summary_failed", {
+                "sessionId": clean_cell_value(session_id),
+                "error": str(ga_exc),
+            })
 
         try:
             notification_delivery = (

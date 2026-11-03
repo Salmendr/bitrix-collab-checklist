@@ -18,7 +18,7 @@ from app.ui.template_engine import render_ui_template
 
 router = APIRouter()
 
-ASSET_VERSION = "8.34-panel-risks"
+ASSET_VERSION = "8.36-ga-tab"
 
 
 def _actor(payload: dict) -> dict:

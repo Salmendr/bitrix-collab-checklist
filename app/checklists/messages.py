@@ -31,14 +31,22 @@ def status_emoji(status: str) -> str:
 
 MESSAGE_ALIGNMENT_SPACE = " "
 MESSAGE_ALIGNMENT_SPACE_FACTOR = 2
+# Граданализ is not a checklist of the table: its block of the message goes
+# right after ИД, like its tab in the window.
+GA_MESSAGE_KEY = "ga"
+GA_MESSAGE_TITLE = "Чек-лист Граданализ"
+
+
 def get_message_checklist_order_map() -> dict[str, int]:
-    return {
-        config.key: index
-        for index, config in enumerate(list_checklist_configs())
-    }
+    keys = [config.key for config in list_checklist_configs()]
+    position = keys.index("id") + 1 if "id" in keys else 0
+    keys.insert(position, GA_MESSAGE_KEY)
+    return {key: index for index, key in enumerate(keys)}
 
 
 def get_message_checklist_title(checklist_key: str) -> str:
+    if normalize_checklist_key(checklist_key) == GA_MESSAGE_KEY:
+        return GA_MESSAGE_TITLE
     return get_checklist_config(checklist_key).title
 
 MESSAGE_SECTION_LABELS = {
@@ -61,6 +69,9 @@ MESSAGE_SECTION_LABELS = {
     "folder-move": "Изменены папки",
     "folder-delete": "Удалены папки",
     "item-to-folder": "Пункты стали папками",
+    "ga-status": "Статусы",
+    "ga-link-text": "Ссылки на документы",
+    "ga-note": "Примечания",
 }
 
 
@@ -71,6 +82,11 @@ def display_status_text(status: str) -> str:
 
 
 def build_progress_text(data: dict) -> str:
+    if normalize_checklist_key(data.get("checklistKey") or "id") == GA_MESSAGE_KEY:
+        progress = data.get("gaProgress") or {}
+        percent = progress.get("percent")
+        return f"📊Прогресс: {int(percent or 0)}%"
+
     from app.checklists.subitems import progress_items
     items = progress_items(data.get("items") or [])
 
@@ -84,14 +100,6 @@ def build_progress_text(data: dict) -> str:
     ]
 
     done, total = len(completed_items), len(active_items)
-    if normalize_checklist_key(data.get("checklistKey") or "id") == "opr":
-        # The OPR progress counts the items of Граданализ too.
-        from app.checklists.grad_analysis import progress_counts
-
-        dialog_id = normalize_dialog_id(data.get("resolvedDialogId") or data.get("dialogId") or "")
-        if dialog_id:
-            ga = progress_counts(dialog_id)
-            done, total = done + ga["done"], total + ga["total"]
     percent = round((done / total) * 100) if total else 0
     return f"📊Прогресс: {percent}%"
 
@@ -151,6 +159,8 @@ def split_changes(changes: list) -> dict:
             groups["delete-item"].append(change)
         elif field in {"folder-upload", "folder-replace", "folder-create", "folder-move", "folder-delete", "item-to-folder"}:
             groups[field].append(change)
+        elif field in {"ga-status", "ga-link-text", "ga-note"}:
+            groups.setdefault(field, []).append(change)
 
     return groups
 
@@ -247,8 +257,12 @@ def normalize_message_value(field: str, value, checklist_key: str) -> str:
 
 
 def build_change_left_label(field: str, checklist_key: str) -> str:
-    if field == "status":
+    if field in {"status", "ga-status"}:
         return "Статус"
+    if field == "ga-link-text":
+        return "Ссылка"
+    if field == "ga-note":
+        return "Примечание"
     if field in {"date", "plan", "plannedDate"}:
         return "План"
     if field == "fact":
@@ -281,6 +295,12 @@ def build_change_left_label(field: str, checklist_key: str) -> str:
 def build_change_emoji(field: str, new_value: str, checklist_key: str) -> str:
     if field == "status":
         return status_emoji(new_value)
+    if field == "ga-status":
+        return {"Да": "🟢", "Нет": "🔴", "Не требуется": "🚫"}.get(new_value, "⚪️")
+    if field == "ga-link-text":
+        return "📚"
+    if field == "ga-note":
+        return "📝"
     if field in {"date", "plan", "plannedDate", "fact"}:
         return "📆"
     if field == "extraInfo":
@@ -314,7 +334,7 @@ def build_change_emoji(field: str, new_value: str, checklist_key: str) -> str:
 
 
 def should_show_empty_old_value(field: str) -> bool:
-    return field in {"extraInfo", "source", "name"}
+    return field in {"extraInfo", "source", "name", "ga-link-text", "ga-note"}
 
 
 def build_message_value_link(value: str, url: str) -> str:
@@ -499,6 +519,7 @@ def build_recent_changes_sections(changes: list, checklist_key: str) -> list[dic
 
     section_order = [
         "status",
+        "ga-status",
         "date",
         "document-replacement",
         "document-add",
@@ -517,6 +538,8 @@ def build_recent_changes_sections(changes: list, checklist_key: str) -> list[dic
         "order",
         "source",
         "extraInfo",
+        "ga-link-text",
+        "ga-note",
     ]
 
     sections = []

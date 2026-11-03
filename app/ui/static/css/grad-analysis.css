@@ -1,4 +1,4 @@
-/* Граданализ: the right column of the OPR checklist window. */
+/* Граданализ: its own tab of the checklist window. */
 
 .ga-panel {
     display: flex;
@@ -284,6 +284,38 @@
 
 .ga-file-mark.is-deleted {
     color: #b42318;
+}
+
+/* The link stays on a version that went to the archive of ИД. */
+.ga-file-mark.is-archived {
+    color: #475467;
+}
+
+/* «Убрать» next to «Скачать» for those who fill ГА. */
+.doc-file-row.ga-file-row-editable {
+    grid-template-columns: minmax(0, 1fr) max-content 34px 34px 34px;
+}
+
+/* The tab takes the whole width: the five columns get room. */
+.ga-tab {
+    width: 100%;
+}
+
+.ga-tab .ga-grid {
+    min-width: 900px;
+}
+
+.ga-tab .ga-row {
+    grid-template-columns: 46px minmax(260px, 1.6fr) minmax(300px, 1.5fr) 150px minmax(220px, 1.2fr);
+}
+
+.ga-block-nr .ga-block-title {
+    background: #f2f4f7;
+    color: #475467;
+}
+
+.ga-block-nr .ga-row {
+    background: #fcfcfd;
 }
 
 .ga-file-icon {

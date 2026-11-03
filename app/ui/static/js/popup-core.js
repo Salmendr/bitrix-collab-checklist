@@ -651,6 +651,11 @@
             }
 
             async function reloadCurrentChecklistFromServer() {
+                if (currentChecklistKey === 'ga') {
+                    // Граданализ is read by its own module.
+                    if (window.ChecklistGa) await window.ChecklistGa.load();
+                    return buildChecklistSnapshot();
+                }
                 const response = await fetch(
                     appUrl('api/checklist') +
                     '?dialogId=' + encodeURIComponent(dialogId) +
@@ -696,6 +701,10 @@
 
                     collabTitle = title;
                     renderTitle();
+                    if (currentChecklistKey === 'ga') {
+                        // Граданализ is not a checklist of the table.
+                        return;
+                    }
                     debugLog('chat_title_loaded', {
                         title
                     });
@@ -760,13 +769,15 @@
                     : items;
                 const activeItems = progressSource.filter(x => normalizeStatus(x.status) !== 'Не требуется');
                 const completedItems = activeItems.filter(x => normalizeStatus(x.status) === 'Есть');
-                const workItems = activeItems.filter(x => normalizeStatus(x.status) === 'В работе');
+                let workItems = activeItems.filter(x => normalizeStatus(x.status) === 'В работе');
                 let activeCount = activeItems.length;
                 let completedCount = completedItems.length;
-                if (currentChecklistKey === 'opr' && window.ChecklistGa) {
+                if (currentChecklistKey === 'ga' && window.ChecklistGa) {
+                    // Граданализ has its own progress («Да» of its items).
                     const gradAnalysis = window.ChecklistGa.progressCounts();
-                    activeCount += Number(gradAnalysis.total || 0);
-                    completedCount += Number(gradAnalysis.done || 0);
+                    activeCount = Number(gradAnalysis.total || 0);
+                    completedCount = Number(gradAnalysis.done || 0);
+                    workItems = [];
                 }
                 const percent = activeCount ? Math.round((completedCount / activeCount) * 100) : 0;
                 // «В работе» goes on top of «Есть» in yellow.
@@ -2212,6 +2223,11 @@
                 const key = requestedKey || 'id';
                 const force = !!(options && options.force);
 
+                if (key === 'ga') {
+                    // Граданализ keeps its files on the server only.
+                    return null;
+                }
+
                 if (stageYandexFolderRefreshInProgress.has(key)) {
                     return null;
                 }
@@ -2336,6 +2352,11 @@
                 }
 
                 const key = String(currentChecklistKey || '').trim() || 'id';
+                if (key === 'ga') {
+                    stageFolderBoxEl.innerHTML = '';
+                    stageFolderBoxEl.style.display = 'none';
+                    return;
+                }
                 const hasFolderInfo = Object.prototype.hasOwnProperty.call(
                     stageYandexFoldersByKey,
                     key
@@ -2488,7 +2509,15 @@
                         key,
                         title
                     };
-                });
+                }).filter(item => item.key !== 'ga');
+                // Граданализ: its own tab right after ИД.
+                if (window.ChecklistGa) {
+                    const afterId = normalizedList.findIndex(item => item.key === 'id') + 1;
+                    normalizedList.splice(afterId, 0, {
+                        key: window.ChecklistGa.KEY,
+                        title: window.ChecklistGa.TITLE
+                    });
+                }
 
                 projectChecklistListEl.innerHTML = normalizedList.map(item => {
                     const active = item.key === currentChecklistKey ? 'side-link active' : 'side-link';

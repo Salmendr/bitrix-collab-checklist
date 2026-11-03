@@ -48,7 +48,9 @@
     }
 
     function currentKey() {
-        return String(currentChecklistKey || 'id');
+        const key = String(currentChecklistKey || 'id');
+        // Граданализ came out of OPR: its header is the one of OPR.
+        return key === 'ga' ? 'opr' : key;
     }
 
     function currentView() {
