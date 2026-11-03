@@ -64,12 +64,14 @@ class FolderPageLinks:
         user_id: str,
         user_name: str,
         read_only: bool = False,
+        opened_from: str = "",
     ):
         self.app_base_path = app_base_path
         self.dialog_id = dialog_id
         self.checklist_key = checklist_key
         # A read-only window passes it on to every folder opened from it.
         self.read_only = bool(read_only)
+        self.opened_from = opened_from if self.read_only else ""
         self.session_id = "" if self.read_only else session_id
         self.user_id = user_id
         self.user_name = user_name
@@ -88,6 +90,7 @@ class FolderPageLinks:
             ("userId", self.user_id),
             ("userName", self.user_name),
             ("readOnly", "1" if self.read_only else ""),
+            ("openedFrom", self.opened_from),
         ):
             if value:
                 url += f"&{key}={quote(value, safe='')}"

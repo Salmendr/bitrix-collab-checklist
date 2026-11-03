@@ -578,6 +578,44 @@ def _link_target(record: dict, sources: _IdSources) -> tuple[dict | None, object
     return item, find_pinned_version_in_item(item, record["documentId"]), current
 
 
+def _series_folder(item: dict, series_id: str) -> str:
+    """The folder inside the item of a file series of ИД (a new version and
+    the archive stay in the folder of the series)."""
+    from app.checklists.document_folders import document_relative_folder, normalize_relative_folder
+    from app.checklists.documents import normalize_detached_archive_series
+
+    current = _series_current(item, series_id)
+    if current is not None:
+        return document_relative_folder(current)
+    for series in normalize_detached_archive_series(item.get("archivedDocumentSeries")):
+        if clean_cell_value(series.get("seriesId")) == series_id:
+            return normalize_relative_folder(series.get("relativeFolder"), strict=False)
+    return ""
+
+
+def _source_path(source: str, item: dict, folder: str, sources: _IdSources) -> list[dict]:
+    """Where a file of ИД lies: its items (the parent first) and the folders
+    inside the item; every part opens its folder page."""
+    chain = [item]
+    seen = {clean_cell_value(item.get("id"))}
+    parent_id = clean_cell_value(item.get("parentItemId"))
+    while parent_id and parent_id not in seen and len(chain) < 10:
+        parent = sources.item(source, parent_id)
+        if parent is None:
+            break
+        chain.insert(0, parent)
+        seen.add(parent_id)
+        parent_id = clean_cell_value(parent.get("parentItemId"))
+    path = [
+        {"label": clean_cell_value(entry.get("name")) or "Пункт", "itemId": clean_cell_value(entry.get("id")), "folder": ""}
+        for entry in chain
+    ]
+    parts = [part for part in folder.split("/") if part]
+    for index, part in enumerate(parts):
+        path.append({"label": part, "itemId": clean_cell_value(item.get("id")), "folder": "/".join(parts[:index + 1])})
+    return path
+
+
 def _file_view(record: dict, dialog_id: str, sources: _IdSources) -> dict:
     view = {
         "id": record["id"], "kind": record["kind"], "name": record["name"], "size": record["size"],
@@ -590,6 +628,12 @@ def _file_view(record: dict, dialog_id: str, sources: _IdSources) -> dict:
         return view
     item, version, current = _link_target(record, sources)
     view["sourceItemName"] = clean_cell_value((item or {}).get("name"))
+    view["sourceDialogId"] = record["sourceDialogId"]
+    view["documentId"] = record["documentId"]
+    if item is not None:
+        view["sourcePath"] = _source_path(
+            record["sourceDialogId"], item, _series_folder(item, record["seriesId"]), sources,
+        )
     if version is None and not record["documentId"] and current is not None:
         view["name"] = clean_cell_value(current.get("name")) or record["name"]
         view["url"] = _id_document_path(record["sourceDialogId"], record["sourceItemId"], clean_cell_value(current.get("id")))
@@ -715,9 +759,48 @@ def item_payload(dialog_id: str, item_id: str, user_id: str, session_id: str = "
     return {"ok": True, "item": view}
 
 
+def _picker_documents(source: str, item: dict) -> list[dict]:
+    from app.checklists.document_folders import document_relative_folder
+
+    item_id = clean_cell_value(item.get("id"))
+    return [
+        {
+            "id": clean_cell_value(doc.get("id")),
+            "seriesId": clean_cell_value(doc.get("seriesId")),
+            "name": clean_cell_value(doc.get("name")),
+            "at": clean_cell_value(doc.get("uploadedAt")),
+            "folder": document_relative_folder(doc),
+            "url": _id_document_path(source, item_id, clean_cell_value(doc.get("id"))),
+        }
+        for doc in item.get("documents") or [] if isinstance(doc, dict) and clean_cell_value(doc.get("id"))
+    ]
+
+
+def _picker_node(source: str, items: list[dict], item: dict, depth: int = 0) -> dict:
+    """An item as a folder of the picker: its files, its folders (all of
+    them, as on its folder page) and its subitems."""
+    from app.checklists.document_folders import item_subfolders
+    from app.checklists.subitems import children_of
+
+    children = [] if depth >= 5 else [
+        _picker_node(source, items, child, depth + 1)
+        for child in children_of(items, clean_cell_value(item.get("id")))
+    ]
+    node = {
+        "itemId": clean_cell_value(item.get("id")),
+        "name": clean_cell_value(item.get("name")) or "Пункт",
+        "folders": item_subfolders(item),
+        "documents": _picker_documents(source, item),
+        "children": children,
+    }
+    node["fileCount"] = len(node["documents"]) + sum(child["fileCount"] for child in children)
+    return node
+
+
 def id_files(dialog_id: str, user_id: str) -> dict:
     """Files of the ИД checklists of the project for «Сослаться на файл»:
-    the first stage and the stage of this window."""
+    the first stage and the stage of this window, as the tree of their items,
+    subitems and folders. Items without any file are left out."""
     from app.checklists.project_phases import phase_label
 
     dialog_id = normalize_dialog_id(dialog_id)
@@ -727,29 +810,14 @@ def id_files(dialog_id: str, user_id: str) -> dict:
     for source in dict.fromkeys([base_of(dialog_id), dialog_id]):
         checklist = sources.checklist(source)
         items = [item for item in checklist.get("items") or [] if isinstance(item, dict)]
-        by_id = {clean_cell_value(item.get("id")): item for item in items}
-        entries = []
-        for item in items:
-            documents = [
-                {
-                    "id": clean_cell_value(doc.get("id")),
-                    "seriesId": clean_cell_value(doc.get("seriesId")),
-                    "name": clean_cell_value(doc.get("name")),
-                    "at": clean_cell_value(doc.get("uploadedAt")),
-                    "url": _id_document_path(source, clean_cell_value(item.get("id")), clean_cell_value(doc.get("id"))),
-                }
-                for doc in item.get("documents") or [] if isinstance(doc, dict) and clean_cell_value(doc.get("id"))
-            ]
-            if not documents:
-                continue
-            parent = by_id.get(clean_cell_value(item.get("parentItemId")))
-            entries.append({
-                "itemId": clean_cell_value(item.get("id")),
-                "name": clean_cell_value(item.get("name")),
-                "parentName": clean_cell_value((parent or {}).get("name")),
-                "documents": documents,
-            })
-        result.append({"dialogId": source, "label": phase_label(source) or "ИД проекта", "items": entries})
+        ids = {clean_cell_value(item.get("id")) for item in items}
+        tops = [
+            item for item in items
+            if not clean_cell_value(item.get("parentItemId"))
+            or clean_cell_value(item.get("parentItemId")) not in ids
+        ]
+        tree = [node for node in (_picker_node(source, items, item) for item in tops) if node["fileCount"]]
+        result.append({"dialogId": source, "label": phase_label(source) or "ИД проекта", "tree": tree})
     return {"ok": True, "sources": result}
 
 

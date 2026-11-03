@@ -531,8 +531,9 @@
         const name = href
             ? '<a class="doc-file-link" href="' + esc(href) + '" target="_blank" rel="noopener">' + esc(file.name) + '</a>'
             : '<span class="doc-file-link is-gone">' + esc(file.name) + '</span>';
+        const where = file.kind === 'link' ? (sourcePathText(file) || file.sourceItemName || '') : '';
         const meta = file.kind === 'link'
-            ? '<span class="doc-file-meta ga-id-link" title="Ссылка на файл чек-листа ИД' + (file.sourceItemName ? ' · ' + esc(file.sourceItemName) : '') + '">ИД</span>'
+            ? '<span class="doc-file-meta ga-id-link" title="Ссылка на файл чек-листа ИД' + (where ? ' · ' + esc(where) : '') + '">ИД</span>'
             : '<span class="doc-file-meta">' + esc(sizeText(file.size)) + '</span>';
         const replace = replaceButtonHtml(itemId, file, editable) || '<span></span>';
         const download = href
@@ -831,6 +832,26 @@
         return (await getJson('api/ga/item', { dialogId, itemId, userId: who.userId, sessionId: sessionId() })).item;
     }
 
+    // Where a linked file lies in ИД: its item, subitem and folders; every
+    // part opens its folder page of ИД.
+    function sourcePathHtml(file) {
+        const path = Array.isArray(file.sourcePath) ? file.sourcePath : [];
+        if (!path.length) {
+            return 'Ссылка на ИД' + (file.sourceItemName ? ' · ' + esc(file.sourceItemName) : '');
+        }
+        return '<div class="ga-source">Ссылка на ИД:</div><div class="ga-source-path">'
+            + path.map(part => (
+                '<a class="ga-source-link" href="' + esc(idFolderUrl(file.sourceDialogId, part.itemId, part.folder)) + '"'
+                + ' target="_blank" rel="noopener" title="' + esc('Открыть папку «' + part.label + '» в чек-листе ИД') + '">'
+                + esc(part.label) + '</a>'
+            )).join('<span class="ga-source-sep">/</span>')
+            + '</div>';
+    }
+
+    function sourcePathText(file) {
+        return (Array.isArray(file.sourcePath) ? file.sourcePath : []).map(part => part.label).join(' / ');
+    }
+
     // A file row of the folder page of the checklists: the name with
     // «Заменить» and «Скачать» next to it, then where it came from, when and
     // who added it.
@@ -854,9 +875,7 @@
                 + ' href="' + esc(fileHref(file, true)) + '" download title="Скачать файл" aria-label="Скачать файл ' + esc(file.name) + '">'
                 + icon('download') + '</a>'
             : '';
-        const kind = file.kind === 'link'
-            ? 'Ссылка на ИД' + (file.sourceItemName ? ' · ' + esc(file.sourceItemName) : '')
-            : 'Загружен';
+        const kind = file.kind === 'link' ? sourcePathHtml(file) : 'Загружен';
         const mark = fileMarkHtml(file);
         const archivedWhat = file.reason === 'unlinked'
             ? 'Ссылка убрана'
@@ -935,6 +954,111 @@
             'ga-modal-history');
     }
 
+    // Icons of the folder page of the checklists.
+    const TREE_FOLDER_PATH = 'M2.5 6.5A1.5 1.5 0 0 1 4 5h5l2 2.2h9a1.5 1.5 0 0 1 1.5 1.5v9.8A1.5 1.5 0 0 1 20 20H4a1.5 1.5 0 0 1-1.5-1.5Z';
+    const TREE_EYE = '<svg class="ga-tree-eye" viewBox="0 0 24 24" aria-hidden="true">'
+        + '<path d="M1.5 12S5.5 4.5 12 4.5 22.5 12 22.5 12 18.5 19.5 12 19.5 1.5 12 1.5 12Z"></path>'
+        + '<circle cx="12" cy="12" r="3.2"></circle></svg>';
+
+    function treeFolderIcon(isSubitem) {
+        return '<svg class="ga-tree-folder' + (isSubitem ? ' ga-tree-subitem' : '') + '" viewBox="0 0 24 24" aria-hidden="true">'
+            + '<path d="' + TREE_FOLDER_PATH + '"></path>'
+            + (isSubitem ? '<path d="M8 13.5l2.5 2.5L16 10.5"></path>' : '') + '</svg>';
+    }
+
+    // The folder page of an item of ИД (or of a folder inside it), read only.
+    function idFolderUrl(sourceDialogId, itemId, folder) {
+        const who = identity();
+        return url('api/checklist/folder', {
+            dialogId: sourceDialogId, checklistKey: 'id', itemId, folder: folder || '',
+            readOnly: '1', openedFrom: 'ga', userId: who.userId, userName: who.userName
+        });
+    }
+
+    function filesCount(count) {
+        return count ? filesWord(count) : 'пусто';
+    }
+
+    function parentPath(path) {
+        const index = path.lastIndexOf('/');
+        return index < 0 ? '' : path.slice(0, index);
+    }
+
+    function sameFolder(left, right) {
+        return String(left || '').toLocaleLowerCase('ru') === String(right || '').toLocaleLowerCase('ru');
+    }
+
+    function below(folder, path) {
+        const key = String(folder || '').toLocaleLowerCase('ru');
+        const base = String(path || '').toLocaleLowerCase('ru');
+        return key === base || key.startsWith(base + '/');
+    }
+
+    function pickerFileHtml(ctx, document, trail) {
+        const linked = ctx.linked.has(ctx.source.dialogId + '|' + document.id);
+        const where = trail.concat(document.name).join(' / ');
+        return '<li class="ga-tree-file">'
+            + '<button type="button" class="ga-pick-doc' + (linked ? ' is-linked' : '') + '"'
+            + ' data-ga-pick-source="' + esc(ctx.source.dialogId) + '" data-ga-pick-item="' + esc(ctx.itemId) + '"'
+            + ' data-ga-pick-doc="' + esc(document.id) + '" data-ga-target="' + esc(ctx.targetId) + '"'
+            + ' data-ga-pick-path="' + esc(where.toLocaleLowerCase('ru')) + '"'
+            + ' title="' + esc(linked ? 'Ссылка на этот файл уже есть: ' + where : 'Сослаться на файл: ' + where) + '"'
+            + (linked ? ' disabled' : '') + '>'
+            + '<span class="ga-file-icon">' + icon('file') + '</span>'
+            + '<span class="ga-pick-doc-name">' + esc(document.name) + '</span>'
+            + (linked ? '<span class="ga-pick-linked">уже есть</span>' : '')
+            + '<span class="ga-muted">' + esc(formatMoment(document.at)) + '</span></button></li>';
+    }
+
+    function pickerNodeHtml(options) {
+        const body = (options.files ? '<ul class="ga-tree-files">' + options.files + '</ul>' : '')
+            + (options.children ? '<ul class="ga-tree-children">' + options.children + '</ul>' : '');
+        return '<li class="ga-tree-node" data-ga-tree-label="' + esc(options.trail.join(' / ').toLocaleLowerCase('ru')) + '">'
+            + '<details class="ga-tree-details"' + (options.open ? ' open data-default-open="1"' : '') + '>'
+            + '<summary class="ga-tree-summary">'
+            + '<span class="ga-tree-chevron" aria-hidden="true"></span>'
+            + treeFolderIcon(options.isSubitem)
+            + '<span class="ga-tree-name">' + esc(options.label) + '</span>'
+            + '<span class="ga-tree-meta">' + esc(filesCount(options.count)) + '</span>'
+            + '<a class="ga-tree-view" href="' + esc(options.viewUrl) + '" target="_blank" rel="noopener"'
+            + ' title="Посмотреть папку в чек-листе ИД">' + TREE_EYE + '<span>Посмотреть папку</span></a>'
+            + '</summary>'
+            + '<div class="ga-tree-body">' + (body || '<div class="ga-tree-empty">Пустая папка</div>') + '</div>'
+            + '</details></li>';
+    }
+
+    // The folders inside an item: all of them, as on its folder page.
+    function pickerFoldersHtml(ctx, node, parent, trail) {
+        return (node.folders || [])
+            .filter(path => sameFolder(parentPath(path), parent))
+            .map(path => {
+                const label = path.slice(path.lastIndexOf('/') + 1);
+                const here = trail.concat(label);
+                const files = (node.documents || []).filter(document => sameFolder(document.folder, path))
+                    .map(document => pickerFileHtml(ctx, document, here)).join('');
+                return pickerNodeHtml({
+                    label, trail: here, isSubitem: false, open: false, files,
+                    count: (node.documents || []).filter(document => below(document.folder, path)).length,
+                    children: pickerFoldersHtml(ctx, node, path, here),
+                    viewUrl: idFolderUrl(ctx.source.dialogId, node.itemId, path)
+                });
+            }).join('');
+    }
+
+    // An item of ИД: its own files, its folders, then its subitems.
+    function pickerItemHtml(source, node, targetId, linked, trail, depth) {
+        const here = trail.concat(node.name);
+        const ctx = { source, itemId: node.itemId, targetId, linked };
+        const files = (node.documents || []).filter(document => !document.folder)
+            .map(document => pickerFileHtml(ctx, document, here)).join('');
+        const children = pickerFoldersHtml(ctx, node, '', here)
+            + (node.children || []).map(child => pickerItemHtml(source, child, targetId, linked, here, depth + 1)).join('');
+        return pickerNodeHtml({
+            label: node.name, trail: here, isSubitem: depth > 0, open: depth === 0, files, children,
+            count: node.fileCount, viewUrl: idFolderUrl(source.dialogId, node.itemId, '')
+        });
+    }
+
     async function openPicker(itemId) {
         let sources;
         try {
@@ -943,20 +1067,60 @@
             say('error', error.message);
             return;
         }
+        const target = itemById(itemId);
+        const linked = new Set(((target && target.files) || [])
+            .filter(file => file.kind === 'link' && file.documentId)
+            .map(file => file.sourceDialogId + '|' + file.documentId));
         const body = sources.map(source => {
-            const list = (source.items || []).map(entry => (
-                '<div class="ga-pick-item"><div class="ga-pick-name">' + esc(entry.parentName ? entry.parentName + ' / ' + entry.name : entry.name) + '</div>'
-                + entry.documents.map(document => (
-                    '<button type="button" class="ga-pick-doc" data-ga-pick-source="' + esc(source.dialogId) + '"'
-                    + ' data-ga-pick-item="' + esc(entry.itemId) + '" data-ga-pick-doc="' + esc(document.id) + '" data-ga-target="' + esc(itemId) + '">'
-                    + '<span class="ga-file-icon">' + icon('file') + '</span><span>' + esc(document.name) + '</span>'
-                    + '<span class="ga-muted">' + esc(formatMoment(document.at)) + '</span></button>'
-                )).join('')
-                + '</div>'
-            )).join('');
-            return '<h4>' + esc(source.label) + '</h4>' + (list || '<div class="ga-muted">В чек-листе ИД нет файлов</div>');
+            const tree = (source.tree || []).map(node => pickerItemHtml(source, node, itemId, linked, [], 0)).join('');
+            return '<section class="ga-pick-source" data-ga-pick-source-block>'
+                + '<h4>' + esc(source.label) + '</h4>'
+                + (tree ? '<ul class="ga-tree-root">' + tree + '</ul>' : '<div class="ga-muted">В чек-листе ИД нет файлов</div>')
+                + '</section>';
         }).join('');
-        openModal('Сослаться на файл чек-листа ИД', '<input type="search" class="ga-input ga-pick-search" placeholder="Найти файл или пункт" data-ga-pick-search>' + body, 'ga-modal-picker');
+        openModal('Сослаться на файл чек-листа ИД',
+            '<input type="search" class="ga-input ga-pick-search" placeholder="Найти файл, папку или пункт" data-ga-pick-search>'
+            + '<div class="ga-pick-nothing ga-muted" hidden>Ничего не найдено</div>'
+            + body, 'ga-modal-picker');
+    }
+
+    // The search shows the files whose path has the text, with their
+    // folders open; a folder found by its name shows all its files.
+    function filterPicker(query) {
+        const modal = doc.querySelector('.ga-modal-picker');
+        if (!modal) return;
+        const nodes = Array.from(modal.querySelectorAll('.ga-tree-node'));
+        const files = Array.from(modal.querySelectorAll('.ga-tree-file'));
+        if (!query) {
+            nodes.forEach(node => {
+                node.hidden = false;
+                const details = node.querySelector(':scope > .ga-tree-details');
+                if (details) details.open = !!details.dataset.defaultOpen;
+            });
+            files.forEach(file => { file.hidden = false; });
+            modal.querySelectorAll('[data-ga-pick-source-block]').forEach(block => { block.hidden = false; });
+            modal.querySelector('.ga-pick-nothing').hidden = true;
+            return;
+        }
+        const found = new Set(nodes.filter(node => (node.dataset.gaTreeLabel || '').indexOf(query) >= 0));
+        files.forEach(file => {
+            const button = file.querySelector('[data-ga-pick-path]');
+            const inFound = Array.from(found).some(node => node.contains(file));
+            file.hidden = !(inFound || (button && button.dataset.gaPickPath.indexOf(query) >= 0));
+        });
+        nodes.slice().reverse().forEach(node => {
+            const visible = found.has(node) || Array.from(node.querySelectorAll('.ga-tree-file')).some(file => !file.hidden);
+            node.hidden = !visible;
+            const details = node.querySelector(':scope > .ga-tree-details');
+            if (details) details.open = visible;
+        });
+        let any = false;
+        modal.querySelectorAll('[data-ga-pick-source-block]').forEach(block => {
+            const shown = Array.from(block.querySelectorAll('.ga-tree-root > .ga-tree-node')).some(node => !node.hidden);
+            block.hidden = !shown;
+            any = any || shown;
+        });
+        modal.querySelector('.ga-pick-nothing').hidden = any;
     }
 
     async function refreshOpenFolder() {
@@ -1153,10 +1317,7 @@
         const field = event.target;
         if (!field.dataset) return;
         if (field.dataset.gaPickSearch !== undefined) {
-            const query = field.value.trim().toLowerCase();
-            doc.querySelectorAll('.ga-pick-item').forEach(entry => {
-                entry.hidden = !!query && entry.textContent.toLowerCase().indexOf(query) === -1;
-            });
+            filterPicker(field.value.trim().toLocaleLowerCase('ru'));
             return;
         }
         const itemId = field.dataset.gaNote || field.dataset.gaLinkText || field.dataset.gaNameInput;

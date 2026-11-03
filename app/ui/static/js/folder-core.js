@@ -49,11 +49,16 @@
     // gets the edit session later. The folders opened from here are read
     // only too (the server passes readOnly=1 on in every link).
     const folderReadOnly = bootstrap.readOnly === true;
-    const READ_ONLY_MESSAGE = (
-        'Только просмотр: папка открыта, когда чек-лист редактировал '
-        + 'другой сотрудник. Чтобы вносить изменения, закройте это окно '
-        + 'и откройте папку заново из чек-листа, когда сессия перейдёт к вам.'
-    );
+    const READ_ONLY_MESSAGE = bootstrap.openedFrom === 'ga'
+        ? (
+            'Только просмотр: папка чек-листа ИД открыта из Граданализа. '
+            + 'Файлы этой папки меняют в самом чек-листе ИД.'
+        )
+        : (
+            'Только просмотр: папка открыта, когда чек-лист редактировал '
+            + 'другой сотрудник. Чтобы вносить изменения, закройте это окно '
+            + 'и откройте папку заново из чек-листа, когда сессия перейдёт к вам.'
+        );
     const folderBootstrapSessionId = folderReadOnly ? '' : String(
         bootstrap.sessionId || ''
     ).trim();

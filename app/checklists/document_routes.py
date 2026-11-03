@@ -2176,6 +2176,7 @@ def api_checklist_folder(
     userName: str = "",
     folder: str = "",
     readOnly: str = "",
+    openedFrom: str = "",
 ):
     from app.checklists import folder_page
 
@@ -2188,6 +2189,8 @@ def api_checklist_folder(
     )
     if read_only:
         sessionId = ""
+    # A folder of ИД looked at from Граданализ says so.
+    opened_from = "ga" if read_only and clean_cell_value(openedFrom) == "ga" else ""
 
     dialog_id = normalize_dialog_id(dialogId)
     checklist_key = normalize_checklist_key(
@@ -2315,6 +2318,7 @@ def api_checklist_folder(
         user_id=clean_cell_value(userId),
         user_name=clean_cell_value(userName),
         read_only=read_only,
+        opened_from=opened_from,
     )
     from app.checklists.storage import get_project_storage_context
     is_top_level = not clean_cell_value(target_item.get("parentItemId")) and not item_allows_plain_folders(target_item)
@@ -2357,7 +2361,7 @@ def api_checklist_folder(
     ui_static_base_url = (
         f"{app_base_path}/ui-static"
     )
-    ui_asset_version = "8.35-save-statuses"
+    ui_asset_version = "8.37-ga-tree"
     popup_url = (
         f"{app_base_path}/popup"
         f"?dialogId={quote(dialog_id, safe='')}"
@@ -2410,6 +2414,7 @@ def api_checklist_folder(
         ),
         "sessionId": clean_cell_value(sessionId),
         "readOnly": read_only,
+        "openedFrom": opened_from,
         "userId": clean_cell_value(userId),
         "userName": clean_cell_value(userName),
         "popupUrl": popup_url,

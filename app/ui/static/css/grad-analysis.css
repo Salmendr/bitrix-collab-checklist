@@ -656,3 +656,200 @@
 .ga-pick-search {
     margin-bottom: 4px;
 }
+
+/* «Сослаться на файл чек-листа ИД»: the items, subitems and folders of ИД as
+   on the folder page of an item. */
+.ga-pick-source + .ga-pick-source {
+    margin-top: 14px;
+}
+
+.ga-tree-root,
+.ga-tree-children,
+.ga-tree-files {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.ga-tree-root {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.ga-tree-root > .ga-tree-node {
+    border: 1px solid #e4e7ec;
+    border-radius: 10px;
+    background: #ffffff;
+}
+
+.ga-tree-children {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.ga-tree-summary {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 34px;
+    padding: 5px 10px;
+    cursor: pointer;
+    list-style: none;
+    font-size: 13px;
+}
+
+.ga-tree-summary::-webkit-details-marker {
+    display: none;
+}
+
+.ga-tree-summary:hover {
+    background: #f9fafb;
+    border-radius: 8px;
+}
+
+.ga-tree-chevron {
+    flex: 0 0 auto;
+    width: 7px;
+    height: 7px;
+    margin: 0 3px;
+    border-right: 2px solid #667085;
+    border-bottom: 2px solid #667085;
+    transform: rotate(-45deg);
+    transition: transform 140ms ease;
+}
+
+.ga-tree-details[open] > .ga-tree-summary .ga-tree-chevron {
+    transform: rotate(45deg);
+}
+
+.ga-tree-folder {
+    flex: 0 0 18px;
+    width: 18px;
+    height: 18px;
+    fill: #fcd34d;
+    stroke: #d97706;
+    stroke-width: 1.2;
+}
+
+.ga-tree-subitem path + path {
+    fill: none;
+    stroke: #92400e;
+    stroke-width: 1.8;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+.ga-tree-name {
+    min-width: 0;
+    font-weight: 700;
+    color: #1f2328;
+    overflow-wrap: anywhere;
+}
+
+.ga-tree-meta {
+    flex: 0 0 auto;
+    color: #667085;
+    font-size: 12px;
+    white-space: nowrap;
+}
+
+.ga-tree-view {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-left: auto;
+    padding: 3px 8px;
+    border-radius: 999px;
+    color: #1d4ed8;
+    font-size: 12px;
+    text-decoration: none;
+    white-space: nowrap;
+}
+
+.ga-tree-view:hover {
+    background: #eff4ff;
+}
+
+.ga-tree-eye {
+    width: 16px;
+    height: 16px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.8;
+}
+
+.ga-tree-body {
+    padding: 0 10px 6px 26px;
+}
+
+.ga-tree-file {
+    border-top: 1px solid #f2f4f7;
+}
+
+.ga-tree-empty {
+    padding: 4px 0 4px 28px;
+    color: #98a2b3;
+    font-size: 12px;
+}
+
+.ga-pick-doc-name {
+    min-width: 0;
+    text-align: left;
+    overflow-wrap: anywhere;
+}
+
+.ga-pick-doc.is-linked,
+.ga-pick-doc:disabled {
+    color: #667085;
+    cursor: default;
+    background: transparent;
+}
+
+.ga-pick-linked {
+    flex: 0 0 auto;
+    padding: 0 6px;
+    border-radius: 999px;
+    background: #ecfdf3;
+    color: #067647;
+    font-size: 11px;
+    font-weight: 700;
+}
+
+.ga-pick-nothing {
+    padding: 8px 2px;
+}
+
+/* «Источник» of the folder of an item: the path in ИД, every part opens its
+   folder. */
+.ga-source {
+    color: #475467;
+}
+
+.ga-source-path {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0 4px;
+}
+
+.ga-source-link {
+    color: #175cd3;
+    text-decoration: none;
+    overflow-wrap: anywhere;
+}
+
+.ga-source-link:hover {
+    text-decoration: underline;
+}
+
+.ga-source-sep {
+    color: #98a2b3;
+}
+
+@media (max-width: 640px) {
+    .ga-tree-view span {
+        display: none;
+    }
+}
