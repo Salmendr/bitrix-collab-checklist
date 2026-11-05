@@ -21,7 +21,7 @@ function buildGenericTableHeader(group, showDates) {
     void showDates;
 
     return `
-        <div class="group-title group-title-generic-head">${esc(group.title)}</div>
+        <div class="group-title group-title-generic-head"><span>${esc(group.title)}</span>${window.ChecklistAssignments ? window.ChecklistAssignments.sectionHtml(group) : ''}</div>
         <div class="thead-top ${getGenericGridClass(false)}">
             <div class="th">
                 <span>Пункты раздела</span>

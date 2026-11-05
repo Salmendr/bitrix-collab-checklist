@@ -120,6 +120,7 @@ renderOprTables = function () {
             <div class="thead-top ${gridClass}">
                 <div class="th">
                     <span>ОПР</span>
+                    ${window.ChecklistAssignments ? window.ChecklistAssignments.sectionHtml((groups || []).find(group => Number(group.id) === 1)) : ''}
                 </div>
                 <div class="th">Документ</div>
             </div>

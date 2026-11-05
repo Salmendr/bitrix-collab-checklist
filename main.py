@@ -26,6 +26,7 @@ from app.checklists.phase_routes import router as phase_router
 from app.checklists.project_object_routes import router as project_object_router
 from app.checklists.object_analysis_routes import router as object_analysis_router
 from app.checklists.grad_analysis_routes import router as grad_analysis_router
+from app.checklists.assignment_routes import router as assignment_router
 from app.checklists.document_routes import router as document_router
 from app.checklists.archive_routes import router as archive_router
 from app.checklists.version_link_routes import (
@@ -100,6 +101,7 @@ from app.auth.middleware import AuthMiddleware
 from app.auth.routes import router as auth_router
 from app.checklists.id_reminders import start_worker as start_id_reminders, stop_worker as stop_id_reminders
 from app.checklists.date_reminders import start_worker as start_date_reminders, stop_worker as stop_date_reminders
+from app.checklists.assignments import start_worker as start_assignment_sync, stop_worker as stop_assignment_sync
 
 
 # Successful polling of the windows stays out of the docker log.
@@ -112,6 +114,7 @@ app.include_router(id_reminder_router)
 def shutdown_id_reminders():
     stop_id_reminders()
     stop_date_reminders()
+    stop_assignment_sync()
 
 
 @app.middleware("http")
@@ -192,6 +195,7 @@ app.include_router(phase_router)
 app.include_router(project_object_router)
 app.include_router(object_analysis_router)
 app.include_router(grad_analysis_router)
+app.include_router(assignment_router)
 # Страховочный вызов при импорте модуля
 init_db()
 ensure_notification_delivery_schema()
@@ -237,3 +241,5 @@ def startup_event():
 
     start_id_reminders()
     start_date_reminders()
+    # Tasks of the assignees left by a restart or a failed call to Bitrix.
+    start_assignment_sync()

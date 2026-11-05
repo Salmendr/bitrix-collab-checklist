@@ -1791,22 +1791,9 @@ def _build_folder_document_rows_html(
             else ""
         )
 
-        assignment_history_count = int(
-            doc.get("assignmentHistoryCount") or 0
-        )
         current_series_id = (
             clean_cell_value(doc.get("seriesId"))
             or doc_id
-        )
-        assignment_history_panel_id = (
-            "assignment-history-panel-"
-            + uuid.uuid5(
-                uuid.NAMESPACE_URL,
-                (
-                    f"{dialog_id}|{checklist_key}|{item_id}|"
-                    f"{current_series_id}|assignment-history"
-                ),
-            ).hex
         )
 
         rows.append(
@@ -1885,49 +1872,7 @@ def _build_folder_document_rows_html(
             '''
         )
 
-        if assignment_history_count > 0:
-            rows.append(f"""
-                <tr class="folder-assignment-history-summary-row">
-                    <td
-                        class="folder-assignment-history-summary-cell"
-                        colspan="5"
-                    >
-                        <button
-                            type="button"
-                            class="assignment-history-toggle"
-                            data-role="document-assignment-history-toggle"
-                            data-panel-id="{html.escape(assignment_history_panel_id)}"
-                            data-dialog-id="{html.escape(dialog_id)}"
-                            data-checklist-key="{html.escape(checklist_key)}"
-                            data-item-id="{html.escape(item_id)}"
-                            data-series-id="{html.escape(current_series_id)}"
-                            aria-expanded="false"
-                        >
-                            <span
-                                class="assignment-history-toggle-icon"
-                                data-role="assignment-history-toggle-icon"
-                                aria-hidden="true"
-                            >▸</span>
-                            <span>История заданий: {assignment_history_count}</span>
-                        </button>
-                    </td>
-                </tr>
-                <tr
-                    id="{html.escape(assignment_history_panel_id)}"
-                    class="folder-assignment-history-panel-row"
-                    hidden
-                >
-                    <td
-                        class="folder-assignment-history-panel-cell"
-                        colspan="5"
-                    >
-                        <div
-                            class="assignment-history-panel"
-                            aria-live="polite"
-                        ></div>
-                    </td>
-                </tr>
-            """)
+        # «История заданий» of «Оповещение по документам» is removed.
 
         current_archive_rows_html = (
             build_archive_series_rows_html(
@@ -2361,7 +2306,7 @@ def api_checklist_folder(
     ui_static_base_url = (
         f"{app_base_path}/ui-static"
     )
-    ui_asset_version = "8.37-ga-tree"
+    ui_asset_version = "8.38-assignees"
     popup_url = (
         f"{app_base_path}/popup"
         f"?dialogId={quote(dialog_id, safe='')}"
@@ -2402,6 +2347,9 @@ def api_checklist_folder(
             f"{app_base_path}"
             "/api/checklist/notification-drafts"
         ),
+        # The assignees of the item (checklist-assignments.js).
+        "assignmentsApiUrl": f"{app_base_path}/",
+        "bitrixUsersApiUrl": f"{app_base_path}/api/checklist/bitrix-users",
         "dialogId": dialog_id,
         "checklistKey": checklist_key,
         "itemId": item_id,
@@ -2514,6 +2462,9 @@ def api_checklist_folder(
             "FOLDER_ASSIGNMENT_HISTORY_CSS_URL": html.escape(
                 f"{ui_static_base_url}/css/assignment-history.css?v={ui_asset_version}"
             ),
+            "FOLDER_ASSIGNEES_CSS_URL": html.escape(
+                f"{ui_static_base_url}/css/assignees.css?v={ui_asset_version}"
+            ),
             "FOLDER_WINDOW_CHANNEL_JS_URL": html.escape(
                 f"{ui_static_base_url}/js/checklist-window-channel.js?v={ui_asset_version}"
             ),
@@ -2532,14 +2483,8 @@ def api_checklist_folder(
             "FOLDER_BITRIX_COMPANY_PICKER_JS_URL": html.escape(
                 f"{ui_static_base_url}/js/bitrix-company-picker.js?v={ui_asset_version}"
             ),
-            "FOLDER_NOTIFICATION_UI_JS_URL": html.escape(
-                f"{ui_static_base_url}/js/notification-draft-ui.js?v={ui_asset_version}"
-            ),
-            "FOLDER_NOTIFICATION_DRAFTS_JS_URL": html.escape(
-                f"{ui_static_base_url}/js/folder-notification-drafts.js?v={ui_asset_version}"
-            ),
-            "FOLDER_ASSIGNMENT_HISTORY_JS_URL": html.escape(
-                f"{ui_static_base_url}/js/document-assignment-history.js?v={ui_asset_version}"
+            "FOLDER_ASSIGNMENTS_JS_URL": html.escape(
+                f"{ui_static_base_url}/js/checklist-assignments.js?v={ui_asset_version}"
             ),
             "FOLDER_UPLOAD_PROGRESS_JS_URL": html.escape(
                 f"{ui_static_base_url}/js/folder-upload-progress.js?v={ui_asset_version}"

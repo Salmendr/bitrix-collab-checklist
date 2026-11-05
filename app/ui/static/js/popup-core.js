@@ -842,6 +842,7 @@
                                 ${disabledAttr()}
                             >${esc(itemName)}</button>
                             ${subitemCounter}
+                            ${window.ChecklistAssignments ? window.ChecklistAssignments.itemStickers(item) : ''}
                         </div>
                         ${subitemAddTrigger}
                     </div>

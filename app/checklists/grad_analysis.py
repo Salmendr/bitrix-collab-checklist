@@ -1,8 +1,10 @@
 """Граданализ (ГА): its own checklist of the project window, between ИД and
-ОПР, with the checklists to КОПР Генплан and КОПР АР, ПБ, ОДИ.
+ОПР, with the checklist to КОПР Генплан (the checklists to КОПР АР, ПБ, ОДИ
+are removed: see grad_analysis_template).
 
 Everybody sees it; leaders and administrators change it, so do the
 architects of the project (Алексей Кузьмин unless the project names others).
+An architect names other architects too: one with him or one instead of him.
 ГА has its own lock, taken by the first change: viewing it holds nothing.
 
 A change goes to a draft of the edit session of the window; «Сохранить» and
@@ -41,6 +43,7 @@ from app.checklists.grad_analysis_template import (
     BLOCKS,
     DERIVED_ITEM_IDS,
     GROUPS,
+    REMOVED_GROUP_IDS,
     template_items,
 )
 from app.checklists.utils import clean_cell_value, normalize_dialog_id
@@ -312,6 +315,9 @@ def normalize(data: dict | None) -> dict:
         template = _TEMPLATE.get(item_id)
         if template is None and not raw.get("isCustom"):
             continue
+        if template is None and clean_cell_value(raw.get("group")) in REMOVED_GROUP_IDS:
+            # A custom item of a removed section goes with it.
+            continue
         by_id[item_id] = _clean_item(raw, template)
     for item_id, template in _TEMPLATE.items():
         if item_id not in by_id:
@@ -391,21 +397,22 @@ def architects(base: str) -> list[dict]:
 
 def rights(dialog_id: str, user_id: str) -> dict:
     """Everybody sees ГА; leaders, administrators and the architects of the
-    project change it."""
+    project change it and name its architects."""
     from app.checklists.project_leaders import is_project_leader
 
     user = clean_cell_value(user_id)
     base = base_of(dialog_id)
     if not base:
-        return {"view": False, "edit": False, "manageArchitects": False}
+        return {"view": False, "edit": False, "manageArchitects": False, "leader": False}
     if not user:
-        return {"view": True, "edit": False, "manageArchitects": False}
+        return {"view": True, "edit": False, "manageArchitects": False, "leader": False}
     leader = is_project_leader(base, user)
     architect = user in {entry["userId"] for entry in architects(base)}
     return {
         "view": True,
         "edit": leader or architect,
-        "manageArchitects": leader,
+        "manageArchitects": leader or architect,
+        "leader": leader,
     }
 
 
@@ -415,7 +422,7 @@ def _require(dialog_id: str, user_id: str, right: str) -> dict:
         raise GaDenied({
             "view": "Граданализ недоступен",
             "edit": "Граданализ заполняют руководители, администраторы и архитекторы проекта",
-            "manageArchitects": "Архитекторов назначают руководители и администраторы",
+            "manageArchitects": "Архитекторов назначают руководители, администраторы и архитекторы проекта",
         }[right])
     return result
 
@@ -423,7 +430,7 @@ def _require(dialog_id: str, user_id: str, right: str) -> dict:
 def change_architects(dialog_id: str, op: str, *, user: dict, actor: dict) -> list[dict]:
     from app.checklists.bitrix_users import get_cached_bitrix_user
 
-    _require(dialog_id, actor.get("userId"), "manageArchitects")
+    actor_rights = _require(dialog_id, actor.get("userId"), "manageArchitects")
     base = base_of(dialog_id)
     target_id = clean_cell_value((user or {}).get("userId"))
     if not target_id.isdecimal() or int(target_id) <= 0:
@@ -439,7 +446,11 @@ def change_architects(dialog_id: str, op: str, *, user: dict, actor: dict) -> li
             name = clean_cell_value(cached.get("name")) or _text((user or {}).get("name"), 200)
             current.append({"userId": target_id, "name": name or ("ID " + target_id)})
         elif op == "remove":
-            current = [entry for entry in current if entry["userId"] != target_id]
+            left = [entry for entry in current if entry["userId"] != target_id]
+            if current and not left and not actor_rights.get("leader"):
+                # An architect hands ГА over: someone else first, then himself.
+                raise GaError("Сначала добавьте другого архитектора, затем уберите себя")
+            current = left
         else:
             raise GaError("Неизвестное действие")
         conn = _conn()

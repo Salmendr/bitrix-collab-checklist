@@ -621,6 +621,7 @@ function updateSaveStateBySession() {
     if (
         sessionDirty
         || (window.ChecklistGa && window.ChecklistGa.hasDraft())
+        || (window.ChecklistAssignments && window.ChecklistAssignments.hasDraft())
     ) {
         setSaveState('saving', 'Есть несохраненные изменения');
         return;

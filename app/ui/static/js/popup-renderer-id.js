@@ -26,6 +26,7 @@ if (!popupIdRendererCommon) {
                     <div class="thead-top ${getIdGridClass(false)}">
                         <div class="th">
                             <span>${esc(group.title)}</span>
+                            ${window.ChecklistAssignments ? window.ChecklistAssignments.sectionHtml(group) : ''}
                         </div>
                         <div class="th">Документ</div>
                     </div>

@@ -23,13 +23,6 @@ function getYandexFolderStateText(status, action = '') {
     return 'Ошибка синхронизации папки — нажмите Яндекс для повтора';
 }
 
-function assignmentHistoryPanelId(itemId, seriesId) {
-    return 'assignment-history-popup-'
-        + String(itemId || '').replace(/[^a-zA-Z0-9_-]+/g, '-')
-        + '-'
-        + String(seriesId || '').replace(/[^a-zA-Z0-9_-]+/g, '-');
-}
-
 function documentRelativeFolder(doc) {
     return String(doc && doc.relativeFolder || '')
         .split('/')
@@ -262,37 +255,6 @@ function buildDocumentCell(item) {
             : mirrorStatus === 'error'
                 ? 'Заменить файл — потребуется подтверждение ошибки синхронизации'
                 : 'Заменить файл';
-        const seriesId = String(doc.seriesId || docId);
-        const historyCount = Math.max(0, Number(doc.assignmentHistoryCount || 0));
-        const historyPanelId = assignmentHistoryPanelId(itemId, seriesId);
-        const historyHtml = historyCount > 0 ? `
-            <div class="assignment-history-shell">
-                <button
-                    type="button"
-                    class="assignment-history-toggle"
-                    data-role="document-assignment-history-toggle"
-                    data-panel-id="${esc(historyPanelId)}"
-                    data-dialog-id="${esc(dialogId)}"
-                    data-checklist-key="${esc(currentChecklistKey)}"
-                    data-item-id="${esc(itemId)}"
-                    data-series-id="${esc(seriesId)}"
-                    aria-expanded="false"
-                >
-                    <span
-                        class="assignment-history-toggle-icon"
-                        data-role="assignment-history-toggle-icon"
-                        aria-hidden="true"
-                    >▸</span>
-                    <span>История заданий: ${historyCount}</span>
-                </button>
-                <div
-                    id="${esc(historyPanelId)}"
-                    class="assignment-history-panel"
-                    aria-live="polite"
-                    hidden
-                ></div>
-            </div>
-        ` : '';
         const mirrorErrorHtml = mirrorStatus === 'error' ? `
             <div
                 class="doc-yandex-file-error"
@@ -339,7 +301,6 @@ function buildDocumentCell(item) {
                 </a>
             </div>
             ${mirrorErrorHtml}
-            ${historyHtml}
             </div>
         `;
     }).join('');
@@ -359,6 +320,8 @@ function buildDocumentCell(item) {
                 >
                     ${iconSvg('upload')}
                 </button>
+
+                ${window.ChecklistAssignments ? window.ChecklistAssignments.itemButton(item) : ''}
 
                 ${showViewFolder ? `
                     <button

@@ -27,9 +27,6 @@ from app.checklists.storage import get_checklist, save_checklist
 from app.checklists.session_summary import (
     build_session_summary_sessions,
 )
-from app.checklists.notification_delivery import (
-    deliver_committed_notification_drafts,
-)
 from app.checklists.utils import (
     clean_cell_value,
     normalize_checklist_key,
@@ -727,22 +724,17 @@ def deliver_finalized_edit_session(session_id: str) -> dict:
                 "error": str(ga_exc),
             })
 
-        try:
-            notification_delivery = (
-                deliver_committed_notification_drafts(
-                    clean_cell_value(session_id)
-                )
-            )
-        except Exception as notification_exc:
-            notification_delivery = {
-                "ok": False,
-                "status": "failed",
-                "sessionId": clean_cell_value(session_id),
-                "error": str(notification_exc),
-                "taskResults": [],
-                "chatResults": [],
-                "crmResults": [],
-            }
+        # «Оповещение по документам» is removed: nothing of it is sent any
+        # more (its tables stay). The assignees and their tasks replace it.
+        notification_delivery = {
+            "ok": True,
+            "status": "completed",
+            "sessionId": clean_cell_value(session_id),
+            "removed": True,
+            "taskResults": [],
+            "chatResults": [],
+            "crmResults": [],
+        }
 
         delivery = _deliver_summary_once(
             session_id=clean_cell_value(session_id),
@@ -750,6 +742,19 @@ def deliver_finalized_edit_session(session_id: str) -> dict:
             sessions=summary_sessions,
             editor=editor,
         )
+
+        try:
+            # The tasks of the assignees, then a message of its own to the
+            # chat about who was assigned (assignments.py).
+            from app.checklists.assignments import deliver_session as deliver_assignments
+
+            assignment_delivery = deliver_assignments(clean_cell_value(session_id))
+        except Exception as assignment_exc:
+            assignment_delivery = {"ok": False, "error": str(assignment_exc)}
+            write_debug_log("assign_delivery_failed", {
+                "sessionId": clean_cell_value(session_id),
+                "error": str(assignment_exc),
+            })
 
         existing = _get_finalization_row(
             clean_cell_value(session_id)
@@ -759,6 +764,7 @@ def deliver_finalized_edit_session(session_id: str) -> dict:
             {},
         )
         response.update({
+            "assignmentDelivery": assignment_delivery,
             "notificationDelivery": notification_delivery,
             **delivery,
             "externalDeliveryQueued": False,

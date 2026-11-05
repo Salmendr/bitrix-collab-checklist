@@ -22,6 +22,7 @@ if (!popupConceptRendererCommon) {
                     <div class="thead-top ${getConceptGridClass(false)}">
                         <div class="th">
                             <span>${esc(group.title)}</span>
+                            ${window.ChecklistAssignments ? window.ChecklistAssignments.sectionHtml(group) : ''}
                         </div>
                         <div class="th">Документ</div>
                     </div>

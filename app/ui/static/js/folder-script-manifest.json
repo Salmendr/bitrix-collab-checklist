@@ -1,5 +1,5 @@
 {
-  "stage": "8.27-item-folders",
+  "stage": "8.38-assignees",
   "hashMode": "utf8-lf",
   "modules": {
     "checklist-window-channel.js": {
@@ -73,6 +73,10 @@
     "checklist-link-menu.js": {
       "sha256": "4d4f9a736e171ae4ad528428cd7e56f4c252b5f133855f6595dfb64d99ec816c",
       "bytes": 6706
+    },
+    "checklist-assignments.js": {
+      "sha256": "28bc124d1e847ebcc051ec4abb1d2317b72d7407403c3c2a7d2befbe236036a3",
+      "bytes": 39039
     }
   },
   "loadOrder": [
@@ -82,9 +86,7 @@
     "public-folder-share.js",
     "bitrix-user-picker.js",
     "bitrix-company-picker.js",
-    "notification-draft-ui.js",
-    "folder-notification-drafts.js",
-    "document-assignment-history.js",
+    "checklist-assignments.js",
     "folder-upload-progress.js",
     "upload-staging.js",
     "folder-upload-planner.js",
@@ -138,5 +140,5 @@
     "Stage 8.25: only employees checked by Bitrix24 open the application; every page gets the keys of its window from the server (checklist-auth.js, put into the page, not a module), reloads and new windows carry a link key.",
     "Stage 8.27: «Переместить» offers subitems: the item becomes their folder; an item with subitems may go into another item (they become its folders)."
   ],
-  "generatedAt": "2026-10-15T00:00:00+00:00"
+  "generatedAt": "2026-11-05T00:00:00+00:00"
 }

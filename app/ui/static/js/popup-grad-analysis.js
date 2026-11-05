@@ -4,7 +4,8 @@
     // Граданализ (ГА): its own tab of the checklist window, between ИД and
     // ОПР, with the checklists to КОПР Генплан and КОПР АР, ПБ, ОДИ.
     // Everybody sees it; leaders, administrators and the architects of the
-    // project change it. A change goes to the draft of the edit session of
+    // project change it (an architect names other architects too, with him or
+    // instead of him). A change goes to the draft of the edit session of
     // the window and is kept by «Сохранить» / «Сохранить и закрыть»;
     // «Отмена» drops it. ГА has its own lock, taken by the first change, and
     // its own progress; its items in «Не требуется» are at the end of the tab.
@@ -1148,8 +1149,12 @@
     }
 
     async function removeArchitect(userId) {
+        const who = identity();
+        const self = text(userId) === text(who.userId) && !rights().leader;
+        if (!global.confirm(self
+            ? 'Убрать себя из архитекторов? После этого Граданализ этого проекта будет открыт вам только для просмотра.'
+            : 'Убрать сотрудника из архитекторов проекта?')) return;
         try {
-            const who = identity();
             await sendJson('api/ga/architects', { dialogId, op: 'remove', userId, actingUserId: who.userId });
             await load();
             redraw();
@@ -1286,7 +1291,6 @@
             state.architectPicker = false;
             redraw();
         } else if (data.gaArchitectRemove !== undefined) {
-            if (!global.confirm('Убрать сотрудника из архитекторов проекта?')) return;
             removeArchitect(data.gaArchitectRemove);
         }
     });

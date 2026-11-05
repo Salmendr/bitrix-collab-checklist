@@ -1182,6 +1182,8 @@ def complete_edit_session_commit(
         finalize_drafts(conn, record["session_id"], commit=True, now=now)
         from app.checklists.grad_analysis import finalize_drafts as finalize_ga_drafts
         finalize_ga_drafts(conn, record["session_id"], commit=True, now=now)
+        from app.checklists.assignments import finalize_drafts as finalize_assignment_drafts
+        finalize_assignment_drafts(conn, record["session_id"], commit=True, now=now)
 
         held_locks = []
         if continue_editing:
@@ -1506,6 +1508,8 @@ def complete_edit_session_rollback(
         finalize_drafts(conn, record["session_id"], commit=False, now=now)
         from app.checklists.grad_analysis import finalize_drafts as finalize_ga_drafts
         finalize_ga_drafts(conn, record["session_id"], commit=False, now=now)
+        from app.checklists.assignments import finalize_drafts as finalize_assignment_drafts
+        finalize_assignment_drafts(conn, record["session_id"], commit=False, now=now)
 
         release_edit_session_locks_in_transaction(
             conn,
