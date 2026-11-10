@@ -11,35 +11,12 @@
     }
 
     function bindLifecycleEvents() {
-        document.addEventListener('visibilitychange', function () {
-            if (document.visibilityState !== 'hidden') {
-                return;
-            }
-
-            if (
-                typeof popupHasPendingUploads === 'function'
-                && popupHasPendingUploads()
-            ) {
-                return;
-            }
-
-            if (typeof registerPopupCloseHandoff === 'function') {
-                registerPopupCloseHandoff({ source: 'popup_hidden' });
-            }
-            sendCloseSummaryOnce('popup_hidden');
-        });
-
+        // The window is closed: the session is saved and released at once,
+        // also while files are uploading (their requests stop with the
+        // window; a file the server has fully received is saved with the
+        // session). A slider of Bitrix24 that is only hidden on close is
+        // handled by popup-frame-visibility.js.
         global.addEventListener('pagehide', function () {
-            if (
-                typeof popupHasPendingUploads === 'function'
-                && popupHasPendingUploads()
-            ) {
-                return;
-            }
-
-            if (typeof registerPopupCloseHandoff === 'function') {
-                registerPopupCloseHandoff({ source: 'popup_pagehide' });
-            }
             sendCloseSummaryOnce('popup_pagehide');
         });
 
@@ -48,14 +25,13 @@
                 typeof popupHasPendingUploads === 'function'
                 && popupHasPendingUploads()
             ) {
+                // A window of its own asks before leaving; if the user
+                // leaves, pagehide saves the session.
                 event.preventDefault();
                 event.returnValue = '';
                 return '';
             }
 
-            if (typeof registerPopupCloseHandoff === 'function') {
-                registerPopupCloseHandoff({ source: 'popup_beforeunload' });
-            }
             sendCloseSummaryOnce('popup_beforeunload');
             return undefined;
         });

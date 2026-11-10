@@ -1,5 +1,5 @@
 {
-  "stage": "8.27-item-folders",
+  "stage": "8.38-session-release",
   "hashMode": "utf8-lf",
   "modules": {
     "checklist-window-channel.js": {
@@ -11,8 +11,8 @@
       "bytes": 5819
     },
     "folder-core.js": {
-      "sha256": "ac9cb333f726b698281a6738943ccc120bb2676599c80e9b0a2eeb1135f444f9",
-      "bytes": 20894
+      "sha256": "e217813900fe7af1450a6785ad81abb3a858c4e3e1acf5ccada8d300fcbddcef",
+      "bytes": 25548
     },
     "public-folder-share.js": {
       "sha256": "0a76ada593bbad042556d0cf528f0f167681694c523f8a652cac9b7737325338",
@@ -47,8 +47,8 @@
       "bytes": 26381
     },
     "folder-uploads.js": {
-      "sha256": "8b0d1cbc00ce5e01c6c0620b30c810c65b5c9612d2a155dd2d344a084548eca4",
-      "bytes": 34753
+      "sha256": "1efebcc4aa464223896eb1b2ec8c592419c4a8f885eec77debff0a83561310d1",
+      "bytes": 35639
     },
     "folder-replacement.js": {
       "sha256": "b693e6e9d63409c39c00f0e60e9811c9ae4f40c6c6ae3af118bdc3011b7615c2",

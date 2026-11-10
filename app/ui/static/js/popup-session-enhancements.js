@@ -47,72 +47,55 @@ let unloadFinalizedSessionId = '';
 let popupUploadFinalizeWaitPromise = null;
 let popupFinalizeRequestInProgress = false;
 
-const POPUP_CLOSE_HANDOFF_PREFIX = 'checklist_popup_close_handoff_v1:';
-const popupCloseToken = String(
-    new URLSearchParams(window.location.search || '').get('closeToken') || ''
-).trim();
+// The window is gone for its host (the slider of Bitrix24 was closed and
+// only hidden, see popup-frame-visibility.js): the session is finalized and
+// nothing starts a new one until the window is shown and reloaded.
+let popupClosedByHost = false;
 
-function getPopupCloseHandoffKey() {
-    return popupCloseToken
-        ? POPUP_CLOSE_HANDOFF_PREFIX + popupCloseToken
-        : '';
+function isPopupClosedByHost() {
+    return popupClosedByHost;
 }
 
-function registerPopupCloseHandoff(extra = {}) {
-    const storageKey = getPopupCloseHandoffKey();
-    const sessionId = getActiveEditSessionId();
-
-    if (!storageKey || !sessionId) {
-        return false;
-    }
-
-    const identity = getCurrentEditorIdentity();
-    const handoff = {
-        version: 1,
-        closeToken: popupCloseToken,
-        sessionId,
-        dialogId: String(dialogId || '').trim(),
-        checklistKey: String(currentChecklistKey || 'id').trim() || 'id',
-        userId: String(identity.userId || '').trim(),
-        userName: String(identity.userName || '').trim(),
-        clientSessionId: String(clientSessionId || '').trim(),
-        updatedAt: Date.now(),
-        ...(
-            extra && typeof extra === 'object'
-                ? extra
-                : {}
-        )
-    };
-
-    try {
-        localStorage.setItem(storageKey, JSON.stringify(handoff));
-        return true;
-    } catch (error) {
-        debugLog('popup_close_handoff_write_failed', {
-            closeToken: popupCloseToken,
-            sessionId,
-            error: String(error && error.message || error || '')
+// The window is closed for good (by its host, by the server after ten
+// minutes without actions or five minutes without a heartbeat): no
+// heartbeat, no lock checks and no new session from it any more.
+function markPopupWindowClosed(reason) {
+    if (!popupClosedByHost) {
+        debugLog('popup_window_closed_state', {
+            dialogId,
+            checklistKey: currentChecklistKey,
+            sessionId: getActiveEditSessionId(),
+            reason: String(reason || '')
         });
-        return false;
     }
-}
-
-function clearPopupCloseHandoff() {
-    const storageKey = getPopupCloseHandoffKey();
-    if (!storageKey) return;
-
+    popupClosedByHost = true;
     try {
-        localStorage.removeItem(storageKey);
+        stopLockHeartbeat();
     } catch (error) {
-        // The server finalization remains authoritative even if storage cleanup fails.
+        console.log('stop heartbeat error:', error);
     }
 }
 
-window.ChecklistPopupCloseHandoff = Object.freeze({
-    token: popupCloseToken,
-    register: registerPopupCloseHandoff,
-    clear: clearPopupCloseHandoff
-});
+// What the window had seen when it read each checklist it shows (a marker of
+// the server): a window that only views a checklist holds no lock, so
+// another window may save it meanwhile; the server says whether it did (the
+// sessions of this window do not count).
+const checklistReadMarker = {};
+let lockStatusInFlight = false;
+const pendingViewRefresh = {};
+
+function rememberChecklistReadMarker(checklistKey, readMarker) {
+    const key = String(checklistKey || '').trim();
+    const value = String(readMarker || '').trim();
+    if (key && value) {
+        checklistReadMarker[key] = value;
+    }
+}
+
+(function rememberBootstrapReadMarker() {
+    const bootstrap = window.CHECKLIST_POPUP_BOOTSTRAP || {};
+    rememberChecklistReadMarker(bootstrap.checklistKey, bootstrap.checklistReadMarker);
+})();
 
 const headerRightEl = document.querySelector('.header-right');
 if (headerRightEl && !document.getElementById('lockNotice')) {
@@ -350,10 +333,12 @@ function getEditSessionRuntimeState() {
     };
 }
 
-// Граданализ: its tab takes no lock when it opens; the first change of ГА
-// takes the lock of ГА (api/ga), so viewing it holds nothing.
+// The lock of a checklist is taken by its first change, not by opening it
+// or its tab: viewing holds nothing and does not keep others from editing.
+// The window asks who holds the lock (api/checklist/lock/status) to show it.
+// Граданализ has its own lock, taken by its first change too (api/ga).
 function defersCurrentChecklistLock() {
-    return currentChecklistKey === 'ga';
+    return !isReadOnlyWindow();
 }
 
 // The window can save Граданализ while another employee holds OPR.
@@ -476,10 +461,14 @@ async function requireEditingSession(
     }
 
     if (requireCurrentLock && !ownsCurrentChecklistLock()) {
-        await acquireChecklistLock(
+        // The first change takes the lock.
+        const lockResult = await acquireChecklistLock(
             currentChecklistKey,
             false
         );
+        if (ownsCurrentChecklistLock()) {
+            await ensureCurrentChecklistIsFresh(lockResult, actionName);
+        }
     }
 
     if (
@@ -521,7 +510,11 @@ function setActionButtonState() {
         saveContinueBtn.style.cursor = saveContinueBtn.disabled ? 'not-allowed' : 'pointer';
     }
     if (cancelBtn) {
-        cancelBtn.disabled = popupFinalizationInProgress;
+        // While «Отмена» (or a save) runs the button stays unavailable.
+        cancelBtn.disabled = !!(
+            popupFinalizationInProgress
+            || popupFinalizeRequestInProgress
+        );
     }
 
     // Folders open in the view mode too (read only, see view-folder).
@@ -603,6 +596,15 @@ function updateSaveStateBySession() {
     }
 
     if (
+        isChecklistLockedByOther()
+        && !ownsCurrentChecklistLock()
+        && !gradAnalysisEditable()
+    ) {
+        setSaveState('error', 'Только просмотр');
+        return;
+    }
+
+    if (
         !ownsCurrentChecklistLock()
         && !defersCurrentChecklistLock()
         && !gradAnalysisEditable()
@@ -648,6 +650,38 @@ function hasDocumentDeletionInAnyDirtyChecklist() {
     return dirtyKeys.some(key => sessionStateHasDocumentDeletion(checklistSessionState[key]));
 }
 
+// The checklist is drawn with its controls on or off. The lock is taken by
+// the first change, so no lock change redraws it when the session gets ready
+// or another employee takes or gives back the checklist: it is redrawn here.
+let renderedEditingAllowed = false;
+let editingRerenderScheduled = false;
+
+function noteRenderedEditingState() {
+    renderedEditingAllowed = !isReadOnlyWindow() && isEditingAllowed();
+}
+
+function scheduleEditingRerender() {
+    if (editingRerenderScheduled || isReadOnlyWindow()) {
+        return;
+    }
+    editingRerenderScheduled = true;
+    setTimeout(function () {
+        editingRerenderScheduled = false;
+        if (
+            popupClosedByHost
+            || typeof renderAll !== 'function'
+            || isEditingAllowed() === renderedEditingAllowed
+        ) {
+            return;
+        }
+        try {
+            renderAll();
+        } catch (error) {
+            console.log('editing state rerender error:', error);
+        }
+    }, 0);
+}
+
 function updateLockNotice() {
     const sessionState = getEditSessionRuntimeState();
 
@@ -686,6 +720,7 @@ function updateLockNotice() {
 
     setActionButtonState();
     updateSaveStateBySession();
+    scheduleEditingRerender();
 }
 
 window.addEventListener(
@@ -712,14 +747,6 @@ window.addEventListener(
             debugLog('popup_unload_finalize_rearmed', {
                 sessionId: activeSessionId,
                 finalizedSessionId: unloadFinalizedSessionId
-            });
-        }
-        if (
-            String(detail.status || '').trim() === 'active'
-            && activeSessionId
-        ) {
-            registerPopupCloseHandoff({
-                source: 'edit_session_state'
             });
         }
     }
@@ -1029,7 +1056,9 @@ async function acquireChecklistLock(checklistKey = currentChecklistKey, silent =
             ? currentChecklistLock.lockId
             : '',
         sessionId: getActiveEditSessionId(),
-        clientSessionId
+        clientSessionId,
+        // The server says whether another window saved it after this.
+        since: checklistReadMarker[targetKey] || ''
     };
 
     try {
@@ -1170,7 +1199,7 @@ function syncCurrentLockFromSessionHeartbeat(result) {
 }
 
 async function recoverPopupSessionAndCurrentLock() {
-    if (popupFinalizationInProgress) {
+    if (popupFinalizationInProgress || popupClosedByHost) {
         return null;
     }
 
@@ -1230,16 +1259,222 @@ async function recoverPopupSessionAndCurrentLock() {
     return sessionRecoveryPromise;
 }
 
-function startLockHeartbeat() {
-    stopLockHeartbeat();
-    if (isReadOnlyWindow()) {
+// Read the current checklist again for a window that does not hold its
+// lock: another employee saved or cancelled changes meanwhile.
+async function refreshCurrentChecklistView(reason) {
+    const targetKey = currentChecklistKey;
+    if (
+        !targetKey
+        || targetKey === 'ga'
+        || ownsCurrentChecklistLock()
+        || sessionDirty
+        || popupFinalizationInProgress
+        || popupFinalizeRequestInProgress
+        || popupClosedByHost
+    ) {
+        return false;
+    }
+    const response = await fetch(
+        appUrl('api/checklist')
+        + '?dialogId=' + encodeURIComponent(dialogId)
+        + '&checklistKey=' + encodeURIComponent(targetKey),
+        { cache: 'no-store' }
+    );
+    const result = await response.json();
+    if (!response.ok) {
+        throw new Error(result.error || 'reload checklist failed');
+    }
+    if (
+        targetKey !== currentChecklistKey
+        || ownsCurrentChecklistLock()
+        || sessionDirty
+    ) {
+        return false;
+    }
+    applyChecklistData(result);
+    rememberChecklistReadMarker(
+        targetKey,
+        response.headers.get('X-Checklist-Read-Marker')
+    );
+    syncChecklistCache();
+    renderAll();
+    pendingViewRefresh[targetKey] = false;
+    debugLog('checklist_view_refreshed', {
+        dialogId,
+        checklistKey: targetKey,
+        reason: String(reason || ''),
+        readMarker: checklistReadMarker[targetKey] || ''
+    });
+    return true;
+}
+
+// The user edits something in an input, a menu or a window: the view is
+// read again on the next check.
+function popupViewIsBusy() {
+    const active = document.activeElement;
+    if (
+        active
+        && active !== document.body
+        && /^(INPUT|TEXTAREA|SELECT)$/.test(String(active.tagName || ''))
+    ) {
+        return true;
+    }
+    if (popupHasPendingUploads()) {
+        return true;
+    }
+    return !!document.querySelector(
+        '.item-status-menu, .checklist-link-menu, .project-object-menu,'
+        + ' .ga-status-menu, .ga-modal-backdrop, .notification-draft-backdrop,'
+        + ' .oa-popover, .public-share-overlay'
+    );
+}
+
+// Who holds the lock of the current checklist, without taking it.
+async function refreshCurrentChecklistLockStatus(reason = 'heartbeat') {
+    if (
+        isReadOnlyWindow()
+        || popupClosedByHost
+        || popupFinalizationInProgress
+        || lockStatusInFlight
+    ) {
+        return null;
+    }
+    const targetKey = String(currentChecklistKey || '').trim();
+    if (!targetKey || targetKey === 'ga') {
+        return null;
+    }
+    lockStatusInFlight = true;
+    try {
+        const response = await fetch(
+            appUrl('api/checklist/lock/status')
+            + '?dialogId=' + encodeURIComponent(dialogId)
+            + '&checklistKey=' + encodeURIComponent(targetKey)
+            + '&sessionId=' + encodeURIComponent(getActiveEditSessionId())
+            + '&since=' + encodeURIComponent(checklistReadMarker[targetKey] || ''),
+            { cache: 'no-store' }
+        );
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok || !result || result.ok === false) {
+            return null;
+        }
+        if (targetKey !== currentChecklistKey) {
+            return null;
+        }
+
+        const prevOwned = ownsCurrentChecklistLock();
+        const prevBlocked = isChecklistLockedByOther();
+        const prevOwner = String(currentChecklistLock.userName || '');
+        const owned = !!result.owned;
+        currentChecklistLock = {
+            owned,
+            lockedByOther: !!result.lockedByOther,
+            lockId: owned ? String(result.lockId || '') : '',
+            userId: String(result.userId || ''),
+            userName: String(result.userName || ''),
+            checklistKey: targetKey
+        };
+        const readMarker = String(result.readMarker || '');
+        if (owned || !checklistReadMarker[targetKey]) {
+            // Nobody else saves it while this window holds it.
+            rememberChecklistReadMarker(targetKey, readMarker);
+        } else if (result.changedSince) {
+            pendingViewRefresh[targetKey] = true;
+        }
+        if (prevBlocked && !currentChecklistLock.lockedByOther && !owned) {
+            // The other employee saved or cancelled: show it as it is now.
+            pendingViewRefresh[targetKey] = true;
+        }
+
+        const changed = (
+            prevOwned !== ownsCurrentChecklistLock()
+            || prevBlocked !== isChecklistLockedByOther()
+            || prevOwner !== String(currentChecklistLock.userName || '')
+        );
+        if (changed) {
+            debugLog('checklist_lock_status_changed', {
+                dialogId,
+                checklistKey: targetKey,
+                reason: String(reason || ''),
+                owned,
+                lockedByOther: !!result.lockedByOther,
+                userName: String(result.userName || '')
+            });
+            // The notice follows the lock at once, before the data is read.
+            updateLockNotice();
+        }
+
+        let refreshed = false;
+        if (
+            pendingViewRefresh[targetKey]
+            && !owned
+            && !currentChecklistLock.lockedByOther
+            && !popupViewIsBusy()
+        ) {
+            try {
+                refreshed = await refreshCurrentChecklistView(
+                    prevBlocked ? 'lock_released' : 'saved_by_other'
+                );
+            } catch (refreshError) {
+                console.log('checklist view refresh error:', refreshError);
+            }
+        }
+
+        if (changed && !refreshed) {
+            renderAll();
+        }
+        return result;
+    } catch (error) {
+        console.log('lock status error:', error);
+        return null;
+    } finally {
+        lockStatusInFlight = false;
+    }
+}
+
+// The first change took the lock: if another employee saved the checklist
+// after this window read it, the window reads it again and the action is
+// repeated on the current data (the lock is given back meanwhile).
+async function ensureCurrentChecklistIsFresh(lockResult, actionName) {
+    const targetKey = String(currentChecklistKey || '').trim();
+    const readMarker = String(lockResult && lockResult.readMarker || '');
+    if (!(lockResult && lockResult.changedSince) || targetKey === 'ga') {
+        rememberChecklistReadMarker(targetKey, readMarker);
         return;
     }
+    debugLog('checklist_changed_before_first_change', {
+        dialogId,
+        checklistKey: targetKey,
+        actionName: String(actionName || ''),
+        readMarker: checklistReadMarker[targetKey] || ''
+    });
+    try {
+        await releaseChecklistLock(targetKey, false);
+    } catch (releaseError) {
+        console.log('lock release after stale view error:', releaseError);
+    }
+    try {
+        await refreshCurrentChecklistView('changed_before_first_change');
+    } catch (refreshError) {
+        console.log('checklist reload after stale view error:', refreshError);
+    }
+    throw new Error(
+        'Пока чек-лист был открыт, его сохранил другой сотрудник. '
+        + 'Данные обновлены — повторите действие.'
+    );
+}
+
+function startLockHeartbeat() {
+    stopLockHeartbeat();
+    if (isReadOnlyWindow() || popupClosedByHost) {
+        return;
+    }
+    refreshCurrentChecklistLockStatus('start');
     lockHeartbeatTimer = setInterval(async function () {
         if (
             !currentEditorReady
             || popupFinalizationInProgress
             || lockHeartbeatInFlight
+            || popupClosedByHost
         ) {
             return;
         }
@@ -1284,6 +1519,9 @@ function startLockHeartbeat() {
                     true
                 );
             }
+            // Who edits the checklist now (the window holds no lock until
+            // its first change).
+            await refreshCurrentChecklistLockStatus('heartbeat');
         } finally {
             lockHeartbeatInFlight = false;
         }
@@ -1509,7 +1747,13 @@ async function waitForPopupUploadsBeforeFinalize(
     }
 
     if (!saveChanges) {
-        if (typeof manager.cancelAll === 'function') {
+        // «Отмена» stops the uploads at once; the server rolls back with the
+        // session also a file it has already received.
+        if (typeof manager.abortAll === 'function') {
+            manager.abortAll(
+                'Отменено пользователем'
+            );
+        } else if (typeof manager.cancelAll === 'function') {
             manager.cancelAll(
                 'Отменено пользователем'
             );
@@ -1522,7 +1766,7 @@ async function waitForPopupUploadsBeforeFinalize(
         }
         setSaveState(
             'saving',
-            'Завершаем активные загрузки перед отменой...'
+            'Отменяем изменения...'
         );
     } else {
         setSaveState(
@@ -1756,10 +2000,6 @@ async function finalizePopupSession(saveChanges, options = {}) {
     };
     updateLockNotice();
 
-    // The launcher callback is reserved for the Bitrix host cross. A close
-    // initiated after a successful Save/Cancel must not finalize a second time.
-    clearPopupCloseHandoff();
-
     // Switching or adding a project stage continues in this window.
     if (typeof finalizeOptions.afterFinalize === 'function') {
         await finalizeOptions.afterFinalize(persistResult);
@@ -1906,17 +2146,51 @@ async function savePopupSessionAndContinue() {
 
 window.savePopupSessionAndContinue = savePopupSessionAndContinue;
 
-function sendCloseSummaryOnce(eventName) {
-    registerPopupCloseHandoff({
-        source: String(eventName || 'popup_lifecycle')
-    });
+// The window closes: its uploads stop at once. A file the server has fully
+// received is still written there and saved with the session; the others
+// have to be uploaded again.
+function abortPopupUploadsForClose(eventName) {
+    const manager = window.popupUploadManager;
+    const staging = window.ChecklistUploadStaging;
+    let result = { aborted: 0, cancelled: 0 };
+    try {
+        if (manager && typeof manager.abortAll === 'function') {
+            result = manager.abortAll('Окно закрыто') || result;
+        }
+    } catch (error) {
+        console.log('close upload abort error:', error);
+    }
+    try {
+        if (
+            staging
+            && typeof staging.hasPendingFiles === 'function'
+            && staging.hasPendingFiles()
+            && typeof staging.clearAll === 'function'
+        ) {
+            staging.clearAll();
+        }
+    } catch (error) {
+        console.log('close staging clear error:', error);
+    }
+    if (result.aborted || result.cancelled) {
+        debugLog('popup_close_uploads_aborted', {
+            eventName,
+            sessionId: getActiveEditSessionId(),
+            aborted: Number(result.aborted || 0),
+            cancelledQueued: Number(result.cancelled || 0)
+        });
+    }
+    return result;
+}
 
-    // A tab/iframe can become hidden without being closed. The reliable Bitrix
-    // host-cross signal is handled by the launcher close callback; pagehide and
-    // beforeunload stay as compact-beacon fallbacks.
+function sendCloseSummaryOnce(eventName) {
+    // A switch to another tab of the browser only hides the window: it is
+    // not closed (the host close of a slider is popup_frame_hidden).
     if (eventName === 'popup_hidden' || suppressAutoCloseSave || closeSummarySent) {
         return;
     }
+
+    abortPopupUploadsForClose(eventName);
 
     if (getActiveEditSessionId()) {
         const finalizingSessionId = getActiveEditSessionId();

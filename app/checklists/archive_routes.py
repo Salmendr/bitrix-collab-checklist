@@ -480,11 +480,16 @@ def archive_edit_session_error_response(
     else:
         status_code = 500
 
+    from app.checklists.edit_sessions import ChecklistLockedByOtherError
+
+    locked_by_other = isinstance(exc, ChecklistLockedByOtherError)
     return JSONResponse(
         {
             "ok": False,
             "error": str(exc).strip("'"),
-            "editSessionError": True,
+            # Another employee holds the lock: shown, not retried.
+            "editSessionError": not locked_by_other,
+            "lockedByOther": locked_by_other,
         },
         status_code=status_code,
     )

@@ -203,6 +203,243 @@ def list_edit_session_locks(
     ]
 
 
+_TERMINAL_SESSION_STATUSES = ("committed", "rolled_back")
+_OPEN_PUBLIC_OPERATION_STATUSES = ("receiving", "queued", "processing")
+
+
+def _rowid_list(rows) -> str:
+    return ",".join(str(int(row[0])) for row in rows)
+
+
+def _parse_rowids(value: str) -> list[int]:
+    result = []
+    for part in str(value or "").split(","):
+        part = part.strip()
+        if part.isdigit():
+            result.append(int(part))
+    return result[:500]
+
+
+def checklist_read_marker(
+    dialog_id: str,
+    checklist_key: str,
+    conn=None,
+) -> str:
+    """What a window has seen when it reads a checklist (taken before the
+    data): the sessions already in the base and those still open, the same
+    for files added by a public folder. A session that ends after it (saved
+    or cancelled) is what the window has not seen. No times: two events in
+    one second are told apart."""
+    normalized_dialog_id = normalize_dialog_id(dialog_id)
+    normalized_checklist_key = normalize_checklist_key(checklist_key)
+    own_conn = conn is None
+    if own_conn:
+        ensure_edit_session_tables()
+        conn = get_conn()
+    try:
+        max_session = int(conn.execute(
+            "SELECT COALESCE(MAX(rowid), 0) FROM edit_sessions"
+        ).fetchone()[0] or 0)
+        open_sessions = conn.execute(
+            "SELECT rowid FROM edit_sessions WHERE dialog_id = ? AND status NOT IN (?, ?) LIMIT 500",
+            (normalized_dialog_id, *_TERMINAL_SESSION_STATUSES),
+        ).fetchall()
+        try:
+            max_public = int(conn.execute(
+                "SELECT COALESCE(MAX(rowid), 0) FROM public_folder_operations"
+            ).fetchone()[0] or 0)
+            open_public = conn.execute(
+                "SELECT rowid FROM public_folder_operations WHERE dialog_id = ? AND checklist_key = ?"
+                " AND status IN (?, ?, ?) LIMIT 500",
+                (normalized_dialog_id, normalized_checklist_key, *_OPEN_PUBLIC_OPERATION_STATUSES),
+            ).fetchall()
+        except sqlite3.OperationalError:
+            max_public, open_public = 0, []
+    finally:
+        if own_conn:
+            conn.close()
+    return "v1:{}:{}:{}:{}".format(
+        max_session,
+        _rowid_list(open_sessions),
+        max_public,
+        _rowid_list(open_public),
+    )
+
+
+def checklist_changed_since(
+    dialog_id: str,
+    checklist_key: str,
+    marker: str,
+    own_session_id: str = "",
+    conn=None,
+) -> bool:
+    """Whether another window saved or cancelled changes of the checklist, or
+    a public folder added a file, after the window read it (`marker`). The
+    sessions of the window itself (its saves, a save at a restart) do not
+    count. Background state (Yandex) does not count either."""
+    parts = str(marker or "").split(":")
+    if len(parts) != 5 or parts[0] != "v1" or not parts[1].isdigit() or not parts[3].isdigit():
+        return False
+    max_session = int(parts[1])
+    open_sessions = _parse_rowids(parts[2])
+    max_public = int(parts[3])
+    open_public = _parse_rowids(parts[4])
+    normalized_dialog_id = normalize_dialog_id(dialog_id)
+    normalized_checklist_key = normalize_checklist_key(checklist_key)
+    own_conn = conn is None
+    if own_conn:
+        ensure_edit_session_tables()
+        conn = get_conn()
+    try:
+        own_client = ""
+        normalized_own_session = clean_cell_value(own_session_id)
+        if normalized_own_session:
+            own = conn.execute(
+                "SELECT client_session_id FROM edit_sessions WHERE session_id = ?",
+                (normalized_own_session,),
+            ).fetchone()
+            own_client = clean_cell_value(own["client_session_id"] if own else "")
+        open_clause = (
+            " OR s.rowid IN (" + ",".join("?" for _ in open_sessions) + ")"
+            if open_sessions else ""
+        )
+        row = conn.execute(
+            """
+            SELECT 1
+            FROM edit_sessions AS s
+            WHERE s.dialog_id = ?
+              AND s.status IN (?, ?)
+              AND (s.rowid > ?""" + open_clause + """)
+              AND s.session_id <> ?
+              AND (? = '' OR COALESCE(s.client_session_id, '') <> ?)
+              AND EXISTS (
+                  SELECT 1
+                  FROM edit_session_operations AS o
+                  WHERE o.session_id = s.session_id
+                    AND o.checklist_key = ?
+              )
+            LIMIT 1
+            """,
+            (
+                normalized_dialog_id,
+                *_TERMINAL_SESSION_STATUSES,
+                max_session,
+                *open_sessions,
+                normalized_own_session,
+                own_client,
+                own_client,
+                normalized_checklist_key,
+            ),
+        ).fetchone()
+        if row:
+            return True
+        public_clause = (
+            " OR rowid IN (" + ",".join("?" for _ in open_public) + ")"
+            if open_public else ""
+        )
+        try:
+            public_row = conn.execute(
+                "SELECT 1 FROM public_folder_operations WHERE dialog_id = ? AND checklist_key = ?"
+                " AND status = 'completed' AND (rowid > ?" + public_clause + ") LIMIT 1",
+                (normalized_dialog_id, normalized_checklist_key, max_public, *open_public),
+            ).fetchone()
+        except sqlite3.OperationalError:
+            public_row = None
+        return bool(public_row)
+    finally:
+        if own_conn:
+            conn.close()
+
+
+def describe_checklist_lock(
+    session_id: str,
+    dialog_id: str,
+    checklist_key: str,
+    since: str = "",
+) -> dict:
+    """Who holds the lock of a checklist, without taking it: a window that
+    only views a checklist holds no lock, the first change takes it."""
+    ensure_edit_session_lock_schema()
+
+    normalized_session_id = clean_cell_value(session_id)
+    normalized_dialog_id = normalize_dialog_id(dialog_id)
+    normalized_checklist_key = normalize_checklist_key(checklist_key)
+
+    if not normalized_dialog_id:
+        raise ValueError("dialogId is required")
+
+    conn = get_conn()
+    try:
+        existing = conn.execute("""
+            SELECT
+                c.*,
+                s.user_id AS owner_user_id,
+                s.user_name AS owner_user_name,
+                s.status AS owner_session_status
+            FROM edit_session_checklists AS c
+            JOIN edit_sessions AS s
+              ON s.session_id = c.session_id
+            WHERE c.dialog_id = ?
+              AND c.checklist_key = ?
+              AND c.status = 'locked'
+              AND COALESCE(c.lock_id, '') <> ''
+              AND s.status IN (
+                  'active',
+                  'committing',
+                  'rolling_back',
+                  'error'
+              )
+            ORDER BY c.updated_at DESC
+            LIMIT 1
+        """, (
+            normalized_dialog_id,
+            normalized_checklist_key,
+        )).fetchone()
+        read_marker = checklist_read_marker(
+            normalized_dialog_id,
+            normalized_checklist_key,
+            conn=conn,
+        )
+        changed_since = checklist_changed_since(
+            normalized_dialog_id,
+            normalized_checklist_key,
+            since,
+            own_session_id=normalized_session_id,
+            conn=conn,
+        )
+    finally:
+        conn.close()
+
+    owner = _public_lock_payload(existing)
+    owned = bool(
+        existing
+        and normalized_session_id
+        and existing["session_id"] == normalized_session_id
+    )
+    locked_by_other = bool(existing) and not owned
+
+    return {
+        "ok": True,
+        "owned": owned,
+        "lockedByOther": locked_by_other,
+        "lockId": owner.get("lockId") if owned else "",
+        "sessionId": normalized_session_id,
+        "dialogId": normalized_dialog_id,
+        "checklistKey": normalized_checklist_key,
+        "userId": owner.get("userId") or "",
+        "userName": (
+            (owner.get("userName") or "Другой сотрудник")
+            if existing
+            else ""
+        ),
+        "updatedAt": owner.get("updatedAt") or "",
+        # What the base is at now: the window keeps it while it holds the
+        # lock (nobody else saves the checklist then).
+        "readMarker": read_marker,
+        "changedSince": changed_since,
+    }
+
+
 def acquire_edit_session_lock(
     session_id: str,
     dialog_id: str,

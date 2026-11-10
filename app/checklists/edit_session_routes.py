@@ -37,6 +37,8 @@ from app.checklists.utils import (
 )
 
 
+from app.checklists.session_writes import wait_for_session_writes
+
 router = APIRouter()
 
 
@@ -202,15 +204,19 @@ async def api_checklist_edit_session_heartbeat(
             dialog_id=dialog_id,
             user_id=user_id,
         )
+        # The server saved the session after ten minutes without actions or
+        # five minutes without a heartbeat: the window closes and is not
+        # opened again.
+        close_reason = clean_cell_value(existing_session.get("close_reason"))
         if (
             clean_cell_value(existing_session.get("status")) == "committed"
-            and clean_cell_value(existing_session.get("close_reason"))
-                == "inactivity_timeout"
+            and close_reason in {"inactivity_timeout", "heartbeat_timeout"}
         ):
             return JSONResponse({
                 "ok": True,
                 "session": public_edit_session_with_locks(existing_session),
                 "inactivityFinalized": True,
+                "closeReason": close_reason,
             })
 
         session = heartbeat_edit_session(
@@ -439,6 +445,9 @@ async def api_checklist_edit_session_commit(
         payload.get("reason")
     ) or "save_and_close"
 
+    # Files that have fully arrived are written first and saved with it.
+    await wait_for_session_writes(session_id, reason)
+
     try:
         session = commit_edit_session(
             session_id=session_id,
@@ -496,6 +505,11 @@ async def api_checklist_edit_session_rollback(
         payload.get("reason")
     )
     confirmed = payload.get("confirmed") is True
+
+    if reason == "cancel_button" and confirmed:
+        # A file the server is still writing is rolled back with the session
+        # instead of joining it after the rollback.
+        await wait_for_session_writes(session_id, reason)
 
     try:
         if reason != "cancel_button" or not confirmed:

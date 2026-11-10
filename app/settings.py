@@ -44,9 +44,19 @@ EDIT_SESSION_SWEEP_SECONDS = 15
 
 # Stage 8.15.4: absolute inactivity is equivalent to Save and Close.
 # The warning is shown one minute before the automatic durable commit.
+# Ten minutes without any action of the user (an upload in progress counts
+# as an action).
 EDIT_SESSION_INACTIVITY_SECONDS = max(60, int(os.getenv(
     "EDIT_SESSION_INACTIVITY_SECONDS",
-    "1500",
+    "600",
+)))
+
+# A session whose window sent no heartbeat for five minutes (the browser was
+# closed or crashed, the network is gone) is saved and released like Save and
+# Close, with its chat message. The window does not open it again.
+EDIT_SESSION_HEARTBEAT_TIMEOUT_SECONDS = max(60, int(os.getenv(
+    "EDIT_SESSION_HEARTBEAT_TIMEOUT_SECONDS",
+    "300",
 )))
 EDIT_SESSION_INACTIVITY_WARNING_SECONDS = max(10, min(
     EDIT_SESSION_INACTIVITY_SECONDS - 1,

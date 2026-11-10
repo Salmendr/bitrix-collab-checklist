@@ -269,6 +269,103 @@
         return folderBootstrapSessionId;
     }
 
+    // The lock of the checklist is taken by its first change: this window
+    // asks who holds it to show it, and takes it before an upload.
+    let folderLockedByName = '';
+    let folderLockTimer = null;
+
+    function folderLockApiUrl(path) {
+        return folderUploadApiUrl.replace(
+            /\/api\/checklist\/upload-document$/,
+            '/api/checklist/lock/' + path
+        );
+    }
+
+    function folderLockedMessage() {
+        return 'С этим чек-листом сейчас работает ' + folderLockedByName;
+    }
+
+    function showFolderLockNotice() {
+        let notice = global.document.getElementById('folderLockNotice');
+        if (!folderLockedByName) {
+            if (notice) notice.remove();
+            return;
+        }
+        if (!notice) {
+            notice = global.document.createElement('div');
+            notice.id = 'folderLockNotice';
+            notice.className = 'folder-read-only-notice';
+            notice.setAttribute('role', 'status');
+            const anchor = global.document.querySelector('.folder-shell') || global.document.body;
+            anchor.insertBefore(notice, anchor.firstChild);
+        }
+        notice.textContent = (
+            folderLockedMessage()
+            + '. Изменения в этой папке станут доступны, когда он завершит работу.'
+        );
+    }
+
+    async function refreshFolderLockStatus() {
+        if (folderReadOnly || !folderUploadApiUrl) {
+            return null;
+        }
+        try {
+            const url = new URL(folderLockApiUrl('status'), global.location.href);
+            url.searchParams.set('dialogId', folderDialogId);
+            url.searchParams.set('checklistKey', folderChecklistKey);
+            url.searchParams.set('sessionId', getFolderEditSessionId());
+            const response = await global.fetch(url.href, { cache: 'no-store' });
+            const result = await response.json().catch(() => ({}));
+            if (!response.ok || !result || result.ok === false) {
+                return null;
+            }
+            const lockedBy = result.lockedByOther
+                ? String(result.userName || 'другой сотрудник')
+                : '';
+            if (lockedBy !== folderLockedByName) {
+                folderLockedByName = lockedBy;
+                showFolderLockNotice();
+                applyFolderEditSessionState();
+            }
+            return result;
+        } catch (error) {
+            return null;
+        }
+    }
+
+    // Before a file is sent: the lock is taken now, or the file is not sent.
+    async function ensureFolderChecklistLock() {
+        const sessionId = requireFolderEditSession('загрузка файлов');
+        const actor = getFolderDeleteActor();
+        const response = await global.fetch(folderLockApiUrl('acquire'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                dialogId: folderDialogId,
+                checklistKey: folderChecklistKey,
+                sessionId,
+                userId: actor.id,
+                userName: actor.name
+            })
+        });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok || !result || result.ok === false) {
+            throw new Error(result && result.error || 'Не удалось получить доступ к чек-листу');
+        }
+        if (!result.owned) {
+            folderLockedByName = String(result.userName || 'другой сотрудник');
+            showFolderLockNotice();
+            applyFolderEditSessionState();
+            throw new Error(folderLockedMessage());
+        }
+        if (folderLockedByName) {
+            folderLockedByName = '';
+            showFolderLockNotice();
+            applyFolderEditSessionState();
+        }
+        return sessionId;
+    }
+
     function requireFolderEditSession(
         actionName = 'изменение'
     ) {
@@ -276,6 +373,10 @@
 
         if (!sessionId && folderReadOnly) {
             throw new Error(READ_ONLY_MESSAGE);
+        }
+
+        if (sessionId && folderLockedByName) {
+            throw new Error(folderLockedMessage());
         }
 
         if (!sessionId) {
@@ -291,7 +392,7 @@
     }
 
     function applyFolderEditSessionState() {
-        const sessionReady = !!getFolderEditSessionId();
+        const sessionReady = !!getFolderEditSessionId() && !folderLockedByName;
         const selector = [
             '#folderUploadBtn',
             '#folderUploadInput',
@@ -332,8 +433,12 @@
                 element.title = folderReadOnly
                     ? 'Только просмотр'
                     : (
-                        'Недоступно без активной '
-                        + 'сессии редактирования'
+                        folderLockedByName
+                            ? folderLockedMessage()
+                            : (
+                                'Недоступно без активной '
+                                + 'сессии редактирования'
+                            )
                     );
                 return;
             }
@@ -612,6 +717,8 @@
         getActor: getFolderDeleteActor,
         getSessionId: getFolderEditSessionId,
         requireSession: requireFolderEditSession,
+        ensureLock: ensureFolderChecklistLock,
+        refreshLockStatus: refreshFolderLockStatus,
         applySessionState: applyFolderEditSessionState,
         notifyParent: notifyParentChecklistDocumentChanged,
         requestRefresh: requestFolderRefresh,
@@ -636,8 +743,15 @@
         getFolderDeleteActor,
         getFolderEditSessionId,
         requireFolderEditSession,
+        ensureFolderChecklistLock,
         notifyParentChecklistDocumentChanged
     });
+
+    function startFolderLockStatus() {
+        if (folderReadOnly || folderLockTimer) return;
+        refreshFolderLockStatus();
+        folderLockTimer = global.setInterval(refreshFolderLockStatus, 15000);
+    }
 
     if (global.document.readyState === 'loading') {
         global.document.addEventListener(
@@ -645,11 +759,13 @@
             function () {
                 showReadOnlyNotice();
                 applyFolderEditSessionState();
+                startFolderLockStatus();
             },
             { once: true }
         );
     } else {
         showReadOnlyNotice();
         applyFolderEditSessionState();
+        startFolderLockStatus();
     }
 })(window);

@@ -577,9 +577,12 @@ async function uploadPopupStagedFiles(
         const failedUploads = settled.filter(
             entry => entry.status === 'rejected'
         );
+        // A file stopped after three identical breaks is dropped from the
+        // upload area («Ошибка загрузки»); others stay there to retry.
         const failedFiles = settled
             .map((entry, index) => (
                 entry.status === 'rejected'
+                && !(entry.reason && entry.reason.repeatedBreak)
                     ? uploadPlans[index].file
                     : null
             ))

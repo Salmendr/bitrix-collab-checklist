@@ -9,6 +9,11 @@
     let heartbeatPromise = null;
     let activityHeartbeatTimer = null;
     let lastActivityHeartbeatAt = 0;
+    // The session the window lost the connection to (a failed heartbeat or
+    // upload): before it starts a new one it asks whether the server saved
+    // that session for inactivity or a lost heartbeat; then the window closes
+    // instead of opening again.
+    let lostSessionId = '';
 
     function emitSessionState() {
         try {
@@ -33,16 +38,6 @@
         activeSessionStatus = String(status || '').trim() || 'idle';
         lastSessionError = String(errorText || '').trim();
         emitSessionState();
-
-        const handoff = global.ChecklistPopupCloseHandoff;
-        if (
-            activeSessionStatus === 'active'
-            && activeSessionId
-            && handoff
-            && typeof handoff.register === 'function'
-        ) {
-            handoff.register({ source: 'popup_edit_session' });
-        }
     }
 
     function actor() {
@@ -76,6 +71,57 @@
         return result;
     }
 
+    // The server saved the lost session after ten minutes without actions or
+    // five minutes without a heartbeat: the window is closed, not reopened.
+    // An unanswered check (still no network) starts nothing either.
+    async function checkLostSession(identity) {
+        const sessionId = lostSessionId;
+        const url = new URL(appUrl('api/checklist/session/status'));
+        url.searchParams.set('sessionId', sessionId);
+        url.searchParams.set('dialogId', dialogId);
+        url.searchParams.set('userId', String(identity && identity.userId || ''));
+        const response = await fetch(url.href, { cache: 'no-store' });
+        const result = await response.json().catch(() => ({}));
+        if (response.status === 404) {
+            lostSessionId = '';
+            return;
+        }
+        if (!response.ok || !result.ok) {
+            throw new Error(result.error || ('HTTP ' + response.status));
+        }
+        const session = result.session || {};
+        const status = String(session.status || '').trim();
+        const closeReason = String(session.closeReason || '').trim();
+        if (
+            status === 'committed'
+            && (
+                closeReason === 'inactivity_timeout'
+                || closeReason === 'heartbeat_timeout'
+            )
+        ) {
+            debugLog('popup_edit_session_closed_by_server', {
+                sessionId,
+                closeReason
+            });
+            activeSessionId = sessionId;
+            setSessionStatus('committed');
+            global.dispatchEvent(new CustomEvent(
+                'checklist-edit-session-inactivity-finalized',
+                {
+                    detail: {
+                        session,
+                        inactivityFinalized: true,
+                        closeReason
+                    }
+                }
+            ));
+            const closedError = new Error('Сессия завершена сервером');
+            closedError.sessionClosedByServer = true;
+            throw closedError;
+        }
+        lostSessionId = '';
+    }
+
     async function start() {
         if (activeSessionId && activeSessionStatus === 'active') {
             return activeSessionId;
@@ -93,6 +139,10 @@
             }
 
             const identity = actor();
+
+            if (lostSessionId) {
+                await checkLostSession(identity);
+            }
 
             debugLog('popup_edit_session_start_requested', {
                 dialogId,
@@ -144,6 +194,10 @@
             const errorText = String(
                 error && error.message || error || ''
             );
+            if (error && error.sessionClosedByServer) {
+                // The window closes; its session stays saved.
+                throw error;
+            }
             activeSessionId = '';
             setSessionStatus('failed', errorText);
             debugLog('popup_edit_session_start_failed', {
@@ -215,6 +269,7 @@
                 const errorText = String(
                     error && error.message || error || ''
                 );
+                lostSessionId = activeSessionId || lostSessionId;
                 activeSessionId = '';
                 setSessionStatus('failed', errorText);
                 if (!silent) {
@@ -301,9 +356,6 @@
             }
 
             setSessionStatus('committed');
-            if (global.ChecklistPopupCloseHandoff) {
-                global.ChecklistPopupCloseHandoff.clear();
-            }
             debugLog('popup_edit_session_finalized', {
                 sessionId: activeSessionId,
                 reason: requestPayload.reason,
@@ -393,9 +445,6 @@
                 ).trim()
             );
 
-            if (global.ChecklistPopupCloseHandoff) {
-                global.ChecklistPopupCloseHandoff.clear();
-            }
             debugLog('popup_edit_session_rolled_back', {
                 sessionId: activeSessionId,
                 status: activeSessionStatus,
@@ -481,6 +530,7 @@
     }
 
     function invalidate(errorText = '') {
+        lostSessionId = activeSessionId || lostSessionId;
         activeSessionId = '';
         setSessionStatus(
             'failed',

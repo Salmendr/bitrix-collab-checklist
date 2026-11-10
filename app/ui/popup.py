@@ -59,6 +59,14 @@ def _grad_analysis_page_data(dialog_id: str) -> dict:
 def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
     dialog_id = normalize_dialog_id(dialogId)
     checklist_key = normalize_checklist_key(checklistKey)
+    # Taken before the data: the window holds no lock until its first change
+    # and asks then whether another window saved the checklist after this.
+    try:
+        from app.checklists.edit_session_locks import checklist_read_marker
+
+        checklist_read_marker_value = checklist_read_marker(dialog_id, checklist_key)
+    except Exception:
+        checklist_read_marker_value = ""
     if checklist_key == "ga":
         data = _grad_analysis_page_data(dialog_id)
     else:
@@ -276,6 +284,7 @@ def popup_html(dialogId: str = "", checklistKey: str = "id") -> str:
             "POPUP_FILE_DELETE_ALLOWED_USER_IDS_JSON": file_delete_allowed_user_ids_json,
             "POPUP_INACTIVITY_SECONDS_JSON": inactivity_seconds_json,
             "POPUP_INACTIVITY_WARNING_SECONDS_JSON": inactivity_warning_seconds_json,
+            "POPUP_CHECKLIST_READ_MARKER_JSON": json.dumps(checklist_read_marker_value),
             "POPUP_GA_PROGRESS_JSON": json.dumps(ga_progress),
         },
     )

@@ -1,5 +1,5 @@
 {
-  "stage": "8.32-date-reminders",
+  "stage": "8.38-session-release",
   "generatedAt": "2026-10-29T12:00:00+00:00",
   "loadOrder": [
     "checklist-host-diagnostics.js",
@@ -26,6 +26,7 @@
     "popup-session-enhancements.js",
     "popup-edit-session.js",
     "popup-inactivity.js",
+    "popup-frame-visibility.js",
     "popup-grad-analysis.js",
     "bitrix-user-picker.js",
     "id-reminders.js",
@@ -352,8 +353,8 @@
       "bytes": 10475
     },
     "popup-core.js": {
-      "sha256": "239f70a3b7f71a5d67a4ebd18879b91d12245c4e65018a16fa6eb76c9f51c6a5",
-      "bytes": 111174
+      "sha256": "90969f31e25a4d95d2b8e9e64e0e66de18b37d3661924fc770a801c86a5edeb4",
+      "bytes": 111867
     },
     "popup-document-list.js": {
       "sha256": "090e04eea9d27f2431e71e23fc089a5573bee8f65dccd2779df225a3b22fea73",
@@ -368,8 +369,8 @@
       "bytes": 12564
     },
     "popup-document-actions.js": {
-      "sha256": "c5703d7d6d6ea411e643e565f935342deb0c882722671267c979878d103e8168",
-      "bytes": 36758
+      "sha256": "aa71432bb44666731b79aa8a7ce90c1b5ba8b6f8237705a43a13d4b62dbb9596",
+      "bytes": 36986
     },
     "popup-window-channel.js": {
       "sha256": "5b9abaff9f29705db8745e4737f28bfb449fc23b4ae3ef2cf47050607f2f5723",
@@ -380,24 +381,24 @@
       "bytes": 11655
     },
     "popup-upload-manager.js": {
-      "sha256": "9c6a0c4d5f0146fd7222e952096dde9ce9908f1945c210540b2d0c430bbfdd73",
-      "bytes": 19809
+      "sha256": "29fa0fc89e86e41e06d2c2408eeb89e4e290fdbed35a08a35a2923a535a96cb6",
+      "bytes": 26398
     },
     "popup-document-replacement.js": {
-      "sha256": "1f2dc2868ac36045807e1fb720cf569769693c4335d8083d534b687bfc96ab85",
-      "bytes": 27283
+      "sha256": "86e4055440c9ef670155cc38499f5b1e9dbf15ef5885a74dd203847fae98690c",
+      "bytes": 27651
     },
     "popup-session-enhancements.js": {
-      "sha256": "c8c3f4a3562596ca8dc4e226598bba448ba9dbd992b4e7501db20703570b8039",
-      "bytes": 61084
+      "sha256": "30e2881bcbca93bb70cef6039f9301463fe5cec348d57e5d3ece895aa8f5121e",
+      "bytes": 71266
     },
     "popup-edit-session.js": {
-      "sha256": "abf5c8fe59a3e862d01f65ec396d111dfe3bb04d9011a9ebcbf6cfd06314354c",
-      "bytes": 16165
+      "sha256": "3e24514956cf54a19ffcd69d77b5e74de465508fe8f88d8719e4e7467bd0ff04",
+      "bytes": 18364
     },
     "popup-inactivity.js": {
-      "sha256": "0a1428d3e4157d07c7295aee1701cac53f88b5cb859828ffa7f77e7ce9305230",
-      "bytes": 6629
+      "sha256": "d2052daf4be5b8785a64d5868b6603d61970875d32ed0af9e36536b5c6ea346b",
+      "bytes": 8253
     },
     "popup-grad-analysis.js": {
       "sha256": "edee37198b984a8740dc1cf8bfceac323032084e29c9dd2f10e5ae09e179d5fb",
@@ -428,16 +429,16 @@
       "bytes": 15568
     },
     "popup-event-shell.js": {
-      "sha256": "b5f080eb74e23ee94208158dd9c984774da45beb9ff79398e55634d640225008",
-      "bytes": 2095
+      "sha256": "ce916c155426aa3308a1c7c4bb7012ef664e17d173344bef3d3e8c509f21dc65",
+      "bytes": 1522
     },
     "popup-event-window-sync.js": {
       "sha256": "13672fde78a1a48b379392ab49f111027faa0781b9970379e01418c9e93107c0",
       "bytes": 10559
     },
     "popup-event-session.js": {
-      "sha256": "95b250505a98e119f68df43ca4d4391fe463ef6b1d0542b42b8183840239f3bc",
-      "bytes": 6658
+      "sha256": "0d0192897bc77ad264e1727274a98bb78e37ac2d4bb15105cbd2080d616b18a6",
+      "bytes": 7409
     },
     "popup-renderer-common.js": {
       "sha256": "23de63d24a18c3d9204c230579af1f1027017a40192436e7f2f218ca16c00d9a",
@@ -488,8 +489,8 @@
       "bytes": 2244
     },
     "popup-render-orchestrator.js": {
-      "sha256": "7f250d1bb53166ec94ded28fd10319882361c3aa1144030c030f56c90f2c0b6b",
-      "bytes": 14028
+      "sha256": "ce03c50147c59bd56d7feaf10bc25ed6bd78514bb38fa4e11ee06d13150d045a",
+      "bytes": 14350
     },
     "popup-init.js": {
       "sha256": "4596fcfe86614d66f79a923ff65a5b0c8e579dabf2fb7c45b4b99646a9f42b47",
@@ -526,6 +527,10 @@
     "checklist-link-menu.js": {
       "sha256": "4d4f9a736e171ae4ad528428cd7e56f4c252b5f133855f6595dfb64d99ec816c",
       "bytes": 6706
+    },
+    "popup-frame-visibility.js": {
+      "sha256": "d097f56424a2feed3ac46b3d78815a4885e4c22fcafe60dbaebef1b29fa81d56",
+      "bytes": 5605
     }
   }
 }

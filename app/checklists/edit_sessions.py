@@ -12,6 +12,7 @@ from app.settings import (
     EDIT_SESSION_TTL_SECONDS,
     EDIT_SESSION_HEARTBEAT_SECONDS,
     EDIT_SESSION_INACTIVITY_SECONDS,
+    EDIT_SESSION_HEARTBEAT_TIMEOUT_SECONDS,
     EDIT_SESSION_SWEEP_SECONDS,
 )
 
@@ -60,6 +61,10 @@ class EditSessionForceReplaceRequiredError(EditSessionConflictError):
 
 class EditSessionPermissionError(EditSessionError):
     pass
+
+
+class ChecklistLockedByOtherError(EditSessionConflictError):
+    """Another employee holds the lock: the change is refused, not retried."""
 
 
 class EditSessionInactivityExpiredError(EditSessionConflictError):
@@ -1594,6 +1599,13 @@ def list_expired_edit_sessions(
             seconds=max(45, int(EDIT_SESSION_HEARTBEAT_SECONDS) * 3)
         )
     ).isoformat(timespec="seconds")
+    # Five minutes without a heartbeat: the window is gone (closed, crashed,
+    # no network). The session is saved and released like Save and Close.
+    lost_heartbeat_before = (
+        now_dt - timedelta(
+            seconds=int(EDIT_SESSION_HEARTBEAT_TIMEOUT_SECONDS)
+        )
+    ).isoformat(timespec="seconds")
     conn = get_conn()
     rows = conn.execute(
         """
@@ -1602,6 +1614,8 @@ def list_expired_edit_sessions(
                    WHEN COALESCE(idle_expires_at, '') <> ''
                     AND idle_expires_at <= ?
                    THEN 'inactivity'
+                   WHEN COALESCE(idle_expires_at, '') <> ''
+                   THEN 'heartbeat_lost'
                    ELSE 'heartbeat'
                END AS expiry_kind
         FROM edit_sessions
@@ -1618,6 +1632,12 @@ def list_expired_edit_sessions(
               )
               OR
               (
+                  COALESCE(idle_expires_at, '') <> ''
+                  AND COALESCE(NULLIF(heartbeat_at, ''), started_at, '') <> ''
+                  AND COALESCE(NULLIF(heartbeat_at, ''), started_at) <= ?
+              )
+              OR
+              (
                   COALESCE(idle_expires_at, '') = ''
                   AND COALESCE(expires_at, '') <> ''
                   AND expires_at <= ?
@@ -1628,6 +1648,8 @@ def list_expired_edit_sessions(
                 WHEN COALESCE(idle_expires_at, '') <> ''
                  AND idle_expires_at <= ?
                 THEN idle_expires_at
+                WHEN COALESCE(idle_expires_at, '') <> ''
+                THEN COALESCE(NULLIF(heartbeat_at, ''), started_at)
                 ELSE expires_at
             END ASC
         LIMIT ?
@@ -1636,6 +1658,7 @@ def list_expired_edit_sessions(
             now,
             now,
             stale_heartbeat_before,
+            lost_heartbeat_before,
             now,
             now,
             safe_limit,
@@ -1713,7 +1736,11 @@ def _record_inactivity_sweep_failure(
         conn.close()
 
 
-def _finalize_inactive_edit_session(record: dict, source: str) -> dict:
+def _finalize_inactive_edit_session(
+    record: dict,
+    source: str,
+    reason: str = "inactivity_timeout",
+) -> dict:
     from app.checklists.session_finalization import (
         finalize_edit_session_payload,
     )
@@ -1729,8 +1756,8 @@ def _finalize_inactive_edit_session(record: dict, source: str) -> dict:
             "name": record.get("user_name") or "",
         },
         "sessions": [],
-        "reason": "inactivity_timeout",
-        "closeEvent": "inactivity_timeout",
+        "reason": reason,
+        "closeEvent": reason,
         "source": clean_cell_value(source),
     }
     return finalize_edit_session_payload(payload)
@@ -1746,11 +1773,35 @@ def sweep_expired_edit_sessions(
     inactivity_finalized = []
     errors = []
 
+    from app.checklists.session_writes import has_session_writes
+
+    skipped_writes = []
     for record in expired_records:
         session_id = record.get("session_id") or ""
+        if has_session_writes(session_id):
+            # The server still writes a received file of this session; the
+            # next sweep saves the session with it.
+            skipped_writes.append(session_id)
+            continue
         try:
-            if record.get("expiry_kind") == "inactivity":
-                result = _finalize_inactive_edit_session(record, source)
+            if record.get("expiry_kind") in {"inactivity", "heartbeat_lost"}:
+                reason = (
+                    "heartbeat_timeout"
+                    if record.get("expiry_kind") == "heartbeat_lost"
+                    else "inactivity_timeout"
+                )
+                if reason == "heartbeat_timeout":
+                    from app.logging_utils import write_debug_log
+                    write_debug_log("edit_session_heartbeat_lost", {
+                        "sessionId": session_id,
+                        "dialogId": record.get("dialog_id") or "",
+                        "userId": record.get("user_id") or "",
+                        "userName": record.get("user_name") or "",
+                        "heartbeatAt": record.get("heartbeat_at") or "",
+                        "timeoutSeconds": int(EDIT_SESSION_HEARTBEAT_TIMEOUT_SECONDS),
+                        "source": clean_cell_value(source),
+                    })
+                result = _finalize_inactive_edit_session(record, source, reason)
                 inactivity_finalized.append(result)
                 latest = get_edit_session(session_id) or {}
                 committed.append(public_edit_session_payload(latest))
@@ -1761,7 +1812,7 @@ def sweep_expired_edit_sessions(
                 )
                 committed.append(public_edit_session_payload(result))
         except Exception as exc:
-            if record.get("expiry_kind") == "inactivity":
+            if record.get("expiry_kind") in {"inactivity", "heartbeat_lost"}:
                 _record_inactivity_sweep_failure(
                     session_id=session_id,
                     source=source,
@@ -1783,6 +1834,7 @@ def sweep_expired_edit_sessions(
         "inactivityFinalized": inactivity_finalized,
         "rolledBack": [],
         "errors": errors,
+        "skippedWhileWriting": skipped_writes,
     }
 
 

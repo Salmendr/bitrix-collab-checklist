@@ -1,6 +1,10 @@
 const POPUP_UPLOAD_MAX_ACTIVE = 10;
 const POPUP_UPLOAD_PROGRESS_EMIT_MS = 140;
 const POPUP_UPLOAD_MAX_ATTEMPTS = 12;
+// Three identical breaks of the connection in a row stop the file: the
+// window shows «Ошибка загрузки», the log has every attempt.
+const POPUP_UPLOAD_SAME_BREAK_LIMIT = 3;
+const POPUP_UPLOAD_FAILED_TEXT = 'Ошибка загрузки';
 
 function createPopupUploadManager(options = {}) {
     const configuredMaxActive = Number(
@@ -244,6 +248,7 @@ function createPopupUploadManager(options = {}) {
     }
 
     function finishTask(task, state, result, error) {
+        task.abortHandler = null;
         task.state = state;
         task.finishedAt = Date.now();
         task.retryAt = 0;
@@ -276,6 +281,78 @@ function createPopupUploadManager(options = {}) {
         )];
     }
 
+    // The kind of a break of the connection: the same kind three times in a
+    // row is not a passing break any more. Waiting for the edit session is
+    // not a break.
+    function breakSignature(error) {
+        if (
+            !error
+            || error.retryable !== true
+            || error.editSessionError === true
+        ) {
+            return '';
+        }
+        const status = Math.round(Number(error.httpStatus || 0)) || 0;
+        const kind = status === 0
+            ? 'network'
+            : (status === 408 ? 'timeout' : 'http');
+        return kind + ':' + status;
+    }
+
+    function recordAttemptFailure(task, error) {
+        const signature = breakSignature(error);
+        const finishedAt = Date.now();
+        const entry = {
+            attempt: task.attempt,
+            signature: signature || 'other',
+            error: String(error && error.message || error || '').slice(0, 300),
+            httpStatus: Number(error && error.httpStatus || 0),
+            durationMs: task.startedAt ? finishedAt - task.startedAt : 0,
+            sentBytes: Math.max(0, Number(task.loadedBytes || 0)),
+            sentPercent: Math.max(0, Number(task.progress || 0)),
+            at: new Date(finishedAt).toISOString()
+        };
+        task.attemptLog.push(entry);
+        if (task.attemptLog.length > 20) {
+            task.attemptLog.shift();
+        }
+        if (signature && signature === task.breakSignature) {
+            task.breakStreak += 1;
+        } else {
+            task.breakSignature = signature;
+            task.breakStreak = signature ? 1 : 0;
+        }
+        return entry;
+    }
+
+    function failRepeatedBreak(task, error) {
+        const context = task.context || {};
+        if (typeof debugLog === 'function') {
+            debugLog('upload_failed_repeated_error', {
+                uploadId: task.uploadId,
+                dialogId: context.dialogId,
+                checklistKey: context.checklistKey,
+                itemId: context.itemId,
+                itemName: context.itemName,
+                operationKind: context.operationKind,
+                fileName: context.fileName,
+                fileSize: context.fileSize,
+                relativeFolder: context.relativeFolder,
+                signature: task.breakSignature,
+                sameBreaks: task.breakStreak,
+                attempts: task.attempt,
+                error: String(error && error.message || error || ''),
+                httpStatus: Number(error && error.httpStatus || 0),
+                attemptLog: task.attemptLog.slice()
+            });
+        }
+        const failure = new Error(POPUP_UPLOAD_FAILED_TEXT);
+        failure.repeatedBreak = true;
+        failure.breakSignature = task.breakSignature;
+        failure.lastError = String(error && error.message || error || '');
+        finishTask(task, 'failed', null, failure);
+    }
+
     function shouldRetryTask(task, error) {
         return Boolean(
             error
@@ -290,8 +367,10 @@ function createPopupUploadManager(options = {}) {
         const retryAt = Date.now() + delay;
 
         releaseTaskSlot(task);
+        task.abortHandler = null;
         task.state = 'queued';
         task.progress = 0;
+        task.loadedBytes = 0;
         task.startedAt = 0;
         task.finishedAt = 0;
         task.retryAt = retryAt;
@@ -312,6 +391,8 @@ function createPopupUploadManager(options = {}) {
         task.retryAt = 0;
         task.attempt += 1;
         task.error = '';
+        task.loadedBytes = 0;
+        task.abortHandler = null;
         activeCount += 1;
         activeQueueKeyCounts.set(
             task.queueKey,
@@ -327,7 +408,7 @@ function createPopupUploadManager(options = {}) {
                 return task.runner(task.context, {
                     attempt: task.attempt,
                     maxAttempts: task.maxAttempts,
-                    updateProgress(percent) {
+                    updateProgress(percent, loadedBytes) {
                         const safePercent = Math.max(
                             0,
                             Math.min(
@@ -337,7 +418,32 @@ function createPopupUploadManager(options = {}) {
                         );
 
                         task.progress = safePercent;
+                        if (Number.isFinite(Number(loadedBytes))) {
+                            task.loadedBytes = Math.max(
+                                0,
+                                Number(loadedBytes)
+                            );
+                        }
                         emitStateChange('progress', task);
+                    },
+                    // The runner gives the way to stop its request: «Отмена»
+                    // and the close of the window stop it at once.
+                    setAbort(abort) {
+                        if (typeof abort !== 'function') {
+                            task.abortHandler = null;
+                            return;
+                        }
+                        task.abortHandler = abort;
+                        if (task.cancelRequested === true) {
+                            try {
+                                abort();
+                            } catch (abortError) {
+                                console.log('upload abort error:', abortError);
+                            }
+                        }
+                    },
+                    isCancelled() {
+                        return task.cancelRequested === true;
                     }
                 });
             })
@@ -346,6 +452,26 @@ function createPopupUploadManager(options = {}) {
                 finishTask(task, 'completed', result, null);
             })
             .catch(function (error) {
+                if (task.cancelRequested === true) {
+                    finishTask(
+                        task,
+                        'cancelled',
+                        null,
+                        new Error(task.error || 'Загрузка отменена')
+                    );
+                    return;
+                }
+
+                recordAttemptFailure(task, error);
+
+                if (
+                    task.breakSignature
+                    && task.breakStreak >= POPUP_UPLOAD_SAME_BREAK_LIMIT
+                ) {
+                    failRepeatedBreak(task, error);
+                    return;
+                }
+
                 if (shouldRetryTask(task, error)) {
                     requeueTask(task, error);
                     return;
@@ -516,6 +642,11 @@ function createPopupUploadManager(options = {}) {
             attempt: 0,
             maxAttempts,
             cancelRequested: false,
+            abortHandler: null,
+            loadedBytes: 0,
+            attemptLog: [],
+            breakSignature: '',
+            breakStreak: 0,
             result: null,
             error: '',
             context: Object.freeze({
@@ -596,6 +727,43 @@ function createPopupUploadManager(options = {}) {
         return cancelAllQueued(errorText);
     }
 
+    // «Отмена» and the close of the window: the requests in progress stop at
+    // once and the queue is dropped. A file the server has fully received is
+    // still written there and goes with the session (saved or rolled back).
+    function abortAll(reason = 'Загрузка отменена') {
+        const errorText = String(reason || 'Загрузка отменена');
+        let aborted = 0;
+
+        for (const task of tasksById.values()) {
+            if (task.state !== 'uploading') {
+                continue;
+            }
+            task.cancelRequested = true;
+            task.error = errorText;
+            if (typeof task.abortHandler === 'function') {
+                try {
+                    task.abortHandler();
+                    aborted += 1;
+                } catch (abortError) {
+                    console.log('upload abort error:', abortError);
+                }
+            }
+        }
+
+        const cancelled = cancelAllQueued(errorText);
+
+        if (typeof debugLog === 'function' && (aborted || cancelled)) {
+            debugLog('upload_manager_aborted_all', {
+                reason: errorText,
+                aborted,
+                cancelledQueued: cancelled,
+                activeCount
+            });
+        }
+
+        return { aborted, cancelled };
+    }
+
     function updateProgress(uploadId, percent) {
         const targetId = String(uploadId || '');
         const task = tasksById.get(targetId);
@@ -644,6 +812,7 @@ function createPopupUploadManager(options = {}) {
         cancelQueued,
         cancelAllQueued,
         cancelAll,
+        abortAll,
         updateProgress,
         getTask,
         getSnapshot,

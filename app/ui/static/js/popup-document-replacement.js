@@ -387,7 +387,8 @@
                                 event.loaded / event.total * 100
                             )
                         )
-                    )
+                    ),
+                    event.loaded
                 );
             };
 
@@ -440,6 +441,15 @@
             };
 
             xhr.send(formData);
+            if (
+                progressControl
+                && typeof progressControl.setAbort === 'function'
+            ) {
+                // «Отмена» and the close of the window stop it at once.
+                progressControl.setAbort(function () {
+                    xhr.abort();
+                });
+            }
         });
     }
 

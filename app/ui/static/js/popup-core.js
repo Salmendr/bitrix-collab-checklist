@@ -668,6 +668,12 @@
                 }
 
                 applyChecklistData(result);
+                if (typeof rememberChecklistReadMarker === 'function') {
+                    rememberChecklistReadMarker(
+                        currentChecklistKey,
+                        response.headers.get('X-Checklist-Read-Marker')
+                    );
+                }
                 return result;
             }
 
@@ -1517,7 +1523,10 @@
                             )
                         );
 
-                        progressControl.updateProgress(rawPercent);
+                        progressControl.updateProgress(
+                            rawPercent,
+                            event.loaded
+                        );
 
                         const displayPercent = Math.max(
                             1,
@@ -1845,6 +1854,14 @@
                     };
 
                     xhr.send(formData);
+                    if (
+                        progressControl
+                        && typeof progressControl.setAbort === 'function'
+                    ) {
+                        progressControl.setAbort(function () {
+                            xhr.abort();
+                        });
+                    }
                 });
             }
 

@@ -387,8 +387,11 @@ def acquire_checklist_for_edit_session(
         owner_name = clean_cell_value(
             lock_result.get("userName")
         ) or "Другой сотрудник"
-        raise EditSessionConflictError(
-            "checklist is locked by another edit session: "
+        # The first change takes the lock; the window shows this text.
+        from app.checklists.edit_sessions import ChecklistLockedByOtherError
+
+        raise ChecklistLockedByOtherError(
+            "С этим чек-листом сейчас работает "
             + owner_name
         )
 

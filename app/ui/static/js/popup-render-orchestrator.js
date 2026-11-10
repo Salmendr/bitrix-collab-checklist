@@ -176,6 +176,9 @@ function bindEvents(rendererEntry) {
 }
 
 function renderAll() {
+    if (typeof noteRenderedEditingState === 'function') {
+        noteRenderedEditingState();
+    }
     if (
         window.ChecklistPopupSubitems
         && typeof window.ChecklistPopupSubitems.beforeRender === 'function'
@@ -267,6 +270,12 @@ async function loadChecklistByKey(checklistKey) {
         }
 
         applyChecklistData(result);
+        if (typeof rememberChecklistReadMarker === 'function') {
+            rememberChecklistReadMarker(
+                targetKey,
+                response.headers.get('X-Checklist-Read-Marker')
+            );
+        }
         renderAll();
         if (!defersCurrentChecklistLock()) {
             await acquireChecklistLock(targetKey, true);

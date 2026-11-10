@@ -52,11 +52,20 @@
                     return;
                 }
 
+                // Uploads stop at once, the button stays unavailable until the
+                // rollback is done.
+                const cancelLabel = cancelBtn.textContent;
                 cancelBtn.disabled = true;
+                cancelBtn.textContent = 'Отменяем…';
+                cancelBtn.setAttribute('aria-busy', 'true');
                 if (saveCloseBtn) saveCloseBtn.disabled = true;
                 setSaveState('saving', 'Отменяем изменения...');
 
                 const completed = await finalizePopupSession(false);
+                if (!completed) {
+                    cancelBtn.textContent = cancelLabel;
+                    cancelBtn.removeAttribute('aria-busy');
+                }
 
                 if (!completed && !global.closed) {
                     cancelBtn.disabled = false;
@@ -168,6 +177,14 @@
 
         if (isPopupSessionReady()) {
             return Promise.resolve(getActiveEditSessionId());
+        }
+
+        if (
+            typeof isPopupClosedByHost === 'function'
+            && isPopupClosedByHost()
+        ) {
+            // The window was closed; it starts no new session.
+            return Promise.reject(new Error('Окно чек-листа закрыто'));
         }
 
         if (!startupPromise) {

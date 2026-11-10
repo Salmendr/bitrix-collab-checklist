@@ -403,7 +403,8 @@
                                 * 100
                             )
                         )
-                    )
+                    ),
+                    event.loaded
                 );
             };
 
@@ -460,6 +461,15 @@
             };
 
             xhr.send(formData);
+            if (
+                progressControl
+                && typeof progressControl.setAbort === 'function'
+            ) {
+                // «Отмена» and the close of the window stop it at once.
+                progressControl.setAbort(function () {
+                    xhr.abort();
+                });
+            }
         });
     }
 
@@ -779,6 +789,11 @@
         const editSessionId = requireFolderEditSession(
             'загрузка файлов'
         );
+        // The first change takes the lock of the checklist: taken before the
+        // files are sent, or they are not sent at all.
+        if (typeof ensureFolderChecklistLock === 'function') {
+            await ensureFolderChecklistLock();
+        }
         const openerManager = getFolderOpenerUploadManager();
         const uploadManager = (
             openerManager
@@ -867,7 +882,11 @@
                         )
                     });
                 } else {
-                    failedFiles.push(plan.file);
+                    // Stopped after three identical breaks: dropped from
+                    // the upload area, the window says «Ошибка загрузки».
+                    if (!(entry.reason && entry.reason.repeatedBreak)) {
+                        failedFiles.push(plan.file);
+                    }
                     failed.push({
                         fileName: String(
                             plan.file.name || 'Файл'

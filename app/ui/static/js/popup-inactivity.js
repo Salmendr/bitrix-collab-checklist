@@ -9,7 +9,7 @@
 
     const bootstrap = global.CHECKLIST_POPUP_BOOTSTRAP || {};
     const timeoutMs = Math.max(60000, Number(
-        bootstrap.inactivityTimeoutSeconds || 1500
+        bootstrap.inactivityTimeoutSeconds || 600
     ) * 1000);
     const warningMs = Math.max(10000, Math.min(
         timeoutMs - 1000,
@@ -51,6 +51,7 @@
 
     async function finalizeForInactivity() {
         if (finalizing) return;
+        if (windowClosed()) return;
         finalizing = true;
         warning.hidden = true;
         try {
@@ -73,8 +74,42 @@
         }
     }
 
+    function windowClosed() {
+        return typeof global.isPopupClosedByHost === 'function'
+            && global.isPopupClosedByHost();
+    }
+
+    // An upload in progress is not inactivity: the ten minutes count from
+    // the end of the last file.
+    let lastUploadActivityAt = 0;
+    let uploadsWerePending = false;
+    function uploadsInProgress() {
+        try {
+            return typeof global.popupHasPendingUploads === 'function'
+                && global.popupHasPendingUploads();
+        } catch (error) {
+            return false;
+        }
+    }
+
     function checkInactivity() {
         if (finalizing) return;
+        if (windowClosed()) return;
+        if (uploadsInProgress()) {
+            const now = Date.now();
+            uploadsWerePending = true;
+            if (now - lastUploadActivityAt >= 30000 || warningVisible) {
+                lastUploadActivityAt = now;
+                noteActivity('upload_in_progress', now);
+            }
+            return;
+        }
+        if (uploadsWerePending) {
+            // The last file has just finished: the ten minutes start now.
+            uploadsWerePending = false;
+            noteActivity('upload_finished', Date.now());
+            return;
+        }
         const idleMs = Date.now() - lastActivityAt;
         if (idleMs >= timeoutMs) {
             finalizeForInactivity();
@@ -152,11 +187,20 @@
     global.addEventListener('checklist-edit-session-inactivity-due', function () {
         finalizeForInactivity();
     });
-    global.addEventListener('checklist-edit-session-inactivity-finalized', function () {
+    // The server saved the session (ten minutes without actions or five
+    // minutes without a heartbeat): the window closes and is not opened again.
+    global.addEventListener('checklist-edit-session-inactivity-finalized', function (event) {
         finalizing = true;
         warning.hidden = true;
         if (checkTimer) global.clearInterval(checkTimer);
-        try { clearPopupCloseHandoff(); } catch (error) {}
+        const detail = event && event.detail || {};
+        try {
+            if (typeof global.markPopupWindowClosed === 'function') {
+                global.markPopupWindowClosed(
+                    'server_' + String(detail.closeReason || 'inactivity_timeout')
+                );
+            }
+        } catch (error) {}
         try { closePopupWindow(); } catch (error) {}
     });
 

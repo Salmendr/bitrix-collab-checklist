@@ -10,6 +10,7 @@ from starlette.concurrency import run_in_threadpool
 
 from app.auth.identity import is_read_only, verified_actor
 from app.checklists import grad_analysis
+from app.checklists.session_writes import session_write
 from app.checklists.edit_sessions import (
     EditSessionConflictError,
     EditSessionNotFoundError,
@@ -20,7 +21,7 @@ from app.checklists.utils import can_preview_in_browser, clean_cell_value, norma
 
 router = APIRouter()
 
-LOCKED_PREFIX = "checklist is locked by another edit session: "
+LOCKED_PREFIX = "С этим чек-листом сейчас работает "
 
 
 def _error(exc: Exception) -> JSONResponse:
@@ -94,22 +95,24 @@ async def api_ga_upload(
     file: UploadFile = File(...),
 ):
     user_id, user_name = verified_actor(request, actingUserId, actingUserName)
-    try:
-        result = await run_in_threadpool(
-            grad_analysis.store_upload,
-            dialogId,
-            sessionId,
-            {"userId": user_id, "userName": user_name},
-            itemId,
-            file.filename or "",
-            file.file,
-            replaceFileId,
-            relativeFolder,
-        )
-    except Exception as exc:
-        return _error(exc)
-    finally:
-        await file.close()
+    # Save, Cancel and closing of the session wait for this received file.
+    with session_write(sessionId, "ga_upload"):
+        try:
+            result = await run_in_threadpool(
+                grad_analysis.store_upload,
+                dialogId,
+                sessionId,
+                {"userId": user_id, "userName": user_name},
+                itemId,
+                file.filename or "",
+                file.file,
+                replaceFileId,
+                relativeFolder,
+            )
+        except Exception as exc:
+            return _error(exc)
+        finally:
+            await file.close()
     return JSONResponse(result)
 
 

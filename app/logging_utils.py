@@ -60,6 +60,8 @@ QUIET_ACCESS_LOG_PATHS = (
     "/api/checklist/session/heartbeat",
     "/api/checklist/session/status",
     "/api/checklist/lock/heartbeat",
+    # Who holds the lock, asked by every open window every 15 seconds.
+    "/api/checklist/lock/status",
     "/api/debug/event",
 )
 

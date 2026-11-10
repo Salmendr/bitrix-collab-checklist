@@ -36,6 +36,9 @@ from app.checklists.session_finalization import (
 )
 
 
+from app.checklists.session_writes import wait_for_session_writes
+from app.checklists.utils import clean_cell_value
+
 router = APIRouter()
 
 @router.post("/api/checklist/close-session")
@@ -273,6 +276,14 @@ async def api_checklist_finalize_session(request: Request):
             payload = json.loads(raw.decode("utf-8") or "{}")
         except Exception:
             payload = {}
+
+    # Save, Cancel and closing (also by a window already gone) wait until the
+    # server has written the files that fully arrived, so they are saved or
+    # rolled back with the session.
+    await wait_for_session_writes(
+        clean_cell_value((payload or {}).get("sessionId") if isinstance(payload, dict) else ""),
+        clean_cell_value((payload or {}).get("reason") if isinstance(payload, dict) else ""),
+    )
 
     try:
         result = finalize_edit_session_payload(payload)

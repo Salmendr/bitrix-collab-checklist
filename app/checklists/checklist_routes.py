@@ -71,6 +71,7 @@ from app.checklists.yandex_context import resolve_checklist_yandex_root_path
 from app.yandex_disk.client import is_yandex_disk_enabled
 
 from app.checklists.checklist_mutation_guard import checklist_mutation_guard
+from app.checklists.edit_session_locks import checklist_read_marker
 from app.checklists.item_names import choose_available_item_name
 from app.checklists.id_surveys import (
     LOCKED_ITEM_DELETE_ERROR,
@@ -164,6 +165,13 @@ def api_get_checklist(dialogId: str = "", checklistKey: str = "id"):
     if not dialog_id:
         return JSONResponse({"ok": False, "error": "dialogId is required"}, status_code=400)
 
+    # Taken before the data: a window that only views the checklist asks
+    # later whether another window saved it after this.
+    try:
+        read_marker = checklist_read_marker(dialog_id, checklist_key)
+    except Exception:
+        read_marker = ""
+
     data = get_checklist(dialog_id, checklist_key)
     data = attach_latest_yandex_structure_states(
         data,
@@ -180,7 +188,10 @@ def api_get_checklist(dialogId: str = "", checklistKey: str = "id"):
         dialog_id=dialog_id,
         checklist_key=checklist_key,
     )
-    return JSONResponse(data)
+    return JSONResponse(
+        data,
+        headers={"X-Checklist-Read-Marker": read_marker} if read_marker else None,
+    )
 
 
 
@@ -337,11 +348,16 @@ def checklist_edit_session_error_response(exc: Exception) -> JSONResponse:
     else:
         status_code = 500
 
+    from app.checklists.edit_sessions import ChecklistLockedByOtherError
+
+    locked_by_other = isinstance(exc, ChecklistLockedByOtherError)
     return JSONResponse(
         {
             "ok": False,
             "error": str(exc),
-            "editSessionError": True,
+            # Another employee holds the lock: shown, not retried.
+            "editSessionError": not locked_by_other,
+            "lockedByOther": locked_by_other,
         },
         status_code=status_code,
     )

@@ -48,8 +48,9 @@ from app.checklists.edit_session_files import (
     rollback_edit_session_file_operation,
     stash_existing_file,
 )
-from app.checklists.edit_sessions import EditSessionConflictError
+from app.checklists.edit_sessions import EditSessionConflictError, get_edit_session
 from app.checklists.item_mutation_guard import item_mutation_guard
+from app.checklists.session_writes import session_write
 from app.checklists.normalization import (
     derive_indicator_from_status,
     normalize_checklist_data,
@@ -182,6 +183,38 @@ def _updated_item(saved: dict, item_id: str) -> dict:
     raise RuntimeError("updated item not found")
 
 
+class SessionEndedDuringWriteError(EditSessionConflictError):
+    """The session was saved or cancelled while the server wrote the file."""
+
+
+def _ensure_session_active_after_write(
+    session_id: str,
+    written_path: Path,
+    log_payload: dict,
+) -> None:
+    """A received file is written before it joins the checklist. If its session
+    ended meanwhile, only the file itself is removed: the checklist is not
+    touched, since it may already belong to another session."""
+    record = get_edit_session(session_id) or {}
+    status = clean_cell_value(record.get("status"))
+    if status == "active":
+        return
+    try:
+        if written_path.exists():
+            written_path.unlink()
+    except Exception:
+        pass
+    write_debug_log("edit_session_document_write_after_session_end", {
+        **dict(log_payload or {}),
+        "sessionStatus": status,
+        "closeReason": clean_cell_value(record.get("close_reason")),
+        "removedPath": str(written_path),
+    })
+    raise SessionEndedDuringWriteError(
+        "Сессия редактирования уже завершена; файл не добавлен"
+    )
+
+
 def _restore_after_failed_operation(
     *,
     session_id: str,
@@ -242,24 +275,27 @@ async def transactional_upload_document(
     folder_upload_root: str = "",
     folder_replace_id: str = "",
 ) -> dict:
-    async with item_mutation_guard(
-        dialog_id,
-        checklist_key,
-        item_id,
-    ):
-        return await _transactional_upload_document_inner(
-            session_id=session_id,
-            dialog_id=dialog_id,
-            checklist_key=checklist_key,
-            item_id=item_id,
-            item_group=item_group,
-            file=file,
-            acting_user_id=acting_user_id,
-            acting_user_name=acting_user_name,
-            relative_folder=relative_folder,
-            folder_upload_root=folder_upload_root,
-            folder_replace_id=folder_replace_id,
-        )
+    # A received file is written for its session: Save, Cancel and closing
+    # wait for it (also while it waits for another write of the checklist).
+    with session_write(session_id, "document_upload"):
+        async with item_mutation_guard(
+            dialog_id,
+            checklist_key,
+            item_id,
+        ):
+            return await _transactional_upload_document_inner(
+                session_id=session_id,
+                dialog_id=dialog_id,
+                checklist_key=checklist_key,
+                item_id=item_id,
+                item_group=item_group,
+                file=file,
+                acting_user_id=acting_user_id,
+                acting_user_name=acting_user_name,
+                relative_folder=relative_folder,
+                folder_upload_root=folder_upload_root,
+                folder_replace_id=folder_replace_id,
+            )
 
 
 async def _transactional_upload_document_inner(
@@ -328,17 +364,23 @@ async def _transactional_upload_document_inner(
             uploaded_name,
         )
         created_path = UPLOAD_ROOT / rel_path
+        write_log_payload = {
+            "sessionId": normalized_session_id,
+            "dialogId": normalized_dialog_id,
+            "checklistKey": config.key,
+            "itemId": normalized_item_id,
+            "fileName": uploaded_name,
+        }
         file_size = await _save_upload_stream(
             file,
             created_path,
             operation_id=operation_id,
-            log_payload={
-                "sessionId": normalized_session_id,
-                "dialogId": normalized_dialog_id,
-                "checklistKey": config.key,
-                "itemId": normalized_item_id,
-                "fileName": uploaded_name,
-            },
+            log_payload=write_log_payload,
+        )
+        _ensure_session_active_after_write(
+            normalized_session_id,
+            created_path,
+            write_log_payload,
         )
 
         document_id = uuid.uuid4().hex
@@ -448,6 +490,9 @@ async def _transactional_upload_document_inner(
             "progressPercent": saved.get("progressPercent", 0),
         }
 
+    except SessionEndedDuringWriteError:
+        raise
+
     except Exception:
         if created_path is not None and created_path.exists():
             try:
@@ -472,8 +517,9 @@ async def _transactional_upload_document_inner(
 
 
 async def transactional_replace_document(**kwargs) -> dict:
-    async with item_mutation_guard(kwargs["dialog_id"], kwargs["checklist_key"], kwargs["item_id"]):
-        return await _transactional_replace_document_inner(**kwargs)
+    with session_write(kwargs.get("session_id", ""), "document_replace"):
+        async with item_mutation_guard(kwargs["dialog_id"], kwargs["checklist_key"], kwargs["item_id"]):
+            return await _transactional_replace_document_inner(**kwargs)
 
 
 async def _transactional_replace_document_inner(
@@ -567,18 +613,24 @@ async def _transactional_replace_document_inner(
             uploaded_name,
         )
         new_abs_path = UPLOAD_ROOT / new_rel_path
+        write_log_payload = {
+            "sessionId": normalized_session_id,
+            "dialogId": normalized_dialog_id,
+            "checklistKey": config.key,
+            "itemId": normalized_item_id,
+            "oldDocumentId": normalized_document_id,
+            "fileName": uploaded_name,
+        }
         file_size = await _save_upload_stream(
             file,
             new_abs_path,
             operation_id=operation_id,
-            log_payload={
-                "sessionId": normalized_session_id,
-                "dialogId": normalized_dialog_id,
-                "checklistKey": config.key,
-                "itemId": normalized_item_id,
-                "oldDocumentId": normalized_document_id,
-                "fileName": uploaded_name,
-            },
+            log_payload=write_log_payload,
+        )
+        _ensure_session_active_after_write(
+            normalized_session_id,
+            new_abs_path,
+            write_log_payload,
         )
 
         new_document_id = uuid.uuid4().hex
@@ -775,6 +827,9 @@ async def _transactional_replace_document_inner(
             },
             "progressPercent": saved.get("progressPercent", 0),
         }
+
+    except SessionEndedDuringWriteError:
+        raise
 
     except Exception:
         if (

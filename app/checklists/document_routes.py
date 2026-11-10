@@ -146,13 +146,18 @@ def document_edit_session_error_response(exc: Exception) -> JSONResponse:
         status_code = 500
 
     from app.checklists.edit_sessions import (
+        ChecklistLockedByOtherError,
         EditSessionForceReplaceRequiredError,
     )
+    # Another employee took the lock (it is taken by the first change): the
+    # window shows it and does not send the file again.
+    locked_by_other = isinstance(exc, ChecklistLockedByOtherError)
     return JSONResponse(
         {
             "ok": False,
             "error": str(exc).strip("'"),
-            "editSessionError": True,
+            "editSessionError": not locked_by_other,
+            "lockedByOther": locked_by_other,
             # The client asks for a confirmation and repeats with forceReplace.
             "requiresForceReplace": isinstance(
                 exc,
@@ -2361,7 +2366,7 @@ def api_checklist_folder(
     ui_static_base_url = (
         f"{app_base_path}/ui-static"
     )
-    ui_asset_version = "8.37-ga-tree"
+    ui_asset_version = "8.38-session-release"
     popup_url = (
         f"{app_base_path}/popup"
         f"?dialogId={quote(dialog_id, safe='')}"

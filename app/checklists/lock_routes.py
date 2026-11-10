@@ -12,6 +12,9 @@ from app.checklists.utils import (
 
 from app.checklists.edit_session_locks import (
     acquire_edit_session_lock,
+    checklist_changed_since,
+    checklist_read_marker,
+    describe_checklist_lock,
     heartbeat_edit_session_lock,
     release_edit_session_lock,
 )
@@ -90,7 +93,51 @@ async def api_checklist_lock_acquire(request: Request):
     except Exception as exc:
         return session_lock_error_response(exc)
 
+    if session_id and isinstance(result, dict):
+        # The first change: if another window saved the checklist after this
+        # one read it (`since`), the window reads it again first.
+        try:
+            read_marker = checklist_read_marker(dialog_id, checklist_key)
+            result = {
+                **result,
+                "readMarker": read_marker,
+                "changedSince": checklist_changed_since(
+                    dialog_id,
+                    checklist_key,
+                    str(payload.get("since") or "").strip(),
+                    own_session_id=session_id,
+                ),
+            }
+        except Exception:
+            pass
+
     write_debug_log("lock_acquire", result)
+    return JSONResponse(result)
+
+
+@router.get("/api/checklist/lock/status")
+async def api_checklist_lock_status(
+    dialogId: str = "",
+    checklistKey: str = "id",
+    sessionId: str = "",
+    since: str = "",
+):
+    """Who holds the lock of the checklist; nothing is taken."""
+    dialog_id = normalize_dialog_id(dialogId)
+    if not dialog_id:
+        return JSONResponse(
+            {"ok": False, "error": "dialogId is required"},
+            status_code=400,
+        )
+    try:
+        result = describe_checklist_lock(
+            session_id=str(sessionId or "").strip(),
+            dialog_id=dialog_id,
+            checklist_key=normalize_checklist_key(checklistKey),
+            since=str(since or "").strip(),
+        )
+    except Exception as exc:
+        return session_lock_error_response(exc)
     return JSONResponse(result)
 
 
