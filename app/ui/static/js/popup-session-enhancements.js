@@ -2006,14 +2006,65 @@ async function finalizePopupSession(saveChanges, options = {}) {
         return true;
     }
 
-    // Stage 7.1.1.1: both successful save and rollback use the safe local
-    // fallback. Bitrix closes through BX24.closeApplication(); a direct local
-    // tab reloads instead of being redirected to a blank page.
+    // «Отмена» rolls back and the window stays open: only the cross of the
+    // window and «Сохранить и закрыть» close it.
+    if (!saveChanges) {
+        await continuePopupAfterCancel();
+        return true;
+    }
+
+    // Stage 7.1.1.1: a successful save uses the safe local fallback. Bitrix
+    // closes through BX24.closeApplication(); a direct local tab reloads
+    // instead of being redirected to a blank page.
     closePopupWindow();
     return true;
 }
 
 window.finalizePopupSession = finalizePopupSession;
+
+// After «Отмена»: the window goes on with a new session (no lock until its
+// first change) and shows the checklists as they are after the rollback.
+async function continuePopupAfterCancel() {
+    popupFinalizationInProgress = false;
+    popupFinalizeRequestInProgress = false;
+    suppressAutoCloseSave = false;
+    closeSummarySent = false;
+    clearLocalPopupSessionState();
+    Object.keys(pendingViewRefresh).forEach(key => {
+        delete pendingViewRefresh[key];
+    });
+    updateLockNotice();
+
+    try {
+        const sessionEvents = window.ChecklistPopupSessionEvents;
+        if (sessionEvents && typeof sessionEvents.ensureStarted === 'function') {
+            await sessionEvents.ensureStarted();
+        }
+    } catch (error) {
+        console.log('session after cancel error:', error);
+    }
+    try {
+        await reloadCurrentChecklistFromServer();
+        renderAll();
+    } catch (reloadError) {
+        console.log('reload after cancel skipped:', reloadError);
+    }
+    if (
+        window.ChecklistPopupObjectAnalysis
+        && typeof window.ChecklistPopupObjectAnalysis.refresh === 'function'
+    ) {
+        window.ChecklistPopupObjectAnalysis.refresh();
+    }
+    startLockHeartbeat();
+    updateLockNotice();
+    setActionButtonState();
+    setSaveState('', 'Изменения отменены');
+    debugLog('popup_cancel_continued', {
+        dialogId,
+        checklistKey: currentChecklistKey,
+        editSessionId: getActiveEditSessionId()
+    });
+}
 
 // «Сохранить»: everything «Сохранить и закрыть» does (the changes, the files
 // to Yandex, the message to the chat), but the window stays open and keeps

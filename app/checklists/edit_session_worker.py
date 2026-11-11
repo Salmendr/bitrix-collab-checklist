@@ -23,6 +23,31 @@ def run_edit_session_sweep(
         limit=1000,
     )
 
+    # Parts of big files left by a closed window or an ended session.
+    try:
+        from app.checklists.chunked_upload_routes import (
+            cleanup_stale_chunked_uploads,
+        )
+        cleanup_stale_chunked_uploads()
+    except Exception as exc:
+        write_debug_log(
+            "chunked_upload_cleanup_failed",
+            {"error": str(exc)},
+        )
+
+    # A personal message after Yandex Disk got a session with a big file
+    # (also when the server restarted between the last file and the message).
+    try:
+        from app.checklists.yandex_upload_notices import (
+            sweep_yandex_upload_notices,
+        )
+        sweep_yandex_upload_notices()
+    except Exception as exc:
+        write_debug_log(
+            "yandex_upload_notice_sweep_failed",
+            {"error": str(exc)},
+        )
+
     if (
         result.get("expiredFound")
         or result.get("errorCount")

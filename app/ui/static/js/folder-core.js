@@ -44,21 +44,17 @@
     const folderItemName = String(
         bootstrap.itemName || 'Пункт'
     );
-    // Opened from a checklist in the view mode (another user edits it):
-    // no changes in this window until it is closed, even when the checklist
-    // gets the edit session later. The folders opened from here are read
-    // only too (the server passes readOnly=1 on in every link).
+    // Always read only: a window of the portal and a folder of ИД looked at
+    // from Граданализ (the server passes readOnly=1 on in every link).
+    // Another employee editing the checklist does not make the folder read
+    // only for good: the page follows the lock (refreshFolderLockStatus).
     const folderReadOnly = bootstrap.readOnly === true;
     const READ_ONLY_MESSAGE = bootstrap.openedFrom === 'ga'
         ? (
             'Только просмотр: папка чек-листа ИД открыта из Граданализа. '
             + 'Файлы этой папки меняют в самом чек-листе ИД.'
         )
-        : (
-            'Только просмотр: папка открыта, когда чек-лист редактировал '
-            + 'другой сотрудник. Чтобы вносить изменения, закройте это окно '
-            + 'и откройте папку заново из чек-листа, когда сессия перейдёт к вам.'
-        );
+        : 'Только просмотр: изменения в этой папке недоступны.';
     const folderBootstrapSessionId = folderReadOnly ? '' : String(
         bootstrap.sessionId || ''
     ).trim();
@@ -325,8 +321,9 @@
             if (lockedBy !== folderLockedByName) {
                 folderLockedByName = lockedBy;
                 showFolderLockNotice();
-                applyFolderEditSessionState();
             }
+            // Also when the session of the checklist window has just come.
+            applyFolderEditSessionState();
             return result;
         } catch (error) {
             return null;
@@ -535,6 +532,8 @@
         },
         { capture: true, passive: true }
     );
+
+    global.publishFolderUserActivity = publishFolderUserActivity;
 
     global.ChecklistFolderArchiveBootstrap = Object.freeze({
         deleteApiUrl: folderArchiveDeleteApiUrl,

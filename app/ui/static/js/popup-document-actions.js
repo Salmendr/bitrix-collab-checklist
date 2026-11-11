@@ -771,20 +771,27 @@ function bindDocumentActions() {
                     folderUrl,
                     window.location.href
                 );
-                // Without the edit session (another user edits the
-                // checklist) the folder window opens read only and stays
-                // so until it is closed, even when this popup gets the
-                // session later.
-                const editingAllowed = (
-                    typeof isEditingAllowed !== 'function'
-                    || isEditingAllowed()
+                // The folder window gets the session of this window also
+                // while another employee edits the checklist: it follows
+                // the lock itself, shows who edits and opens for changes
+                // as soon as the checklist is free. Only a view-only window
+                // (the portal) opens it read only.
+                const readOnlyWindow = (
+                    typeof isReadOnlyWindow === 'function'
+                    && isReadOnlyWindow()
+                );
+                const sessionReady = (
+                    typeof getEditSessionRuntimeState !== 'function'
+                    || getEditSessionRuntimeState().active
                 );
                 const editSessionId = (
-                    editingAllowed
+                    !readOnlyWindow
+                    && sessionReady
                     && typeof getActiveEditSessionId === 'function'
                         ? getActiveEditSessionId()
                         : ''
                 );
+                targetUrl.searchParams.delete('readOnly');
                 if (editSessionId) {
                     targetUrl.searchParams.set(
                         'sessionId',
@@ -792,6 +799,8 @@ function bindDocumentActions() {
                     );
                 } else {
                     targetUrl.searchParams.delete('sessionId');
+                }
+                if (readOnlyWindow) {
                     targetUrl.searchParams.set('readOnly', '1');
                 }
                 const actor = (

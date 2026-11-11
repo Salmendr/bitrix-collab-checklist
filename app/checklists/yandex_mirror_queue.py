@@ -1629,6 +1629,29 @@ def yandex_mirror_worker(worker_index: int):
                 YANDEX_MIRROR_RUNNING_JOB_IDS.discard(job_id)
 
             YANDEX_MIRROR_QUEUE.done(entry)
+            _check_upload_notice_later(job_id)
+
+
+def _check_upload_notice_later(job_id: str) -> None:
+    """The last file of a session with a big file: a personal message to
+    the employee who uploaded it. Off the worker, so Yandex jobs go on."""
+    def run():
+        try:
+            from app.checklists.yandex_upload_notices import (
+                check_yandex_upload_notice_for_job,
+            )
+            check_yandex_upload_notice_for_job(job_id)
+        except Exception as exc:
+            write_debug_log("yandex_upload_notice_check_failed", {
+                "jobId": clean_cell_value(job_id),
+                "error": str(exc)[:500],
+            })
+
+    threading.Thread(
+        target=run,
+        name="yandex-upload-notice",
+        daemon=True,
+    ).start()
 
 
 def start_yandex_mirror_workers():

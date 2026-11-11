@@ -357,7 +357,7 @@ function createPopupUploadManager(options = {}) {
         return Boolean(
             error
             && error.retryable === true
-            && task.attempt < task.maxAttempts
+            && task.attempt - Number(task.attemptBase || 0) < task.maxAttempts
             && task.cancelRequested !== true
         );
     }
@@ -444,6 +444,13 @@ function createPopupUploadManager(options = {}) {
                     },
                     isCancelled() {
                         return task.cancelRequested === true;
+                    },
+                    // A part of a big file came through: the breaks and
+                    // attempts before it do not count any more.
+                    resetBreaks() {
+                        task.breakSignature = '';
+                        task.breakStreak = 0;
+                        task.attemptBase = Math.max(0, task.attempt - 1);
                     }
                 });
             })
@@ -647,6 +654,7 @@ function createPopupUploadManager(options = {}) {
             attemptLog: [],
             breakSignature: '',
             breakStreak: 0,
+            attemptBase: 0,
             result: null,
             error: '',
             context: Object.freeze({

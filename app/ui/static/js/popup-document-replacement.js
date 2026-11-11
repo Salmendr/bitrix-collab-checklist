@@ -353,6 +353,17 @@
         formData,
         progressControl
     ) {
+        // From 1 GiB on the new version goes in parts of 64 MiB.
+        if (
+            global.ChecklistChunkedUpload
+            && global.ChecklistChunkedUpload.applies(formData)
+        ) {
+            return global.ChecklistChunkedUpload.send(
+                appUrl('api/checklist/replace-document'),
+                formData,
+                progressControl
+            );
+        }
         return new Promise((resolve, reject) => {
             const xhr = new XMLHttpRequest();
 

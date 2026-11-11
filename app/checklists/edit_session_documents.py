@@ -11,6 +11,7 @@ from app.checklists.document_folders import (
 )
 
 import copy
+import os
 import shutil
 import time
 import traceback
@@ -92,6 +93,31 @@ async def _save_upload_stream(
 
     try:
         abs_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # A file uploaded in parts is already whole on the disk of the
+        # server: it is moved, not copied once more.
+        prepared_path = getattr(file, "prepared_path", None)
+        if prepared_path is not None:
+            prepared_path = Path(prepared_path)
+            try:
+                os.replace(prepared_path, abs_path)
+            except OSError:
+                shutil.move(str(prepared_path), str(abs_path))
+            total_size = abs_path.stat().st_size
+            if total_size <= 0:
+                raise ValueError("Загружен пустой файл")
+            write_debug_log(
+                "edit_session_document_stream_completed",
+                {
+                    **base_payload,
+                    "writtenBytes": total_size,
+                    "assembledFromParts": True,
+                    "durationMs": int(
+                        (time.monotonic() - started_at) * 1000
+                    ),
+                },
+            )
+            return total_size
 
         with abs_path.open("wb") as output:
             while True:

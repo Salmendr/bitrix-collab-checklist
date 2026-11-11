@@ -1,5 +1,5 @@
 {
-  "stage": "8.38-session-release",
+  "stage": "8.39-big-files",
   "hashMode": "utf8-lf",
   "modules": {
     "checklist-window-channel.js": {
@@ -11,8 +11,8 @@
       "bytes": 5819
     },
     "folder-core.js": {
-      "sha256": "e217813900fe7af1450a6785ad81abb3a858c4e3e1acf5ccada8d300fcbddcef",
-      "bytes": 25548
+      "sha256": "6dabde49aa975922940470a52c5a77ea957f81ad14d97d6f98861a2abb54d104",
+      "bytes": 25405
     },
     "public-folder-share.js": {
       "sha256": "0a76ada593bbad042556d0cf528f0f167681694c523f8a652cac9b7737325338",
@@ -47,8 +47,8 @@
       "bytes": 26381
     },
     "folder-uploads.js": {
-      "sha256": "1efebcc4aa464223896eb1b2ec8c592419c4a8f885eec77debff0a83561310d1",
-      "bytes": 35639
+      "sha256": "92c2c4694e3a12874ee844c4940aa6e77aa81ddc6c984a1990318d6da2f6d1e8",
+      "bytes": 37219
     },
     "folder-replacement.js": {
       "sha256": "b693e6e9d63409c39c00f0e60e9811c9ae4f40c6c6ae3af118bdc3011b7615c2",
@@ -73,6 +73,10 @@
     "checklist-link-menu.js": {
       "sha256": "4d4f9a736e171ae4ad528428cd7e56f4c252b5f133855f6595dfb64d99ec816c",
       "bytes": 6706
+    },
+    "checklist-chunked-upload.js": {
+      "sha256": "1a12bf8c05515a5794d5c03a056d25a6ff1533cce2d1af62d83d65e281ee3493",
+      "bytes": 11383
     }
   },
   "loadOrder": [
@@ -88,6 +92,7 @@
     "folder-upload-progress.js",
     "upload-staging.js",
     "folder-upload-planner.js",
+    "checklist-chunked-upload.js",
     "folder-uploads.js",
     "folder-replacement.js",
     "folder-archive-ui.js",

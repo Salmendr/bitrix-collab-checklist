@@ -192,6 +192,9 @@ app.include_router(phase_router)
 app.include_router(project_object_router)
 app.include_router(object_analysis_router)
 app.include_router(grad_analysis_router)
+# Files from 1 GiB on are uploaded in parts of 64 MiB (IIS takes 4 GB at most).
+from app.checklists.chunked_upload_routes import router as chunked_upload_router
+app.include_router(chunked_upload_router)
 # Страховочный вызов при импорте модуля
 init_db()
 ensure_notification_delivery_schema()

@@ -1492,6 +1492,107 @@
                     );
                 }
 
+                // From 1 GiB on the file goes in parts of 64 MiB (IIS
+                // takes 4 GB in one request at most); a break resends only
+                // the part in progress.
+                if (
+                    window.ChecklistChunkedUpload
+                    && window.ChecklistChunkedUpload.applies(formData)
+                ) {
+                    const chunkProgress = Object.assign({}, progressControl, {
+                        updateProgress(percent, bytes) {
+                            progressControl.updateProgress(percent, bytes);
+                            updateUploadProgress(
+                                fileName,
+                                Math.max(1, Math.min(70, Math.round(percent * 0.70))),
+                                'Передаём файл в приложение... ' + percent + '%'
+                            );
+                        }
+                    });
+                    let chunked;
+                    try {
+                        chunked = await window.ChecklistChunkedUpload.send(
+                            appUrl('api/checklist/upload-document'),
+                            formData,
+                            chunkProgress
+                        );
+                    } catch (chunkError) {
+                        if (chunkError && chunkError.retryable) {
+                            updateUploadProgress(
+                                fileName,
+                                0,
+                                'Связь с приложением прервана. Загрузка будет повторена.'
+                            );
+                        }
+                        throw chunkError;
+                    }
+                    const chunkedResult = chunked.result || {};
+                    if (!chunked.responseOk || !chunkedResult.ok) {
+                        const retryable = (
+                            uploadResponseIsRetryable(
+                                chunked.status,
+                                chunkedResult
+                            )
+                            || chunkedResult.uploadMissing === true
+                        );
+                        const errorText = String(
+                            chunkedResult.error
+                            || chunkedResult.details
+                            || 'Ошибка загрузки файла'
+                        );
+                        if (
+                            retryable
+                            && chunkedResult.editSessionError === true
+                        ) {
+                            invalidateUploadEditSession(errorText);
+                        }
+                        if (retryable) {
+                            updateUploadProgress(
+                                fileName,
+                                0,
+                                'Связь с приложением прервана. Загрузка будет повторена.'
+                            );
+                        } else {
+                            failUploadProgress(fileName, errorText);
+                        }
+                        debugLog('upload_frontend_failed_response', {
+                            uploadId: context.uploadId,
+                            dialogId: context.dialogId,
+                            checklistKey: context.checklistKey,
+                            itemId: context.itemId,
+                            fileName,
+                            fileSize,
+                            chunked: true,
+                            status: chunked.status,
+                            retryable,
+                            result: chunkedResult
+                        });
+                        throw buildUploadRequestError(errorText, {
+                            retryable,
+                            httpStatus: chunked.status,
+                            editSessionError: (
+                                chunkedResult.editSessionError === true
+                            )
+                        });
+                    }
+                    debugLog('upload_frontend_completed', {
+                        uploadId: context.uploadId,
+                        dialogId: context.dialogId,
+                        checklistKey: context.checklistKey,
+                        itemId: context.itemId,
+                        fileName,
+                        fileSize,
+                        chunked: true
+                    });
+                    completeUploadProgress(
+                        fileName,
+                        chunkedResult.yandexMirrorQueued
+                            ? 'Файл сохранён. Синхронизация с Яндекс.Диском идёт в фоне.'
+                            : 'Файл сохранён'
+                    );
+                    return chunkedResult;
+                }
+
                 return await new Promise(function (resolve, reject) {
                     const xhr = new XMLHttpRequest();
 

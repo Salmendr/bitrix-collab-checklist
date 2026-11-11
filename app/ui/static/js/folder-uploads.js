@@ -367,11 +367,55 @@
         });
     }
 
+    // A long upload is not inactivity of the session: the popup is told
+    // every 30 seconds while the parts go (also when this page has no link
+    // to the popup's upload queue).
+    let folderUploadActivityAt = 0;
+    function noteFolderUploadActivity() {
+        const now = Date.now();
+        if (now - folderUploadActivityAt < 30000) return;
+        folderUploadActivityAt = now;
+        if (typeof global.publishFolderUserActivity === 'function') {
+            global.publishFolderUserActivity('upload_in_progress');
+        }
+    }
+
+    function withFolderUploadActivity(progressControl) {
+        const base = progressControl || {};
+        const wrapped = {};
+        Object.keys(base).forEach(key => {
+            wrapped[key] = base[key];
+        });
+        wrapped.updateProgress = function (...args) {
+            noteFolderUploadActivity();
+            if (typeof base.updateProgress === 'function') {
+                return base.updateProgress.apply(base, args);
+            }
+            return undefined;
+        };
+        return wrapped;
+    }
+
     function sendFolderMultipartRequest(
         url,
         formData,
-        progressControl
+        rawProgressControl
     ) {
+        const progressControl = withFolderUploadActivity(
+            rawProgressControl
+        );
+        // From 1 GiB on the file goes in parts of 64 MiB (uploads and new
+        // versions of the folder page).
+        if (
+            window.ChecklistChunkedUpload
+            && window.ChecklistChunkedUpload.applies(formData)
+        ) {
+            return window.ChecklistChunkedUpload.send(
+                url,
+                formData,
+                progressControl
+            );
+        }
         return new Promise((resolve, reject) => {
             const xhr = new XMLHttpRequest();
 

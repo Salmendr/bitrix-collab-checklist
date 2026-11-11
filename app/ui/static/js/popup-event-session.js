@@ -62,15 +62,22 @@
                 setSaveState('saving', 'Отменяем изменения...');
 
                 const completed = await finalizePopupSession(false);
-                if (!completed) {
-                    cancelBtn.textContent = cancelLabel;
-                    cancelBtn.removeAttribute('aria-busy');
-                }
+                // The window stays open after the rollback too.
+                cancelBtn.textContent = cancelLabel;
+                cancelBtn.removeAttribute('aria-busy');
 
-                if (!completed && !global.closed) {
+                if (!global.closed) {
                     cancelBtn.disabled = false;
                     if (saveCloseBtn) saveCloseBtn.disabled = false;
+                    if (typeof setActionButtonState === 'function') {
+                        setActionButtonState();
+                    }
                 }
+                debugLog('popup_cancel_finished', {
+                    dialogId,
+                    checklistKey: currentChecklistKey,
+                    completed: !!completed
+                });
             });
         }
     }

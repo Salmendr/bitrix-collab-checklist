@@ -2185,9 +2185,10 @@ def api_checklist_folder(
 ):
     from app.checklists import folder_page
 
-    # Opened from a checklist in the view mode: no changes in this window
-    # and in the folders opened from it, whatever happens to the session.
-    # A window of the platform portal is always in the view mode.
+    # Read only for good: a window of the platform portal and a folder of ИД
+    # looked at from Граданализ, with the folders opened from them. Another
+    # employee editing the checklist is followed by the page itself (the
+    # lock status), not by this flag.
     read_only = (
         clean_cell_value(readOnly).lower() in {"1", "true", "yes"}
         or is_read_only(request)
@@ -2366,7 +2367,7 @@ def api_checklist_folder(
     ui_static_base_url = (
         f"{app_base_path}/ui-static"
     )
-    ui_asset_version = "8.38-session-release"
+    ui_asset_version = "8.39-big-files"
     popup_url = (
         f"{app_base_path}/popup"
         f"?dialogId={quote(dialog_id, safe='')}"
@@ -2554,6 +2555,9 @@ def api_checklist_folder(
             ),
             "FOLDER_UPLOAD_PLANNER_JS_URL": html.escape(
                 f"{ui_static_base_url}/js/folder-upload-planner.js?v={ui_asset_version}"
+            ),
+            "CHUNKED_UPLOAD_JS_URL": html.escape(
+                f"{ui_static_base_url}/js/checklist-chunked-upload.js?v={ui_asset_version}"
             ),
             "FOLDER_UPLOADS_JS_URL": html.escape(
                 f"{ui_static_base_url}/js/folder-uploads.js?v={ui_asset_version}"
