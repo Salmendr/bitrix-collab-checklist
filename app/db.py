@@ -13,7 +13,45 @@ def get_conn():
     return conn
 
 
+_JOURNAL_MODE_CHECKED = False
+
+
+def ensure_wal_journal_mode() -> str:
+    """The database works in the WAL mode (once per process, kept in the file).
+
+    With the old rollback journal a long save that has written enough pages
+    takes the whole file: nobody may read until it ends. A save that reads
+    through a second connection meanwhile (the Yandex folders of new items)
+    then waits for itself and fails after 30 s with «database is locked».
+    In WAL readers never wait for a writer, and a save does not stop the
+    other windows and workers from reading.
+    """
+    global _JOURNAL_MODE_CHECKED
+    if _JOURNAL_MODE_CHECKED:
+        return ""
+    _JOURNAL_MODE_CHECKED = True
+    try:
+        conn = sqlite3.connect(DB_PATH, timeout=10.0)
+        try:
+            before = str(conn.execute("PRAGMA journal_mode").fetchone()[0])
+            after = str(conn.execute("PRAGMA journal_mode=WAL").fetchone()[0])
+        finally:
+            conn.close()
+        result = {"before": before, "mode": after}
+    except sqlite3.Error as exc:
+        # Another process holds the file: the next start tries again.
+        after = ""
+        result = {"error": str(exc)}
+    try:
+        from app.logging_utils import write_debug_log
+        write_debug_log("database_journal_mode", {"dbPath": DB_PATH, **result})
+    except Exception:
+        pass
+    return after
+
+
 def init_db():
+    ensure_wal_journal_mode()
     conn = get_conn()
     cur = conn.cursor()
 

@@ -177,6 +177,71 @@ def _insert_job_in_transaction(
     return dict(row) if row else {"job_id": job_id}
 
 
+def _mark_documents_queued_in_transaction(conn, marks: list[dict]) -> int:
+    """Mark the documents of a save as queued for Yandex Disk.
+
+    Every checklist is read and written once for all its documents: before,
+    each of 216 files of one save read and wrote the whole checklist again,
+    inside the save, which kept the database busy for many seconds. The
+    marks are applied in their order, so a later one for the same document
+    wins as before.
+    """
+    by_storage: dict[str, list[dict]] = {}
+    for mark in marks:
+        storage_id = _storage_dialog_id(mark["dialog_id"], mark["checklist_key"])
+        by_storage.setdefault(storage_id, []).append(mark)
+
+    marked = 0
+    for storage_id, storage_marks in by_storage.items():
+        row = conn.execute(
+            "SELECT title, data_json FROM checklists WHERE dialog_id = ?",
+            (storage_id,),
+        ).fetchone()
+        if not row:
+            continue
+        data = stable_json_loads(row["data_json"] or "", {})
+        if not isinstance(data, dict):
+            continue
+        items = data.get("items") or []
+        documents_by_key: dict[tuple[str, str], dict] = {}
+        for item in items:
+            item_id = clean_cell_value(item.get("id"))
+            documents = item.get("documents") or []
+            for document in documents:
+                documents_by_key[(item_id, clean_cell_value(document.get("id")))] = document
+
+        changed = False
+        for mark in storage_marks:
+            document = documents_by_key.get((
+                clean_cell_value(mark["item_id"]),
+                clean_cell_value(mark["document_id"]),
+            ))
+            if document is None:
+                continue
+            document["mirrorStatus"] = "queued"
+            document["mirrorStage"] = "mirror_queued"
+            document["mirrorError"] = ""
+            document["mirrorJobId"] = clean_cell_value(mark["job_id"])
+            changed = True
+            marked += 1
+
+        if not changed:
+            continue
+        data["items"] = items
+        conn.execute(
+            """
+            UPDATE checklists
+            SET data_json = ?
+            WHERE dialog_id = ?
+            """,
+            (
+                stable_json_dumps(data),
+                storage_id,
+            ),
+        )
+    return marked
+
+
 def _mark_document_queued_in_transaction(
     conn,
     *,
@@ -186,58 +251,13 @@ def _mark_document_queued_in_transaction(
     document_id: str,
     job_id: str,
 ) -> bool:
-    storage_id = _storage_dialog_id(dialog_id, checklist_key)
-    row = conn.execute(
-        "SELECT title, data_json FROM checklists WHERE dialog_id = ?",
-        (storage_id,),
-    ).fetchone()
-
-    if not row:
-        return False
-
-    data = stable_json_loads(row["data_json"] or "", {})
-    if not isinstance(data, dict):
-        return False
-
-    found = False
-    items = data.get("items") or []
-
-    for item in items:
-        if clean_cell_value(item.get("id")) != clean_cell_value(item_id):
-            continue
-
-        documents = item.get("documents") or []
-        for document in documents:
-            if clean_cell_value(document.get("id")) != clean_cell_value(document_id):
-                continue
-
-            document["mirrorStatus"] = "queued"
-            document["mirrorStage"] = "mirror_queued"
-            document["mirrorError"] = ""
-            document["mirrorJobId"] = clean_cell_value(job_id)
-            found = True
-            break
-
-        if found:
-            item["documents"] = documents
-            break
-
-    if not found:
-        return False
-
-    data["items"] = items
-    conn.execute(
-        """
-        UPDATE checklists
-        SET data_json = ?
-        WHERE dialog_id = ?
-        """,
-        (
-            stable_json_dumps(data),
-            storage_id,
-        ),
-    )
-    return True
+    return _mark_documents_queued_in_transaction(conn, [{
+        "dialog_id": dialog_id,
+        "checklist_key": checklist_key,
+        "item_id": item_id,
+        "document_id": document_id,
+        "job_id": job_id,
+    }]) > 0
 
 
 def _insert_replacement_in_transaction(
@@ -353,6 +373,7 @@ def prepare_edit_session_yandex_jobs_in_transaction(
     jobs: list[dict] = []
     replacements: list[dict] = []
     skipped: list[dict] = []
+    queued_marks: list[dict] = []
 
     for raw_row in rows:
         operation = dict(raw_row)
@@ -405,14 +426,13 @@ def prepare_edit_session_yandex_jobs_in_transaction(
                 file_size=int(document.get("size") or 0),
                 now=now,
             )
-            _mark_document_queued_in_transaction(
-                conn,
-                dialog_id=dialog_id,
-                checklist_key=checklist_key,
-                item_id=item_id,
-                document_id=document_id,
-                job_id=job.get("job_id") or "",
-            )
+            queued_marks.append({
+                "dialog_id": dialog_id,
+                "checklist_key": checklist_key,
+                "item_id": item_id,
+                "document_id": document_id,
+                "job_id": job.get("job_id") or "",
+            })
             jobs.append(job)
             continue
 
@@ -450,14 +470,13 @@ def prepare_edit_session_yandex_jobs_in_transaction(
                 file_size=int(document.get("size") or 0),
                 now=now,
             )
-            _mark_document_queued_in_transaction(
-                conn,
-                dialog_id=dialog_id,
-                checklist_key=checklist_key,
-                item_id=item_id,
-                document_id=document_id,
-                job_id=job.get("job_id") or "",
-            )
+            queued_marks.append({
+                "dialog_id": dialog_id,
+                "checklist_key": checklist_key,
+                "item_id": item_id,
+                "document_id": document_id,
+                "job_id": job.get("job_id") or "",
+            })
             replacement = _insert_replacement_in_transaction(
                 conn,
                 operation=operation,
@@ -540,6 +559,8 @@ def prepare_edit_session_yandex_jobs_in_transaction(
                     now=now,
                 )
                 jobs.append(job)
+
+    _mark_documents_queued_in_transaction(conn, queued_marks)
 
     return {
         "ok": True,
